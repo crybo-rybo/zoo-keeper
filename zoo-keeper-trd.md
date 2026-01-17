@@ -4,8 +4,8 @@
 |-------|-------|
 | **Version** | 1.0 |
 | **Status** | Draft |
-| **Technical Lead** | [Technical Lead Name] |
-| **Last Updated** | [Date] |
+| **Technical Lead** | C.Rybacki |
+| **Last Updated** | 1.17.2025 |
 | **Related PRD** | Zoo-Keeper PRD v1.0 |
 
 ---
@@ -232,81 +232,51 @@ Zoo-Keeper follows a layered architecture with clear separation between the publ
 
 ### 4.1 Agent Lifecycle State Machine
 
-<svg viewBox="0 0 600 650" xmlns="http://www.w3.org/2000/svg" style="max-width: 600px; font-family: Arial, sans-serif;">
-  <defs>
-    <marker id="arrowhead1" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#333"/>
-    </marker>
-  </defs>
-  
-  <!-- Uninitialized -->
-  <rect x="220" y="20" width="140" height="50" rx="8" fill="#e8f4f8" stroke="#333" stroke-width="2"/>
-  <text x="290" y="50" text-anchor="middle" font-size="14" font-weight="bold">Uninitialized</text>
-  
-  <!-- Arrow: Uninitialized -> Loading -->
-  <line x1="290" y1="70" x2="290" y2="110" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="300" y="95" font-size="11" fill="#666">create(config)</text>
-  
-  <!-- Loading -->
-  <rect x="220" y="115" width="140" height="50" rx="8" fill="#fff3cd" stroke="#333" stroke-width="2"/>
-  <text x="290" y="145" text-anchor="middle" font-size="14" font-weight="bold">Loading</text>
-  
-  <!-- Arrow: Loading -> Failed -->
-  <line x1="220" y1="140" x2="130" y2="140" stroke="#333" stroke-width="2"/>
-  <line x1="130" y1="140" x2="130" y2="210" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="140" y="180" font-size="11" fill="#666">load failed</text>
-  
-  <!-- Arrow: Loading -> Idle -->
-  <line x1="290" y1="165" x2="290" y2="210" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="300" y="192" font-size="11" fill="#666">load success</text>
-  
-  <!-- Failed -->
-  <rect x="60" y="215" width="140" height="50" rx="8" fill="#f8d7da" stroke="#333" stroke-width="2"/>
-  <text x="130" y="245" text-anchor="middle" font-size="14" font-weight="bold">Failed</text>
-  
-  <!-- Idle -->
-  <rect x="220" y="215" width="140" height="50" rx="8" fill="#d4edda" stroke="#333" stroke-width="2"/>
-  <text x="290" y="245" text-anchor="middle" font-size="14" font-weight="bold">Idle</text>
-  
-  <!-- Arrow: Idle -> Processing -->
-  <line x1="290" y1="265" x2="290" y2="310" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="300" y="292" font-size="11" fill="#666">chat() called</text>
-  
-  <!-- Processing -->
-  <rect x="220" y="315" width="140" height="50" rx="8" fill="#cce5ff" stroke="#333" stroke-width="2"/>
-  <text x="290" y="345" text-anchor="middle" font-size="14" font-weight="bold">Processing</text>
-  
-  <!-- Arrow: Processing -> Idle (request complete) -->
-  <line x1="360" y1="340" x2="480" y2="340" stroke="#333" stroke-width="2"/>
-  <line x1="480" y1="340" x2="480" y2="240" stroke="#333" stroke-width="2"/>
-  <line x1="480" y1="240" x2="360" y2="240" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="490" y="295" font-size="11" fill="#666">request</text>
-  <text x="490" y="308" font-size="11" fill="#666">complete</text>
-  
-  <!-- Arrow: Processing -> Cancelling -->
-  <line x1="290" y1="365" x2="290" y2="410" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="300" y="392" font-size="11" fill="#666">stop() called</text>
-  
-  <!-- Cancelling -->
-  <rect x="220" y="415" width="140" height="50" rx="8" fill="#fff3cd" stroke="#333" stroke-width="2"/>
-  <text x="290" y="445" text-anchor="middle" font-size="14" font-weight="bold">Cancelling</text>
-  
-  <!-- Arrow: Cancelling -> Idle -->
-  <line x1="360" y1="440" x2="520" y2="440" stroke="#333" stroke-width="2"/>
-  <line x1="520" y1="440" x2="520" y2="240" stroke="#333" stroke-width="2"/>
-  <line x1="520" y1="240" x2="480" y2="240" stroke="#333" stroke-width="2"/>
-  <text x="530" y="350" font-size="11" fill="#666">cancellation</text>
-  <text x="530" y="363" font-size="11" fill="#666">complete</text>
-  
-  <!-- Terminated -->
-  <rect x="220" y="530" width="140" height="50" rx="8" fill="#e2e3e5" stroke="#333" stroke-width="2"/>
-  <text x="290" y="560" text-anchor="middle" font-size="14" font-weight="bold">Terminated</text>
-  
-  <!-- Arrow: destructor -> Terminated -->
-  <line x1="130" y1="555" x2="215" y2="555" stroke="#333" stroke-width="2" marker-end="url(#arrowhead1)"/>
-  <text x="60" y="550" font-size="11" fill="#666">destructor</text>
-  <text x="60" y="563" font-size="11" fill="#666">(from any)</text>
-</svg>
+```
+                           ┌─────────────────┐
+                           │                 │
+                           │   Uninitialized │
+                           │                 │
+                           └────────┬────────┘
+                                    │
+                                    │ create(config)
+                                    │
+                           ┌────────▼────────┐
+                           │                 │
+                     ┌─────│     Loading     │
+                     │     │                 │
+                     │     └────────┬────────┘
+                     │              │
+          load failed│              │ load success
+                     │              │
+           ┌─────────▼───┐ ┌────────▼────────┐
+           │             │ │                 │
+           │   Failed    │ │      Idle       │◄───────────────────┐
+           │             │ │                 │                    │
+           └─────────────┘ └────────┬────────┘                    │
+                                    │                             │
+                                    │ chat() called               │
+                                    │                             │
+                           ┌────────▼────────┐                    │
+                           │                 │                    │
+                           │   Processing    │────────────────────┤
+                           │                 │  request complete  │
+                           └────────┬────────┘                    │
+                                    │                             │
+                                    │ stop() called               │
+                                    │                             │
+                           ┌────────▼────────┐                    │
+                           │                 │                    │
+                           │   Cancelling    │────────────────────┘
+                           │                 │  cancellation complete
+                           └─────────────────┘
+
+                           ┌─────────────────┐
+                           │                 │
+           destructor ────►│   Terminated    │
+           (from any)      │                 │
+                           └─────────────────┘
+```
 
 **State Descriptions:**
 
@@ -322,140 +292,94 @@ Zoo-Keeper follows a layered architecture with clear separation between the publ
 
 ### 4.2 Agentic Loop State Machine
 
-<svg viewBox="0 0 750 850" xmlns="http://www.w3.org/2000/svg" style="max-width: 750px; font-family: Arial, sans-serif;">
-  <defs>
-    <marker id="arrowhead2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#333"/>
-    </marker>
-  </defs>
-  
-  <!-- Await Request -->
-  <rect x="280" y="20" width="150" height="50" rx="8" fill="#d4edda" stroke="#333" stroke-width="2"/>
-  <text x="355" y="50" text-anchor="middle" font-size="13" font-weight="bold">Await Request</text>
-  
-  <!-- Arrow: Await Request -> Format Prompt -->
-  <line x1="355" y1="70" x2="355" y2="110" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="365" y="95" font-size="10" fill="#666">request dequeued</text>
-  
-  <!-- Format Prompt -->
-  <rect x="280" y="115" width="150" height="50" rx="8" fill="#e8f4f8" stroke="#333" stroke-width="2"/>
-  <text x="355" y="145" text-anchor="middle" font-size="13" font-weight="bold">Format Prompt</text>
-  
-  <!-- Arrow: Format Prompt -> Inference -->
-  <line x1="355" y1="165" x2="355" y2="205" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="365" y="190" font-size="10" fill="#666">prompt ready</text>
-  
-  <!-- Inference -->
-  <rect x="280" y="210" width="150" height="50" rx="8" fill="#cce5ff" stroke="#333" stroke-width="2"/>
-  <text x="355" y="240" text-anchor="middle" font-size="13" font-weight="bold">Inference</text>
-  
-  <!-- Arrow: Inference -> Cancelled -->
-  <line x1="430" y1="235" x2="530" y2="235" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="460" y="225" font-size="10" fill="#666">stop()</text>
-  
-  <!-- Cancelled -->
-  <rect x="535" y="210" width="120" height="50" rx="8" fill="#f8d7da" stroke="#333" stroke-width="2"/>
-  <text x="595" y="240" text-anchor="middle" font-size="13" font-weight="bold">Cancelled</text>
-  
-  <!-- Arrow: Cancelled -> Build Response -->
-  <line x1="595" y1="260" x2="595" y2="750" stroke="#333" stroke-width="2"/>
-  <line x1="595" y1="750" x2="505" y2="750" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="605" y="500" font-size="10" fill="#666">resolve future</text>
-  
-  <!-- Arrow: Inference -> Parse Output -->
-  <line x1="355" y1="260" x2="355" y2="300" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="365" y="285" font-size="10" fill="#666">generation complete</text>
-  
-  <!-- Parse Output -->
-  <rect x="280" y="305" width="150" height="50" rx="8" fill="#e8f4f8" stroke="#333" stroke-width="2"/>
-  <text x="355" y="335" text-anchor="middle" font-size="13" font-weight="bold">Parse Output</text>
-  
-  <!-- Three branches from Parse Output -->
-  <!-- No Tool Calls -->
-  <line x1="280" y1="330" x2="100" y2="330" stroke="#333" stroke-width="2"/>
-  <line x1="100" y1="330" x2="100" y2="380" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <rect x="30" y="385" width="140" height="45" rx="8" fill="#d4edda" stroke="#333" stroke-width="2"/>
-  <text x="100" y="412" text-anchor="middle" font-size="12" font-weight="bold">No Tool Calls</text>
-  
-  <!-- Tool Call Detected -->
-  <line x1="355" y1="355" x2="355" y2="395" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <rect x="280" y="400" width="150" height="45" rx="8" fill="#fff3cd" stroke="#333" stroke-width="2"/>
-  <text x="355" y="427" text-anchor="middle" font-size="12" font-weight="bold">Tool Call Detected</text>
-  
-  <!-- Parse Error -->
-  <line x1="430" y1="330" x2="530" y2="330" stroke="#333" stroke-width="2"/>
-  <line x1="530" y1="330" x2="530" y2="380" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <rect x="460" y="385" width="140" height="45" rx="8" fill="#f8d7da" stroke="#333" stroke-width="2"/>
-  <text x="530" y="412" text-anchor="middle" font-size="12" font-weight="bold">Parse Error</text>
-  
-  <!-- Arrow: Tool Call Detected -> Validate Args -->
-  <line x1="355" y1="445" x2="355" y2="485" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  
-  <!-- Validate Args -->
-  <rect x="280" y="490" width="150" height="45" rx="8" fill="#e8f4f8" stroke="#333" stroke-width="2"/>
-  <text x="355" y="517" text-anchor="middle" font-size="12" font-weight="bold">Validate Args</text>
-  
-  <!-- Valid branch -->
-  <line x1="280" y1="512" x2="200" y2="512" stroke="#333" stroke-width="2"/>
-  <line x1="200" y1="512" x2="200" y2="560" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <rect x="130" y="565" width="140" height="45" rx="8" fill="#d4edda" stroke="#333" stroke-width="2"/>
-  <text x="200" y="592" text-anchor="middle" font-size="12" font-weight="bold">Execute Tool</text>
-  <text x="235" y="540" font-size="10" fill="#666">valid</text>
-  
-  <!-- Invalid branch -->
-  <line x1="430" y1="512" x2="510" y2="512" stroke="#333" stroke-width="2"/>
-  <line x1="510" y1="512" x2="510" y2="560" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <rect x="440" y="565" width="140" height="45" rx="8" fill="#fff3cd" stroke="#333" stroke-width="2"/>
-  <text x="510" y="592" text-anchor="middle" font-size="12" font-weight="bold">Error Recovery</text>
-  <text x="475" y="540" font-size="10" fill="#666">invalid</text>
-  
-  <!-- Arrow: Execute Tool -> Inject Result -->
-  <line x1="200" y1="610" x2="200" y2="660" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  
-  <!-- Inject Result -->
-  <rect x="130" y="665" width="140" height="45" rx="8" fill="#cce5ff" stroke="#333" stroke-width="2"/>
-  <text x="200" y="692" text-anchor="middle" font-size="12" font-weight="bold">Inject Result</text>
-  
-  <!-- Error Recovery branches -->
-  <!-- Retry OK -->
-  <line x1="480" y1="610" x2="480" y2="650" stroke="#333" stroke-width="2"/>
-  <line x1="480" y1="650" x2="270" y2="650" stroke="#333" stroke-width="2"/>
-  <line x1="270" y1="650" x2="270" y2="687" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="380" y="640" font-size="10" fill="#666">retry OK</text>
-  
-  <!-- Retries Exhausted -->
-  <line x1="540" y1="610" x2="540" y2="660" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <rect x="470" y="665" width="140" height="45" rx="8" fill="#f8d7da" stroke="#333" stroke-width="2"/>
-  <text x="540" y="692" text-anchor="middle" font-size="12" font-weight="bold">Retries Exhausted</text>
-  
-  <!-- Loop back: Inject Result -> Inference -->
-  <line x1="130" y1="687" x2="40" y2="687" stroke="#333" stroke-width="2"/>
-  <line x1="40" y1="687" x2="40" y2="235" stroke="#333" stroke-width="2"/>
-  <line x1="40" y1="235" x2="275" y2="235" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="50" y="460" font-size="10" fill="#666">loop back</text>
-  
-  <!-- Build Response -->
-  <rect x="205" y="725" width="300" height="50" rx="8" fill="#e2e3e5" stroke="#333" stroke-width="2"/>
-  <text x="355" y="755" text-anchor="middle" font-size="13" font-weight="bold">Build Response</text>
-  
-  <!-- Arrows to Build Response -->
-  <line x1="100" y1="430" x2="100" y2="750" stroke="#333" stroke-width="2"/>
-  <line x1="100" y1="750" x2="200" y2="750" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  
-  <line x1="530" y1="430" x2="530" y2="720" stroke="#333" stroke-width="2"/>
-  <line x1="530" y1="720" x2="510" y2="720" stroke="#333" stroke-width="2"/>
-  <line x1="510" y1="720" x2="510" y2="750" stroke="#333" stroke-width="2"/>
-  <line x1="510" y1="750" x2="510" y2="750" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  
-  <line x1="540" y1="710" x2="540" y2="720" stroke="#333" stroke-width="2"/>
-  
-  <!-- Arrow: Build Response -> Await Request -->
-  <line x1="355" y1="775" x2="355" y2="810" stroke="#333" stroke-width="2"/>
-  <line x1="355" y1="810" x2="700" y2="810" stroke="#333" stroke-width="2"/>
-  <line x1="700" y1="810" x2="700" y2="45" stroke="#333" stroke-width="2"/>
-  <line x1="700" y1="45" x2="435" y2="45" stroke="#333" stroke-width="2" marker-end="url(#arrowhead2)"/>
-  <text x="550" y="825" font-size="10" fill="#666">resolve future</text>
-</svg>
+```
+                           ┌─────────────────┐
+                           │                 │
+                           │  Await Request  │◄──────────────────────────────┐
+                           │                 │                               │
+                           └────────┬────────┘                               │
+                                    │                                        │
+                                    │ request dequeued                       │
+                                    ▼                                        │
+                           ┌─────────────────┐                               │
+                           │                 │                               │
+                           │ Format Prompt   │                               │
+                           │                 │                               │
+                           └────────┬────────┘                               │
+                                    │                                        │
+                                    │ prompt ready                           │
+                                    ▼                                        │
+                           ┌─────────────────┐                               │
+                           │                 │         ┌──────────────┐      │
+                           │    Inference    │────────►│  Cancelled   │      │
+                           │                 │ stop()  └──────┬───────┘      │
+                           └────────┬────────┘                │              │
+                                    │                         │              │
+                                    │ generation complete     │ resolve      │
+                                    ▼                         │ future       │
+                           ┌─────────────────┐                │              │
+                           │                 │                │              │
+                           │  Parse Output   │                │              │
+                           │                 │                │              │
+                           └────────┬────────┘                │              │
+                                    │                         │              │
+                    ┌───────────────┼───────────────┐         │              │
+                    │               │               │         │              │
+                    ▼               ▼               ▼         │              │
+            ┌──────────┐    ┌──────────┐    ┌──────────┐      │              │
+            │ No Tool  │    │Tool Call │    │  Parse   │      │              │
+            │  Calls   │    │ Detected │    │  Error   │      │              │
+            └────┬─────┘    └────┬─────┘    └────┬─────┘      │              │
+                 │               │               │            │              │
+                 │               ▼               │            │              │
+                 │      ┌─────────────────┐      │            │              │
+                 │      │                 │      │            │              │
+                 │      │ Validate Args   │      │            │              │
+                 │      │                 │      │            │              │
+                 │      └────────┬────────┘      │            │              │
+                 │               │               │            │              │
+                 │       ┌──────┴──────┐        │            │              │
+                 │       │             │        │            │              │
+                 │       ▼             ▼        │            │              │
+                 │  ┌─────────┐  ┌─────────┐    │            │              │
+                 │  │  Valid  │  │ Invalid │    │            │              │
+                 │  └────┬────┘  └────┬────┘    │            │              │
+                 │       │            │         │            │              │
+                 │       ▼            ▼         │            │              │
+                 │  ┌─────────┐  ┌──────────┐   │            │              │
+                 │  │ Execute │  │  Error   │   │            │              │
+                 │  │  Tool   │  │ Recovery │   │            │              │
+                 │  └────┬────┘  └────┬─────┘   │            │              │
+                 │       │            │         │            │              │
+                 │       │      ┌─────┴─────┐   │            │              │
+                 │       │      │           │   │            │              │
+                 │       │      ▼           ▼   │            │              │
+                 │       │ ┌────────┐ ┌────────┐│            │              │
+                 │       │ │ Retry  │ │Retries ││            │              │
+                 │       │ │  OK    │ │Exhaust ││            │              │
+                 │       │ └───┬────┘ └───┬────┘│            │              │
+                 │       │     │          │     │            │              │
+                 │       ▼     │          │     │            │              │
+                 │  ┌─────────┐│          │     │            │              │
+                 │  │ Inject  ││          │     │            │              │
+                 │  │ Result  │◄┘         │     │            │              │
+                 │  └────┬────┘           │     │            │              │
+                 │       │                │     │            │              │
+                 │       │ loop back      │     │            │              │
+                 │       │ to inference   │     │            │              │
+                 │       │       ┌────────┘     │            │              │
+                 │       │       │              │            │              │
+                 ▼       │       ▼              ▼            ▼              │
+            ┌───────────────────────────────────────────────────┐           │
+            │                                                   │           │
+            │                 Build Response                    │           │
+            │                                                   │           │
+            └───────────────────────┬───────────────────────────┘           │
+                                    │                                       │
+                                    │ resolve future                        │
+                                    │                                       │
+                                    └───────────────────────────────────────┘
+```
 
 **State Descriptions:**
 
@@ -474,65 +398,48 @@ Zoo-Keeper follows a layered architecture with clear separation between the publ
 
 ### 4.3 History Manager State Machine
 
-<svg viewBox="0 0 550 500" xmlns="http://www.w3.org/2000/svg" style="max-width: 550px; font-family: Arial, sans-serif;">
-  <defs>
-    <marker id="arrowhead3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-      <polygon points="0 0, 10 3.5, 0 7" fill="#333"/>
-    </marker>
-  </defs>
-  
-  <!-- Empty -->
-  <rect x="180" y="20" width="160" height="50" rx="8" fill="#e8f4f8" stroke="#333" stroke-width="2"/>
-  <text x="260" y="42" text-anchor="middle" font-size="14" font-weight="bold">Empty</text>
-  <text x="260" y="58" text-anchor="middle" font-size="11" fill="#666">(no messages)</text>
-  
-  <!-- Arrow: Empty -> System Only -->
-  <line x1="260" y1="70" x2="260" y2="115" stroke="#333" stroke-width="2" marker-end="url(#arrowhead3)"/>
-  <text x="270" y="98" font-size="10" fill="#666">set_system_prompt()</text>
-  
-  <!-- System Only -->
-  <rect x="180" y="120" width="160" height="50" rx="8" fill="#fff3cd" stroke="#333" stroke-width="2"/>
-  <text x="260" y="150" text-anchor="middle" font-size="14" font-weight="bold">System Only</text>
-  
-  <!-- Arrow: System Only -> Accumulating -->
-  <line x1="260" y1="170" x2="260" y2="215" stroke="#333" stroke-width="2" marker-end="url(#arrowhead3)"/>
-  <text x="270" y="198" font-size="10" fill="#666">add user message</text>
-  
-  <!-- Accumulating -->
-  <rect x="180" y="220" width="160" height="50" rx="8" fill="#d4edda" stroke="#333" stroke-width="2"/>
-  <text x="260" y="250" text-anchor="middle" font-size="14" font-weight="bold">Accumulating</text>
-  
-  <!-- Arrow: Accumulating -> Pruning -->
-  <line x1="260" y1="270" x2="260" y2="315" stroke="#333" stroke-width="2" marker-end="url(#arrowhead3)"/>
-  <text x="270" y="298" font-size="10" fill="#666">context window exceeded</text>
-  
-  <!-- Pruning -->
-  <rect x="180" y="320" width="160" height="50" rx="8" fill="#cce5ff" stroke="#333" stroke-width="2"/>
-  <text x="260" y="350" text-anchor="middle" font-size="14" font-weight="bold">Pruning</text>
-  
-  <!-- Arrow: Pruning -> Accumulating (loop back) -->
-  <line x1="340" y1="345" x2="420" y2="345" stroke="#333" stroke-width="2"/>
-  <line x1="420" y1="345" x2="420" y2="245" stroke="#333" stroke-width="2"/>
-  <line x1="420" y1="245" x2="345" y2="245" stroke="#333" stroke-width="2" marker-end="url(#arrowhead3)"/>
-  <text x="430" y="280" font-size="10" fill="#666">oldest pairs removed</text>
-  <text x="430" y="293" font-size="10" fill="#666">(system prompt preserved)</text>
-  <text x="430" y="306" font-size="10" fill="#666">prune callback fired</text>
-  
-  <!-- Arrow: Accumulating -> System Only (clear_history) -->
-  <line x1="340" y1="245" x2="480" y2="245" stroke="#333" stroke-width="2"/>
-  <line x1="480" y1="245" x2="480" y2="145" stroke="#333" stroke-width="2"/>
-  <line x1="480" y1="145" x2="345" y2="145" stroke="#333" stroke-width="2" marker-end="url(#arrowhead3)"/>
-  <text x="490" y="185" font-size="10" fill="#666">clear_history()</text>
-  <text x="490" y="198" font-size="10" fill="#666">(preserves system prompt)</text>
-  
-  <!-- Arrow: update system prompt (Pruning/Accumulating -> System Only) -->
-  <line x1="180" y1="345" x2="80" y2="345" stroke="#333" stroke-width="2"/>
-  <line x1="80" y1="345" x2="80" y2="145" stroke="#333" stroke-width="2"/>
-  <line x1="80" y1="145" x2="175" y2="145" stroke="#333" stroke-width="2" marker-end="url(#arrowhead3)"/>
-  <text x="20" y="240" font-size="10" fill="#666">update</text>
-  <text x="20" y="253" font-size="10" fill="#666">system</text>
-  <text x="20" y="266" font-size="10" fill="#666">prompt</text>
-</svg>
+```
+                           ┌─────────────────┐
+                           │                 │
+                           │     Empty       │
+                           │  (no messages)  │
+                           └────────┬────────┘
+                                    │
+                                    │ set_system_prompt()
+                                    ▼
+                           ┌─────────────────┐
+                           │                 │
+                       ┌───│  System Only    │◄──────────────────────────┐
+                       │   │                 │                           │
+                       │   └────────┬────────┘                           │
+                       │            │                                    │
+                       │            │ add user message                   │
+                       │            ▼                                    │
+                       │   ┌─────────────────┐                           │
+                       │   │                 │      clear_history()      │
+          update       │   │  Accumulating   │───────────────────────────┘
+          system       │   │                 │  (preserves system prompt)
+          prompt       │   └────────┬────────┘
+                       │            │
+                       │            │ context window exceeded
+                       │            ▼
+                       │   ┌─────────────────┐
+                       │   │                 │
+                       └───│    Pruning      │
+                           │                 │
+                           └────────┬────────┘
+                                    │
+                                    │ oldest pairs removed
+                                    │ (system prompt preserved)
+                                    │ prune callback fired
+                                    │
+                                    ▼
+                           ┌─────────────────┐
+                           │                 │
+                           │  Accumulating   │ (back to normal operation)
+                           │                 │
+                           └─────────────────┘
+```
 
 **State Descriptions:**
 
@@ -930,4 +837,4 @@ tests/
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | [Date] | [Author] | Initial TRD created |
+| 1.0 | 1.17.2025 | C.Rybacki | Initial TRD created |
