@@ -226,10 +226,10 @@ Zoo-Keeper follows a layered architecture separating public API, core engine, an
 
 | Thread | Responsibilities |
 |--------|------------------|
-| **Main Thread** | Submits `chat()` requests, receives `std::future<Response>`, handles UI updates |
+| **Calling Thread** | Submits `chat()` requests, receives `std::future<Response>`. |
 | **Inference Thread** | Owns `llama_context`, processes queue, executes tools, manages history pruning |
 
-**Callback Execution:** All callbacks (`on_token`, `on_tool_call`) execute on the inference thread. The consumer is responsible for dispatching UI updates to the main thread (e.g., via signal/slot or thread-safe queue).
+**Callback Execution:** All callbacks (`on_token`, `on_tool_call`) execute on the inference thread. The consumer is responsible for any cross-thread synchronization required by their application (e.g., dispatching to an event loop, posting to a game engine's job system, or signaling a condition variable).
 
 ### 6.3 Dependencies
 
