@@ -371,7 +371,7 @@ TEST_F(RequestQueueTest, StressTest) {
     // Consumers
     const int total_items = num_producers * items_per_producer;
     for (int c = 0; c < num_consumers; ++c) {
-        threads.emplace_back([&queue, &consumed, total_items]() {
+        threads.emplace_back([&queue, &consumed]() {
             while (consumed < total_items) {
                 auto req = queue.pop_for(std::chrono::milliseconds(100));
                 if (req.has_value()) {

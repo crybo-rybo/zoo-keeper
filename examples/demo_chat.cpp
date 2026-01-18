@@ -198,7 +198,10 @@ public:
         response.metrics.tokens_per_second = 25.0;
 
         // Add assistant response to history
-        history_.add_message(zoo::Message::assistant(response.text));
+        add_result = history_.add_message(zoo::Message::assistant(response.text));
+        if (!add_result.has_value()) {
+            return tl::unexpected(add_result.error());
+        }
 
         return response;
     }
@@ -293,8 +296,6 @@ int main(int argc, char** argv) {
         // Process message
         std::cout << "\nAssistant: ";
         std::cout.flush();
-
-        auto start_time = std::chrono::steady_clock::now();
 
         auto result = agent.chat(line);
 

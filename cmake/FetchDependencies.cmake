@@ -1,12 +1,14 @@
 include(FetchContent)
+set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
 # tl::expected (C++23 std::expected backport)
 FetchContent_Declare(
     tl_expected
     GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-    GIT_TAG v1.1.0
+    GIT_TAG v1.3.1
     GIT_SHALLOW TRUE
 )
+set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(tl_expected)
 
 # nlohmann/json
@@ -19,7 +21,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 # llama.cpp (from submodule)
-set(LLAMA_METAL ${ZOO_ENABLE_METAL})
+set(GGML_METAL ${ZOO_ENABLE_METAL})
 set(LLAMA_CUDA ${ZOO_ENABLE_CUDA})
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
