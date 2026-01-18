@@ -1,0 +1,660 @@
+{
+  "tests": 114,
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "MessageTest",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "FactoryMethods",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 10
+        },
+        {
+          "name": "Equality",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "name": "RoleTest",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "RoleToString",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 51
+        }
+      ]
+    },
+    {
+      "name": "ErrorTest",
+      "tests": 3,
+      "testsuite": [
+        {
+          "name": "Construction",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 62
+        },
+        {
+          "name": "ToString",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 75
+        },
+        {
+          "name": "Expected",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "name": "SamplingParamsTest",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "Defaults",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 103
+        },
+        {
+          "name": "Equality",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 113
+        }
+      ]
+    },
+    {
+      "name": "PromptTemplateTest",
+      "tests": 1,
+      "testsuite": [
+        {
+          "name": "TemplateToString",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 130
+        }
+      ]
+    },
+    {
+      "name": "ConfigTest",
+      "tests": 7,
+      "testsuite": [
+        {
+          "name": "Defaults",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 140
+        },
+        {
+          "name": "ValidationSuccess",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 154
+        },
+        {
+          "name": "ValidationEmptyModelPath",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 162
+        },
+        {
+          "name": "ValidationInvalidContextSize",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 171
+        },
+        {
+          "name": "ValidationInvalidMaxTokens",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 186
+        },
+        {
+          "name": "ValidationCustomTemplateRequired",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 196
+        },
+        {
+          "name": "Equality",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 210
+        }
+      ]
+    },
+    {
+      "name": "TokenUsageTest",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "Defaults",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 231
+        },
+        {
+          "name": "Equality",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 238
+        }
+      ]
+    },
+    {
+      "name": "MetricsTest",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "Defaults",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 251
+        },
+        {
+          "name": "Equality",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 258
+        }
+      ]
+    },
+    {
+      "name": "ResponseTest",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "Defaults",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 279
+        },
+        {
+          "name": "Equality",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 287
+        }
+      ]
+    },
+    {
+      "name": "RequestTest",
+      "tests": 2,
+      "testsuite": [
+        {
+          "name": "Construction",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 308
+        },
+        {
+          "name": "WithCallback",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_types.cpp",
+          "line": 317
+        }
+      ]
+    },
+    {
+      "name": "RequestQueueTest",
+      "tests": 19,
+      "testsuite": [
+        {
+          "name": "PushPop",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 21
+        },
+        {
+          "name": "MultipleRequests",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 38
+        },
+        {
+          "name": "EmptyQueue",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 58
+        },
+        {
+          "name": "MaxSizeLimit",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 68
+        },
+        {
+          "name": "UnlimitedQueue",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 84
+        },
+        {
+          "name": "ConcurrentPush",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 99
+        },
+        {
+          "name": "ProducerConsumer",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 122
+        },
+        {
+          "name": "BlockingPop",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 153
+        },
+        {
+          "name": "PopTimeout",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 181
+        },
+        {
+          "name": "PopTimeoutSuccess",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 193
+        },
+        {
+          "name": "PopTimeoutDelayed",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 204
+        },
+        {
+          "name": "ShutdownPreventsNewPush",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 225
+        },
+        {
+          "name": "ShutdownUnblocksWaitingPop",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 234
+        },
+        {
+          "name": "ShutdownWithPendingItems",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 256
+        },
+        {
+          "name": "ShutdownMultipleConsumers",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 282
+        },
+        {
+          "name": "ClearQueue",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 313
+        },
+        {
+          "name": "ClearEmptyQueue",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 329
+        },
+        {
+          "name": "RapidPushPop",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 339
+        },
+        {
+          "name": "StressTest",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_request_queue.cpp",
+          "line": 352
+        }
+      ]
+    },
+    {
+      "name": "HistoryManagerTest",
+      "tests": 29,
+      "testsuite": [
+        {
+          "name": "InitialState",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 22
+        },
+        {
+          "name": "AddMessage",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 29
+        },
+        {
+          "name": "AddMultipleMessages",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 39
+        },
+        {
+          "name": "Clear",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 51
+        },
+        {
+          "name": "SetSystemPrompt",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 68
+        },
+        {
+          "name": "ReplaceSystemPrompt",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 77
+        },
+        {
+          "name": "SetSystemPromptAfterMessages",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 88
+        },
+        {
+          "name": "FirstMessageCannotBeTool",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 103
+        },
+        {
+          "name": "FirstMessageCanBeUser",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 111
+        },
+        {
+          "name": "FirstMessageCanBeSystem",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 118
+        },
+        {
+          "name": "FirstMessageCanBeAssistant",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 125
+        },
+        {
+          "name": "SystemMessageOnlyAtStart",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 132
+        },
+        {
+          "name": "NoConsecutiveSameRoles",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 142
+        },
+        {
+          "name": "AlternatingRolesAllowed",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 151
+        },
+        {
+          "name": "ConsecutiveToolMessagesAllowed",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 160
+        },
+        {
+          "name": "TokenEstimation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 175
+        },
+        {
+          "name": "TokenEstimationAccumulates",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 185
+        },
+        {
+          "name": "TokenEstimationAfterClear",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 195
+        },
+        {
+          "name": "MinimumOneToken",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 203
+        },
+        {
+          "name": "ContextNotExceededInitially",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 213
+        },
+        {
+          "name": "ContextNotExceededSmallMessages",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 217
+        },
+        {
+          "name": "ContextExceeded",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 229
+        },
+        {
+          "name": "ContextExceededMultipleMessages",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 239
+        },
+        {
+          "name": "EmptyMessage",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 258
+        },
+        {
+          "name": "VeryLongMessage",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 265
+        },
+        {
+          "name": "GetMessagesReturnsConst",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 273
+        },
+        {
+          "name": "TypicalConversation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 288
+        },
+        {
+          "name": "ConversationWithToolCalls",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 301
+        },
+        {
+          "name": "MultipleToolCallsInSequence",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 310
+        }
+      ]
+    },
+    {
+      "name": "TemplateEngineTest",
+      "tests": 28,
+      "testsuite": [
+        {
+          "name": "Llama3SimpleConversation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 30
+        },
+        {
+          "name": "Llama3MinimalConversation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 41
+        },
+        {
+          "name": "Llama3IncludesBOT",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 52
+        },
+        {
+          "name": "Llama3HeaderFormat",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 63
+        },
+        {
+          "name": "Llama3EndsWithAssistantHeader",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 75
+        },
+        {
+          "name": "Llama3MultipleRoles",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 93
+        },
+        {
+          "name": "ChatMLSimpleConversation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 117
+        },
+        {
+          "name": "ChatMLMinimalConversation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 128
+        },
+        {
+          "name": "ChatMLFormat",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 139
+        },
+        {
+          "name": "ChatMLEndsWithAssistantStart",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 151
+        },
+        {
+          "name": "ChatMLMultipleMessages",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 162
+        },
+        {
+          "name": "CustomTemplateSimple",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 191
+        },
+        {
+          "name": "CustomTemplateMultiplePlaceholders",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 206
+        },
+        {
+          "name": "CustomTemplateNoPlaceholders",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 218
+        },
+        {
+          "name": "CustomTemplateNotProvided",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 233
+        },
+        {
+          "name": "EmptyMessageList",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 247
+        },
+        {
+          "name": "ChatMLEmptyMessageList",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 256
+        },
+        {
+          "name": "CustomEmptyMessageList",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 265
+        },
+        {
+          "name": "EmptyMessageContent",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 278
+        },
+        {
+          "name": "VeryLongMessage",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 287
+        },
+        {
+          "name": "SpecialCharactersInContent",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 297
+        },
+        {
+          "name": "ToolMessages",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 309
+        },
+        {
+          "name": "GetTemplate",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 325
+        },
+        {
+          "name": "Llama3PreservesMessageContent",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 340
+        },
+        {
+          "name": "ChatMLPreservesMessageContent",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 356
+        },
+        {
+          "name": "CustomPreservesMessageContent",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 370
+        },
+        {
+          "name": "Llama3LastMessageAssistant",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 387
+        },
+        {
+          "name": "ChatMLLastMessageAssistant",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
+          "line": 408
+        }
+      ]
+    },
+    {
+      "name": "AgentTest",
+      "tests": 14,
+      "testsuite": [
+        {
+          "name": "MockBackendInitialization",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 30
+        },
+        {
+          "name": "MockBackendTokenization",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 41
+        },
+        {
+          "name": "MockBackendGeneration",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 52
+        },
+        {
+          "name": "MockBackendStreamingCallback",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 68
+        },
+        {
+          "name": "MockBackendErrorInjection",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 92
+        },
+        {
+          "name": "MockBackendGenerateError",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 106
+        },
+        {
+          "name": "MockBackendKVCacheTracking",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 123
+        },
+        {
+          "name": "MockBackendResponseQueue",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 141
+        },
+        {
+          "name": "MockBackendStopSequences",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 167
+        },
+        {
+          "name": "MockBackendReset",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 183
+        },
+        {
+          "name": "HistoryManagerWithTemplateEngine",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 208
+        },
+        {
+          "name": "TemplateEngineWithMockBackend",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 224
+        },
+        {
+          "name": "FullPipelineSimulation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 242
+        },
+        {
+          "name": "MultiTurnConversationSimulation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
+          "line": 282
+        }
+      ]
+    }
+  ]
+}

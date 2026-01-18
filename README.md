@@ -1,0 +1,275 @@
+# Zoo-Keeper Agent Engine
+
+[![Tests](https://img.shields.io/badge/tests-115%2F115%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+
+A modern C++17 header-only Agent Engine for local LLM inference, built on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper provides a complete agentic AI framework with automated conversation history management, type-safe error handling, and asynchronous inference with streaming support.
+
+**Status:** MVP Implementation Complete (Phase 1)
+
+## Features
+
+- **Asynchronous Inference**: Non-blocking chat API with `std::future` support
+- **Conversation Management**: Automatic history tracking with token estimation
+- **Multiple Prompt Templates**: Built-in support for Llama3, ChatML, and custom formats
+- **Streaming Support**: Token-by-token callbacks for real-time output
+- **Type-Safe Errors**: Modern `std::expected` error handling without exceptions
+- **Header-Only**: Easy integration with CMake FetchContent
+- **Extensible Backend**: Abstract interface for testing and alternative implementations
+- **Thread-Safe**: Producer-consumer pattern with dedicated inference thread
+- **Hardware Acceleration**: Metal (macOS) and CUDA support via llama.cpp
+
+## Quick Start
+
+```cpp
+#include <zoo/zoo.hpp>
+#include <iostream>
+
+int main() {
+    // Configure the agent
+    zoo::Config config;
+    config.model_path = "models/llama-3-8b.gguf";
+    config.context_size = 8192;
+    config.max_tokens = 512;
+    config.prompt_template = zoo::PromptTemplate::Llama3;
+
+    // Create agent
+    auto agent_result = zoo::Agent::create(config);
+    if (!agent_result) {
+        std::cerr << "Error: " << agent_result.error().to_string() << std::endl;
+        return 1;
+    }
+
+    zoo::Agent agent = std::move(*agent_result);
+
+    // Set system prompt
+    agent.set_system_prompt("You are a helpful AI assistant.");
+
+    // Send a message
+    auto future = agent.chat(zoo::Message::user("Hello!"));
+
+    // Wait for response
+    auto response = future.get();
+    if (response) {
+        std::cout << "Assistant: " << response->text << std::endl;
+        std::cout << "Tokens used: " << response->usage.total_tokens << std::endl;
+    } else {
+        std::cerr << "Error: " << response.error().to_string() << std::endl;
+    }
+
+    return 0;
+}
+```
+
+## Building
+
+### Prerequisites
+
+- **C++17 compiler**: GCC 11+, Clang 13+, or MSVC 2019+
+- **CMake 3.18+**
+- **Git** (for submodules)
+
+### Build Steps
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/zoo-keeper.git
+cd zoo-keeper
+
+# Initialize submodules
+git submodule update --init --recursive
+
+# Configure with CMake
+cmake -B build \
+  -DZOO_BUILD_TESTS=ON \
+  -DZOO_BUILD_EXAMPLES=ON \
+  -DZOO_ENABLE_METAL=ON  # macOS only
+
+# Build
+cmake --build build -j4
+
+# Run tests
+ctest --test-dir build --output-on-failure
+
+# Run demo
+build/examples/demo_chat models/your-model.gguf
+```
+
+### CMake Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `ZOO_ENABLE_METAL` | Metal acceleration (macOS) | ON (macOS) |
+| `ZOO_ENABLE_CUDA` | CUDA acceleration | OFF |
+| `ZOO_BUILD_TESTS` | Build test suite | OFF |
+| `ZOO_BUILD_EXAMPLES` | Build examples | OFF |
+| `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
+| `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
+
+## Usage Examples
+
+### Streaming Output
+
+```cpp
+auto future = agent.chat(
+    zoo::Message::user("Write a haiku about AI"),
+    [](std::string_view token) {
+        std::cout << token << std::flush;  // Print tokens as they arrive
+    }
+);
+
+auto response = future.get();
+std::cout << std::endl;
+```
+
+### Multi-Turn Conversation
+
+```cpp
+// History is automatically managed
+agent.chat(zoo::Message::user("My name is Alice")).get();
+agent.chat(zoo::Message::user("What's my name?")).get();  // Will remember "Alice"
+```
+
+### Error Handling
+
+```cpp
+auto response_result = agent.chat(zoo::Message::user("Hello")).get();
+
+if (!response_result) {
+    // Handle error
+    zoo::Error error = response_result.error();
+    switch (error.code) {
+        case zoo::ErrorCode::ContextWindowExceeded:
+            std::cerr << "Context full! Consider clearing history." << std::endl;
+            agent.clear_history();
+            break;
+        case zoo::ErrorCode::InferenceFailed:
+            std::cerr << "Inference failed: " << error.message << std::endl;
+            break;
+        default:
+            std::cerr << error.to_string() << std::endl;
+    }
+} else {
+    // Use response
+    std::cout << response_result->text << std::endl;
+}
+```
+
+### Custom Configuration
+
+```cpp
+zoo::Config config;
+config.model_path = "models/custom-model.gguf";
+config.context_size = 4096;
+config.max_tokens = 256;
+
+// Sampling parameters
+config.sampling.temperature = 0.8f;
+config.sampling.top_p = 0.95f;
+config.sampling.top_k = 40;
+config.sampling.repeat_penalty = 1.1f;
+
+// Stop sequences
+config.stop_sequences = {"\n\n", "User:"};
+
+// Custom template
+config.prompt_template = zoo::PromptTemplate::Custom;
+config.custom_template = "{{role}}: {{content}}\n";
+
+auto agent = zoo::Agent::create(config);
+```
+
+## Architecture
+
+Zoo-Keeper uses a three-layer architecture:
+
+1. **Public API Layer**: Simple entry point via `zoo::Agent` class
+2. **Engine Layer**: Core components (Request Queue, History Manager, Template Engine, Agentic Loop)
+3. **Backend Layer**: Abstracted llama.cpp interface with mock support for testing
+
+### Threading Model
+
+- **Calling Thread**: Submits `chat()` requests, receives `std::future<Response>`
+- **Inference Thread**: Processes queue, executes backend, manages history
+
+All callbacks (`on_token`) execute on the inference thread. Consumer is responsible for thread synchronization.
+
+## Testing
+
+Zoo-Keeper includes comprehensive unit tests using GoogleTest:
+
+```bash
+# Build tests
+cmake -B build -DZOO_BUILD_TESTS=ON
+cmake --build build
+
+# Run all tests (115 tests)
+ctest --test-dir build
+
+# Run specific test suite
+ctest --test-dir build -R HistoryManagerTest
+
+# Run with verbose output
+ctest --test-dir build --output-on-failure --verbose
+```
+
+Test coverage includes:
+- Core types and validation
+- Thread-safe request queue
+- Conversation history management
+- Template rendering (Llama3, ChatML, Custom)
+- Mock backend integration
+- Full pipeline simulation
+
+## Documentation
+
+- **[Product Requirements](zoo-keeper-prd.md)**: Goals, features, and success metrics
+- **[Technical Requirements](zoo-keeper-trd.md)**: Architecture, state machines, and test plan
+- **[Developer Guide](CLAUDE.md)**: Build commands, architecture details, and contribution guidelines
+- **API Documentation**: Generate with Doxygen (see `include/zoo/zoo.hpp` for mainpage)
+
+## MVP Limitations & Roadmap
+
+The current MVP implementation (Phase 1) has intentional shortcuts documented in the plan:
+
+### MVP Shortcuts
+- **Token Counting**: Character-based estimation (4 chars ≈ 1 token)
+- **Context Pruning**: Not implemented (will overflow)
+- **KV Cache Reuse**: Cold start each turn
+- **Tool Support**: Not implemented (Phase 2)
+- **RAG Context**: Not implemented (Phase 2)
+
+### Phase 2 (Planned)
+- Actual backend tokenization with caching
+- Context pruning with FIFO strategy
+- KV cache optimization
+- Tool registration and execution
+- RAG context injection
+
+### Phase 3 (Planned)
+- Error recovery and self-correction
+- Advanced sampling strategies
+- Multi-model support
+- Performance optimizations
+
+## License
+
+[Your License Here - e.g., MIT]
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Acknowledgments
+
+- Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
+- Uses [tl::expected](https://github.com/TartanLlama/expected) by Sy Brand
+- Uses [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann
+
+## Support
+
+- **Issues**: https://github.com/yourusername/zoo-keeper/issues
+- **Discussions**: https://github.com/yourusername/zoo-keeper/discussions
+
+---
+
+*Built with Claude Code*
