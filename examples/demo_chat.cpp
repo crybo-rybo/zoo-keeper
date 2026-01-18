@@ -24,7 +24,7 @@
 
 #include <iostream>
 #include <string>
-#include <cstring>
+
 #include <csignal>
 #include <atomic>
 #include <chrono>
@@ -47,6 +47,7 @@ struct DemoConfig {
     int context_size = 8192;
     zoo::PromptTemplate template_type = zoo::PromptTemplate::Llama3;
     std::string system_prompt = "You are a helpful AI assistant.";
+    std::vector<std::string> stop_sequences;
     bool help = false;
 };
 
@@ -164,6 +165,45 @@ public:
         , config_(config)
     {
         history_.set_system_prompt(config.system_prompt);
+
+        // Initialize backend
+        zoo::Config backend_config;
+        backend_config.model_path = config.model_path;
+        backend_config.context_size = config.context_size;
+        backend_config.sampling.temperature = config.temperature;
+        backend_config.prompt_template = config.template_type;
+        backend_config.max_tokens = config.max_tokens;
+        backend_config.system_prompt = config.system_prompt;
+        backend_config.stop_sequences = config.stop_sequences;
+        
+        backend_ = zoo::backend::create_backend();
+        auto init_result = backend_->initialize(backend_config);
+        if (!init_result.has_value()) {
+            std::cerr << "Failed to initialize backend: " << init_result.error().to_string() << "\n";
+            std::exit(1);
+        }
+
+        // Warmup to suppress initial GGML metal logs
+        std::cout << "Loading model and warming up backend... " << std::flush;
+        
+        // Redirect stdout/stderr to bit bucket
+        auto old_stdout = std::cout.rdbuf();
+        auto old_stderr = std::cerr.rdbuf();
+        std::cout.rdbuf(nullptr);
+        std::cerr.rdbuf(nullptr);
+
+        // Simple warmup generation
+        std::vector<int> warmup_tokens = {1}; // BOS
+        auto warmup_result = backend_->generate(warmup_tokens, 1, {}, std::nullopt);
+        if (!warmup_result.has_value()) {
+            std::cerr << "Failed to warmup backend: " << warmup_result.error().to_string() << "\n";
+            std::exit(1);
+        }
+        // Restore stdout/stderr
+        std::cout.rdbuf(old_stdout);
+        std::cerr.rdbuf(old_stderr);
+        
+        std::cout << "Done.\n" << std::flush;
     }
 
     zoo::Expected<zoo::Response> chat(const std::string& user_message) {
@@ -179,23 +219,55 @@ public:
             return tl::unexpected(rendered.error());
         }
 
-        // This is a placeholder - in real implementation, this would:
-        // 1. Tokenize the rendered prompt
-        // 2. Call backend.generate() with streaming
-        // 3. Return Response with metrics
+        // Tokenize prompt
+        auto prompt_tokens = backend_->tokenize(*rendered, true); // true = add_bos
+        if (!prompt_tokens.has_value()) {
+             return tl::unexpected(prompt_tokens.error());
+        }
 
-        // For demo purposes, return a mock response
+        // Metrics tracking
+        auto start_time = std::chrono::steady_clock::now();
+        int completion_tokens = 0;
+        bool first_token = true;
+        auto first_token_time = start_time;
+
+        // Generate with streaming
+        auto result_text = backend_->generate(*prompt_tokens, config_.max_tokens, config_.stop_sequences, 
+            [&](std::string_view token) {
+                if (first_token) {
+                    first_token_time = std::chrono::steady_clock::now();
+                    first_token = false;
+                }
+                std::cout << token << std::flush;
+                completion_tokens++;
+            }
+        );
+
+        if (!result_text.has_value()) {
+            return tl::unexpected(result_text.error());
+        }
+        
+        auto end_time = std::chrono::steady_clock::now();
+        std::cout << "\n"; // Newline after stream
+
         zoo::Response response;
-        response.text = "This is a demo response. The Agent class is not yet implemented.\n"
-                       "Once implemented, this will use llama.cpp to generate actual responses.";
-
-        // Mock metrics
-        response.usage.prompt_tokens = static_cast<int>(rendered->length() / 4);
-        response.usage.completion_tokens = static_cast<int>(response.text.length() / 4);
+        response.text = *result_text;
+        
+        // Populate metrics
+        response.usage.prompt_tokens = static_cast<int>(prompt_tokens->size());
+        response.usage.completion_tokens = completion_tokens;
         response.usage.total_tokens = response.usage.prompt_tokens + response.usage.completion_tokens;
-        response.metrics.latency_ms = std::chrono::milliseconds(100);
-        response.metrics.time_to_first_token_ms = std::chrono::milliseconds(50);
-        response.metrics.tokens_per_second = 25.0;
+        
+        response.metrics.latency_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        if (!first_token) {
+             response.metrics.time_to_first_token_ms = std::chrono::duration_cast<std::chrono::milliseconds>(first_token_time - start_time);
+        } else {
+             response.metrics.time_to_first_token_ms = response.metrics.latency_ms;
+        }
+        
+        if (response.metrics.latency_ms.count() > 0) {
+            response.metrics.tokens_per_second = (double)completion_tokens / (response.metrics.latency_ms.count() / 1000.0);
+        }
 
         // Add assistant response to history
         add_result = history_.add_message(zoo::Message::assistant(response.text));
@@ -209,6 +281,7 @@ public:
     void clear_history() {
         history_.clear();
         history_.set_system_prompt(config_.system_prompt);
+        backend_->clear_kv_cache();
     }
 
     int get_message_count() const {
@@ -223,11 +296,21 @@ private:
     zoo::engine::HistoryManager history_;
     zoo::engine::TemplateEngine template_engine_;
     DemoConfig config_;
+    std::unique_ptr<zoo::backend::IBackend> backend_;
 };
 
 int main(int argc, char** argv) {
     // Parse arguments
     DemoConfig config = parse_args(argc, argv);
+
+    // Set default stop sequences if not provided
+    if (config.stop_sequences.empty()) {
+        if (config.template_type == zoo::PromptTemplate::Llama3) {
+            config.stop_sequences = {"<|eot_id|>", "<|end_of_text|>"};
+        } else if (config.template_type == zoo::PromptTemplate::ChatML) {
+            config.stop_sequences = {"<|im_end|>"};
+        }
+    }
 
     if (config.help) {
         print_usage(argv[0]);
@@ -304,8 +387,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        // Print response (in real implementation, this would stream)
-        std::cout << result->text << "\n";
+        // Response is already printed via streaming
+        // std::cout << result->text << "\n";
 
         // Print metrics
         print_metrics(result->metrics, result->usage);
