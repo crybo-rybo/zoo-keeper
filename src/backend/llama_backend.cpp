@@ -225,39 +225,19 @@ Expected<std::string> LlamaBackend::generate(
     llama_memory_clear(memory, false);
     kv_cache_token_count_ = 0;
 
-    // Process prompt in batches
-    int n_batch = 512; // Must match context params n_batch (or query it)
-    llama_batch batch = llama_batch_init(n_batch, 0, 1); // Max batch size
+    // Create batch for prompt
+    auto batch = llama_batch_get_one(
+        const_cast<llama_token*>(reinterpret_cast<const llama_token*>(prompt_tokens.data())),
+        static_cast<int32_t>(prompt_tokens.size())
+    );
 
-    for (size_t i = 0; i < prompt_tokens.size(); i += n_batch) {
-        int n_tokens = std::min(n_batch, static_cast<int>(prompt_tokens.size() - i));
-        
-        // Prepare batch
-        batch.n_tokens = n_tokens;
-        for (int j = 0; j < n_tokens; ++j) {
-             batch.token[j] = prompt_tokens[i + j];
-             batch.pos[j] = i + j;
-             batch.n_seq_id[j] = 1;
-             batch.seq_id[j][0] = 0;
-             batch.logits[j] = false;
-        }
-
-        // Last token of the prompt dictates logits generation
-        if (i + n_tokens == prompt_tokens.size()) {
-            batch.logits[n_tokens - 1] = true;
-        }
-
-        // Decode batch
-        if (llama_decode(ctx_, batch) != 0) {
-            llama_batch_free(batch);
-            return tl::unexpected(Error{
-                ErrorCode::InferenceFailed,
-                "Failed to decode prompt batch"
-            });
-        }
+    // Process prompt (prefill phase)
+    if (llama_decode(ctx_, batch) != 0) {
+        return tl::unexpected(Error{
+            ErrorCode::InferenceFailed,
+            "Failed to decode prompt batch"
+        });
     }
-    
-    llama_batch_free(batch);
 
     // Update KV cache count
     kv_cache_token_count_ = static_cast<int>(prompt_tokens.size());
@@ -382,11 +362,11 @@ bool LlamaBackend::check_stop_sequence(
     for (const auto& stop_seq : stop_sequences) {
         if (stop_seq.empty()) continue;
 
-        // Check if generated text contains this stop sequence
-        // We use find() instead of suffix check to be robust against
-        // trailing whitespace or multiple tokens generated at once
-        if (generated_text.find(stop_seq) != std::string::npos) {
-            return true;
+        // Check if generated text ends with this stop sequence
+        if (generated_text.size() >= stop_seq.size()) {
+            if (generated_text.substr(generated_text.size() - stop_seq.size()) == stop_seq) {
+                return true;
+            }
         }
     }
     return false;
