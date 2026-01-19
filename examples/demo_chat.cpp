@@ -192,7 +192,7 @@ int main(int argc, char** argv) {
         std::cerr << "Error: " << agent_result.error().to_string() << "\n";
         return 1;
     }
-    zoo::Agent agent = std::move(*agent_result);
+    auto agent = std::move(*agent_result);  // Now a std::unique_ptr<Agent>
 
     // Print welcome
     print_welcome(config, !args.no_stream);
@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
                 break;
             }
             else if (line == "/clear") {
-                agent.clear_history();
+                agent->clear_history();
                 std::cout << "Conversation history cleared.\n";
                 continue;
             }
@@ -253,19 +253,19 @@ int main(int argc, char** argv) {
         std::future<zoo::Expected<zoo::Response>> future;
         if (args.no_stream) {
             // No streaming
-            future = agent.chat(zoo::Message::user(line));
+            future = agent->chat(zoo::Message::user(line));
         } else {
             // With streaming
             auto callback = [](std::string_view token) {
                 std::cout << token << std::flush;
             };
-            future = agent.chat(zoo::Message::user(line), callback);
+            future = agent->chat(zoo::Message::user(line), callback);
         }
 
         // Poll for interrupt during generation
         while (future.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout) {
             if (g_interrupted) {
-                agent.stop();
+                agent->stop();
                 std::cout << "\n[Generation stopped]\n";
 
                 // Recreate agent for next request

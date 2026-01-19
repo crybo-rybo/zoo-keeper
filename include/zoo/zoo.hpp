@@ -19,11 +19,13 @@
  *     config.context_size = 8192;
  *     config.max_tokens = 512;
  *
- *     auto agent = zoo::Agent::create(config);
- *     if (!agent) {
- *         std::cerr << "Error: " << agent.error().to_string() << std::endl;
+ *     auto agent_result = zoo::Agent::create(config);
+ *     if (!agent_result) {
+ *         std::cerr << "Error: " << agent_result.error().to_string() << std::endl;
  *         return 1;
  *     }
+ *
+ *     auto agent = std::move(*agent_result);  // std::unique_ptr<Agent>
  *
  *     auto future = agent->chat(zoo::Message::user("Hello!"));
  *     auto response = future.get();

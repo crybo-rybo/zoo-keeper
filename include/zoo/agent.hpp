@@ -45,9 +45,9 @@ namespace zoo {
  *     return 1;
  * }
  *
- * Agent agent = std::move(*agent_result);
+ * auto agent = std::move(*agent_result);  // Now a std::unique_ptr<Agent>
  *
- * auto future = agent.chat(Message::user("Hello!"));
+ * auto future = agent->chat(Message::user("Hello!"));
  * auto response = future.get();
  * if (response) {
  *     std::cout << response->text << std::endl;
@@ -63,9 +63,9 @@ public:
      *
      * @param config Agent configuration
      * @param backend Optional backend (for testing with MockBackend)
-     * @return Expected<Agent> Agent instance or initialization error
+     * @return Expected<std::unique_ptr<Agent>> Unique pointer to Agent or initialization error
      */
-    static Expected<Agent> create(
+    static Expected<std::unique_ptr<Agent>> create(
         const Config& config,
         std::unique_ptr<backend::IBackend> backend = nullptr
     ) {
@@ -90,8 +90,8 @@ public:
             return tl::unexpected(result.error());
         }
 
-        // Create agent with initialized backend
-        return Agent(config, std::move(backend));
+        // Create agent with initialized backend (use unique_ptr with private constructor)
+        return std::unique_ptr<Agent>(new Agent(config, std::move(backend)));
     }
 
     /**
@@ -107,65 +107,11 @@ public:
         stop();
     }
 
-    // Non-copyable (Agent owns an active thread and shared resources)
+    // Non-copyable and non-movable (inference thread captures `this`)
     Agent(const Agent&) = delete;
     Agent& operator=(const Agent&) = delete;
-
-    /**
-     * @brief Move constructor
-     *
-     * Transfers ownership of all resources including the running inference thread.
-     * The moved-from object is left in a valid but stopped state.
-     *
-     * Thread Safety: The inference thread continues running and now operates
-     * on the new object's resources. The moved-from object's running_ flag
-     * is set to false to prevent double-shutdown.
-     *
-     * @param other Agent to move from
-     */
-    Agent(Agent&& other) noexcept
-        : config_(std::move(other.config_))
-        , backend_(std::move(other.backend_))
-        , history_(std::move(other.history_))
-        , template_engine_(std::move(other.template_engine_))
-        , request_queue_(std::move(other.request_queue_))
-        , agentic_loop_(std::move(other.agentic_loop_))
-        , inference_thread_(std::move(other.inference_thread_))
-        , running_(other.running_.load())
-        // Note: mutexes are default-constructed (cannot be moved)
-    {
-        other.running_.store(false);
-    }
-
-    /**
-     * @brief Move assignment operator
-     *
-     * Stops the current agent's inference thread before moving resources.
-     * The moved-from object is left in a valid but stopped state.
-     *
-     * Thread Safety: Calls stop() to ensure current inference thread is
-     * joined before transferring resources from other.
-     *
-     * @param other Agent to move from
-     * @return Reference to this
-     */
-    Agent& operator=(Agent&& other) noexcept {
-        if (this != &other) {
-            stop();  // Stop and join current inference thread
-
-            config_ = std::move(other.config_);
-            backend_ = std::move(other.backend_);
-            history_ = std::move(other.history_);
-            template_engine_ = std::move(other.template_engine_);
-            request_queue_ = std::move(other.request_queue_);
-            agentic_loop_ = std::move(other.agentic_loop_);
-            inference_thread_ = std::move(other.inference_thread_);
-            running_.store(other.running_.load());
-            other.running_.store(false);
-            // Note: mutexes remain in place (cannot be moved)
-        }
-        return *this;
-    }
+    Agent(Agent&&) = delete;
+    Agent& operator=(Agent&&) = delete;
 
     /**
      * @brief Submit a chat message and get a future for the response

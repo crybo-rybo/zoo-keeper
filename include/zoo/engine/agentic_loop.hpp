@@ -274,6 +274,18 @@ public:
         cancelled_.store(false, std::memory_order_release);
     }
 
+    /**
+     * @brief Update the history mutex pointer
+     *
+     * Used by Agent move operations to fix the mutex pointer after moving.
+     * Thread-safe: Can be called from any thread.
+     *
+     * @param mutex New mutex pointer
+     */
+    void set_history_mutex(std::mutex* mutex) {
+        history_mutex_ = mutex;
+    }
+
 private:
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<HistoryManager> history_;
