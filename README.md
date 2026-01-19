@@ -39,13 +39,13 @@ int main() {
         return 1;
     }
 
-    zoo::Agent agent = std::move(*agent_result);
+    auto agent = std::move(*agent_result);  // std::unique_ptr<Agent>
 
     // Set system prompt
-    agent.set_system_prompt("You are a helpful AI assistant.");
+    agent->set_system_prompt("You are a helpful AI assistant.");
 
     // Send a message
-    auto future = agent.chat(zoo::Message::user("Hello!"));
+    auto future = agent->chat(zoo::Message::user("Hello!"));
 
     // Wait for response
     auto response = future.get();
@@ -110,7 +110,7 @@ build/examples/demo_chat models/your-model.gguf
 ### Streaming Output
 
 ```cpp
-auto future = agent.chat(
+auto future = agent->chat(
     zoo::Message::user("Write a haiku about AI"),
     [](std::string_view token) {
         std::cout << token << std::flush;  // Print tokens as they arrive
@@ -125,14 +125,14 @@ std::cout << std::endl;
 
 ```cpp
 // History is automatically managed
-agent.chat(zoo::Message::user("My name is Alice")).get();
-agent.chat(zoo::Message::user("What's my name?")).get();  // Will remember "Alice"
+agent->chat(zoo::Message::user("My name is Alice")).get();
+agent->chat(zoo::Message::user("What's my name?")).get();  // Will remember "Alice"
 ```
 
 ### Error Handling
 
 ```cpp
-auto response_result = agent.chat(zoo::Message::user("Hello")).get();
+auto response_result = agent->chat(zoo::Message::user("Hello")).get();
 
 if (!response_result) {
     // Handle error
@@ -140,7 +140,7 @@ if (!response_result) {
     switch (error.code) {
         case zoo::ErrorCode::ContextWindowExceeded:
             std::cerr << "Context full! Consider clearing history." << std::endl;
-            agent.clear_history();
+            agent->clear_history();
             break;
         case zoo::ErrorCode::InferenceFailed:
             std::cerr << "Inference failed: " << error.message << std::endl;
@@ -175,7 +175,10 @@ config.stop_sequences = {"\n\n", "User:"};
 config.prompt_template = zoo::PromptTemplate::Custom;
 config.custom_template = "{{role}}: {{content}}\n";
 
-auto agent = zoo::Agent::create(config);
+auto agent_result = zoo::Agent::create(config);
+if (agent_result) {
+    auto agent = std::move(*agent_result);  // std::unique_ptr<Agent>
+}
 ```
 
 ## Architecture
