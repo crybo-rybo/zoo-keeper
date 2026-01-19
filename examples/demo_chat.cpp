@@ -1,9 +1,7 @@
 /**
  * Zoo-Keeper Demo Chat Application
  *
- * Interactive CLI demonstrating the Zoo-Keeper Agent Engine.
- * This is a placeholder implementation that shows the intended API
- * and user experience for when the Agent class is fully implemented.
+ * Interactive CLI demonstrating the Zoo-Keeper Agent Engine with real LLM inference.
  *
  * Usage:
  *   ./demo_chat <model_path> [options]
@@ -14,21 +12,20 @@
  *   --context-size <int>     Context window size (default: 8192)
  *   --template <type>        Template type: llama3, chatml (default: llama3)
  *   --system <prompt>        System prompt
+ *   --no-stream              Disable token streaming
  *   --help                   Show this help message
  */
 
+#include "zoo/agent.hpp"
 #include "zoo/types.hpp"
-#include "zoo/engine/history_manager.hpp"
-#include "zoo/engine/template_engine.hpp"
-#include "zoo/backend/interface.hpp"
 
 #include <iostream>
 #include <string>
-#include <cstring>
 #include <csignal>
 #include <atomic>
 #include <chrono>
 #include <iomanip>
+#include <future>
 
 // Global flag for Ctrl+C handling
 std::atomic<bool> g_interrupted{false};
@@ -36,17 +33,18 @@ std::atomic<bool> g_interrupted{false};
 void signal_handler(int signal) {
     if (signal == SIGINT) {
         g_interrupted = true;
-        std::cout << "\n\nInterrupted. Exiting gracefully...\n";
+        std::cout << "\n\nInterrupted. Stopping generation...\n";
     }
 }
 
-struct DemoConfig {
+struct CLIArgs {
     std::string model_path;
     float temperature = 0.7f;
     int max_tokens = 512;
     int context_size = 8192;
     zoo::PromptTemplate template_type = zoo::PromptTemplate::Llama3;
     std::string system_prompt = "You are a helpful AI assistant.";
+    bool no_stream = false;
     bool help = false;
 };
 
@@ -60,6 +58,7 @@ void print_usage(const char* program_name) {
     std::cout << "  --context-size <int>     Context window size (default: 8192)\n";
     std::cout << "  --template <type>        Template type: llama3, chatml (default: llama3)\n";
     std::cout << "  --system <prompt>        System prompt\n";
+    std::cout << "  --no-stream              Disable token streaming\n";
     std::cout << "  --help                   Show this help message\n\n";
     std::cout << "Example:\n";
     std::cout << "  " << program_name << " model.gguf --temperature 0.8 --max-tokens 1024\n\n";
@@ -67,58 +66,67 @@ void print_usage(const char* program_name) {
     std::cout << "  /quit, /exit    Exit the application\n";
     std::cout << "  /clear          Clear conversation history\n";
     std::cout << "  /help           Show available commands\n";
-    std::cout << "  Ctrl+C          Exit gracefully\n";
+    std::cout << "  Ctrl+C          Stop current generation\n";
 }
 
-DemoConfig parse_args(int argc, char** argv) {
-    DemoConfig config;
+CLIArgs parse_args(int argc, char** argv) {
+    CLIArgs args;
 
     if (argc < 2) {
-        config.help = true;
-        return config;
+        args.help = true;
+        return args;
     }
 
-    config.model_path = argv[1];
+    // Check if first argument is --help
+    if (std::string(argv[1]) == "--help") {
+        args.help = true;
+        return args;
+    }
+
+    args.model_path = argv[1];
 
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
 
         if (arg == "--help") {
-            config.help = true;
-            return config;
+            args.help = true;
+            return args;
         }
         else if (arg == "--temperature" && i + 1 < argc) {
-            config.temperature = std::stof(argv[++i]);
+            args.temperature = std::stof(argv[++i]);
         }
         else if (arg == "--max-tokens" && i + 1 < argc) {
-            config.max_tokens = std::stoi(argv[++i]);
+            args.max_tokens = std::stoi(argv[++i]);
         }
         else if (arg == "--context-size" && i + 1 < argc) {
-            config.context_size = std::stoi(argv[++i]);
+            args.context_size = std::stoi(argv[++i]);
         }
         else if (arg == "--template" && i + 1 < argc) {
             std::string tmpl = argv[++i];
             if (tmpl == "llama3") {
-                config.template_type = zoo::PromptTemplate::Llama3;
+                args.template_type = zoo::PromptTemplate::Llama3;
             } else if (tmpl == "chatml") {
-                config.template_type = zoo::PromptTemplate::ChatML;
+                args.template_type = zoo::PromptTemplate::ChatML;
             } else {
                 std::cerr << "Unknown template type: " << tmpl << "\n";
-                config.help = true;
-                return config;
+                args.help = true;
+                return args;
             }
         }
         else if (arg == "--system" && i + 1 < argc) {
-            config.system_prompt = argv[++i];
+            args.system_prompt = argv[++i];
+        }
+        else if (arg == "--no-stream") {
+            args.no_stream = true;
         }
         else {
             std::cerr << "Unknown option: " << arg << "\n";
-            config.help = true;
-            return config;
+            args.help = true;
+            return args;
         }
     }
 
-    return config;
+    return args;
 }
 
 void print_separator() {
@@ -139,109 +147,55 @@ void print_metrics(const zoo::Metrics& metrics, const zoo::TokenUsage& usage) {
     print_separator();
 }
 
-void print_welcome(const DemoConfig& config) {
+void print_welcome(const zoo::Config& config, bool streaming) {
     std::cout << "\n";
     print_separator();
     std::cout << "Zoo-Keeper Demo Chat\n";
     print_separator();
     std::cout << "Model: " << config.model_path << "\n";
-    std::cout << "Template: " << zoo::template_to_string(config.template_type) << "\n";
-    std::cout << "Temperature: " << config.temperature << "\n";
+    std::cout << "Template: " << zoo::template_to_string(config.prompt_template) << "\n";
+    std::cout << "Temperature: " << config.sampling.temperature << "\n";
     std::cout << "Max Tokens: " << config.max_tokens << "\n";
     std::cout << "Context Size: " << config.context_size << "\n";
-    std::cout << "System Prompt: " << config.system_prompt << "\n";
+    std::cout << "System Prompt: " << config.system_prompt.value_or("(none)") << "\n";
+    std::cout << "Streaming: " << (streaming ? "enabled" : "disabled") << "\n";
     print_separator();
     std::cout << "\nType your message and press Enter. Type '/quit' to exit.\n";
     std::cout << "Type '/help' for available commands.\n\n";
 }
 
-// Placeholder implementation until Agent class is ready
-class DemoAgent {
-public:
-    DemoAgent(const DemoConfig& config)
-        : history_(config.context_size)
-        , template_engine_(config.template_type)
-        , config_(config)
-    {
-        history_.set_system_prompt(config.system_prompt);
-    }
-
-    zoo::Expected<zoo::Response> chat(const std::string& user_message) {
-        // Add user message to history
-        auto add_result = history_.add_message(zoo::Message::user(user_message));
-        if (!add_result.has_value()) {
-            return tl::unexpected(add_result.error());
-        }
-
-        // Render conversation
-        auto rendered = template_engine_.render(history_.get_messages());
-        if (!rendered.has_value()) {
-            return tl::unexpected(rendered.error());
-        }
-
-        // This is a placeholder - in real implementation, this would:
-        // 1. Tokenize the rendered prompt
-        // 2. Call backend.generate() with streaming
-        // 3. Return Response with metrics
-
-        // For demo purposes, return a mock response
-        zoo::Response response;
-        response.text = "This is a demo response. The Agent class is not yet implemented.\n"
-                       "Once implemented, this will use llama.cpp to generate actual responses.";
-
-        // Mock metrics
-        response.usage.prompt_tokens = static_cast<int>(rendered->length() / 4);
-        response.usage.completion_tokens = static_cast<int>(response.text.length() / 4);
-        response.usage.total_tokens = response.usage.prompt_tokens + response.usage.completion_tokens;
-        response.metrics.latency_ms = std::chrono::milliseconds(100);
-        response.metrics.time_to_first_token_ms = std::chrono::milliseconds(50);
-        response.metrics.tokens_per_second = 25.0;
-
-        // Add assistant response to history
-        add_result = history_.add_message(zoo::Message::assistant(response.text));
-        if (!add_result.has_value()) {
-            return tl::unexpected(add_result.error());
-        }
-
-        return response;
-    }
-
-    void clear_history() {
-        history_.clear();
-        history_.set_system_prompt(config_.system_prompt);
-    }
-
-    int get_message_count() const {
-        return static_cast<int>(history_.get_messages().size());
-    }
-
-    bool is_context_exceeded() const {
-        return history_.is_context_exceeded();
-    }
-
-private:
-    zoo::engine::HistoryManager history_;
-    zoo::engine::TemplateEngine template_engine_;
-    DemoConfig config_;
-};
-
 int main(int argc, char** argv) {
-    // Parse arguments
-    DemoConfig config = parse_args(argc, argv);
+    // Parse arguments first before any other operations
+    CLIArgs args = parse_args(argc, argv);
 
-    if (config.help) {
+    if (args.help) {
         print_usage(argv[0]);
-        return config.model_path.empty() ? 1 : 0;
+        return args.model_path.empty() ? 1 : 0;
     }
 
     // Setup signal handler
     std::signal(SIGINT, signal_handler);
 
-    // Print welcome
-    print_welcome(config);
+    // Build zoo::Config from CLI args
+    zoo::Config config;
+    config.model_path = args.model_path;
+    config.context_size = args.context_size;
+    config.max_tokens = args.max_tokens;
+    config.sampling.temperature = args.temperature;
+    config.prompt_template = args.template_type;
+    config.system_prompt = args.system_prompt;
 
-    // Create demo agent
-    DemoAgent agent(config);
+    // Create agent
+    std::cout << "Loading model...\n";
+    auto agent_result = zoo::Agent::create(config);
+    if (!agent_result) {
+        std::cerr << "Error: " << agent_result.error().to_string() << "\n";
+        return 1;
+    }
+    zoo::Agent agent = std::move(*agent_result);
+
+    // Print welcome
+    print_welcome(config, !args.no_stream);
 
     // Main chat loop
     std::string line;
@@ -288,27 +242,64 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Check context window
-        if (agent.is_context_exceeded()) {
-            std::cout << "\nWarning: Context window exceeded. Consider using /clear.\n";
-        }
-
-        // Process message
+        // Print assistant prompt
         std::cout << "\nAssistant: ";
         std::cout.flush();
 
-        auto result = agent.chat(line);
+        // Reset interrupt flag
+        g_interrupted = false;
 
-        if (!result.has_value()) {
-            std::cerr << "\nError: " << result.error().to_string() << "\n";
-            continue;
+        // Submit chat request with optional streaming callback
+        std::future<zoo::Expected<zoo::Response>> future;
+        if (args.no_stream) {
+            // No streaming
+            future = agent.chat(zoo::Message::user(line));
+        } else {
+            // With streaming
+            auto callback = [](std::string_view token) {
+                std::cout << token << std::flush;
+            };
+            future = agent.chat(zoo::Message::user(line), callback);
         }
 
-        // Print response (in real implementation, this would stream)
-        std::cout << result->text << "\n";
+        // Poll for interrupt during generation
+        while (future.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout) {
+            if (g_interrupted) {
+                agent.stop();
+                std::cout << "\n[Generation stopped]\n";
 
-        // Print metrics
-        print_metrics(result->metrics, result->usage);
+                // Recreate agent for next request
+                std::cout << "Reloading agent...\n";
+                agent_result = zoo::Agent::create(config);
+                if (!agent_result) {
+                    std::cerr << "Error: " << agent_result.error().to_string() << "\n";
+                    return 1;
+                }
+                agent = std::move(*agent_result);
+
+                g_interrupted = false;
+                break;
+            }
+        }
+
+        // Get result if not interrupted
+        if (!g_interrupted) {
+            auto result = future.get();
+
+            if (!result.has_value()) {
+                std::cerr << "\nError: " << result.error().to_string() << "\n";
+                continue;
+            }
+
+            // If not streaming, print the full response
+            if (args.no_stream) {
+                std::cout << result->text;
+            }
+            std::cout << "\n";
+
+            // Print metrics
+            print_metrics(result->metrics, result->usage);
+        }
     }
 
     std::cout << "\n";

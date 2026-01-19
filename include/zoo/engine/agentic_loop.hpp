@@ -151,7 +151,7 @@ public:
             };
         } else {
             // No user callback, but still track metrics
-            wrapped_callback = [&](std::string_view token) {
+            wrapped_callback = [&](std::string_view) {
                 if (!first_token_received) {
                     first_token_time = std::chrono::steady_clock::now();
                     first_token_received = true;
