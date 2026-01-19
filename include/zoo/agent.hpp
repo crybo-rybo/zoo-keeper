@@ -135,6 +135,11 @@ public:
         // Note: mutexes are default-constructed (cannot be moved)
     {
         other.running_.store(false);
+
+        // Fix the mutex pointer in agentic_loop to point to the new object's mutex
+        if (agentic_loop_) {
+            agentic_loop_->set_history_mutex(&history_mutex_);
+        }
     }
 
     /**
@@ -163,6 +168,11 @@ public:
             running_.store(other.running_.load());
             other.running_.store(false);
             // Note: mutexes remain in place (cannot be moved)
+
+            // Fix the mutex pointer in agentic_loop to point to the new object's mutex
+            if (agentic_loop_) {
+                agentic_loop_->set_history_mutex(&history_mutex_);
+            }
         }
         return *this;
     }
