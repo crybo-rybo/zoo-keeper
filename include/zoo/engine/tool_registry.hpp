@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -61,9 +62,17 @@ struct function_traits<R(*)(Args...)> {
     static constexpr size_t arity = sizeof...(Args);
 };
 
-// Member function pointer
+// Member function pointer (const — non-mutable lambdas)
 template<typename C, typename R, typename... Args>
 struct function_traits<R(C::*)(Args...) const> {
+    using return_type = R;
+    using args_tuple = std::tuple<std::decay_t<Args>...>;
+    static constexpr size_t arity = sizeof...(Args);
+};
+
+// Member function pointer (non-const — mutable lambdas)
+template<typename C, typename R, typename... Args>
+struct function_traits<R(C::*)(Args...)> {
     using return_type = R;
     using args_tuple = std::tuple<std::decay_t<Args>...>;
     static constexpr size_t arity = sizeof...(Args);
@@ -177,8 +186,11 @@ public:
         using traits = detail::function_traits<Func>;
         using args_tuple = typename traits::args_tuple;
 
-        static_assert(traits::arity > 0 || traits::arity == 0,
-            "Function must have zero or more parameters");
+        if (param_names.size() != traits::arity) {
+            throw std::invalid_argument(
+                "Parameter name count (" + std::to_string(param_names.size()) +
+                ") does not match function arity (" + std::to_string(traits::arity) + ")");
+        }
 
         // Generate schema from function signature
         nlohmann::json schema;
