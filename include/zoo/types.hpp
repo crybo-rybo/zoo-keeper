@@ -118,10 +118,12 @@ enum class ErrorCode {
     RequestTimeout = 402,
     QueueFull = 403,
 
-    // Tool errors (500-599) - for future use
+    // Tool errors (500-599)
     ToolNotFound = 500,
     ToolExecutionFailed = 501,
     InvalidToolSignature = 502,
+    ToolRetriesExhausted = 503,
+    ToolLoopLimitReached = 504,
 
     // Unknown
     Unknown = 999
@@ -344,7 +346,7 @@ struct Response {
     std::string text;                 ///< Generated response text
     TokenUsage usage;                 ///< Token consumption statistics
     Metrics metrics;                  ///< Performance timing data
-    std::vector<Message> tool_calls;  ///< Tool invocations (reserved for future use)
+    std::vector<Message> tool_calls;  ///< Tool call and result history from agentic loop
 
     bool operator==(const Response& other) const {
         return text == other.text &&

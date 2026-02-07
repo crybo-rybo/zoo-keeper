@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "zoo/types.hpp"
+#include "zoo/engine/tool_call_parser.hpp"
 
 using namespace zoo;
 
@@ -326,4 +327,85 @@ TEST(RequestTest, WithCallback) {
         (*req.streaming_callback)("token");
         EXPECT_TRUE(called);
     }
+}
+
+// ============================================================================
+// ToolCall Tests
+// ============================================================================
+
+TEST(ToolCallTest, Equality) {
+    zoo::ToolCall tc1;
+    tc1.id = "call_1";
+    tc1.name = "add";
+    tc1.arguments = {{"a", 1}, {"b", 2}};
+
+    zoo::ToolCall tc2;
+    tc2.id = "call_1";
+    tc2.name = "add";
+    tc2.arguments = {{"a", 1}, {"b", 2}};
+
+    EXPECT_EQ(tc1, tc2);
+}
+
+TEST(ToolCallTest, InequalityById) {
+    zoo::ToolCall tc1;
+    tc1.id = "call_1";
+    tc1.name = "add";
+    tc1.arguments = {{"a", 1}};
+
+    zoo::ToolCall tc2;
+    tc2.id = "call_2";
+    tc2.name = "add";
+    tc2.arguments = {{"a", 1}};
+
+    EXPECT_NE(tc1, tc2);
+}
+
+TEST(ToolCallTest, InequalityByName) {
+    zoo::ToolCall tc1;
+    tc1.id = "call_1";
+    tc1.name = "add";
+    tc1.arguments = {};
+
+    zoo::ToolCall tc2;
+    tc2.id = "call_1";
+    tc2.name = "multiply";
+    tc2.arguments = {};
+
+    EXPECT_NE(tc1, tc2);
+}
+
+TEST(ToolCallTest, InequalityByArguments) {
+    zoo::ToolCall tc1;
+    tc1.id = "call_1";
+    tc1.name = "add";
+    tc1.arguments = {{"a", 1}, {"b", 2}};
+
+    zoo::ToolCall tc2;
+    tc2.id = "call_1";
+    tc2.name = "add";
+    tc2.arguments = {{"a", 1}, {"b", 99}};
+
+    EXPECT_NE(tc1, tc2);
+}
+
+// ============================================================================
+// Tool Error Codes in to_string
+// ============================================================================
+
+TEST(ErrorTest, ToolErrorCodesToString) {
+    Error e1(ErrorCode::ToolNotFound, "Tool not found");
+    EXPECT_NE(e1.to_string().find("500"), std::string::npos);
+
+    Error e2(ErrorCode::ToolExecutionFailed, "Execution failed");
+    EXPECT_NE(e2.to_string().find("501"), std::string::npos);
+
+    Error e3(ErrorCode::InvalidToolSignature, "Bad signature");
+    EXPECT_NE(e3.to_string().find("502"), std::string::npos);
+
+    Error e4(ErrorCode::ToolRetriesExhausted, "Retries exhausted");
+    EXPECT_NE(e4.to_string().find("503"), std::string::npos);
+
+    Error e5(ErrorCode::ToolLoopLimitReached, "Loop limit");
+    EXPECT_NE(e5.to_string().find("504"), std::string::npos);
 }

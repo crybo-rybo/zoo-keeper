@@ -4,6 +4,9 @@
 #include "../backend/IBackend.hpp"
 #include "history_manager.hpp"
 #include "request_queue.hpp"
+#include "tool_registry.hpp"
+#include "tool_call_parser.hpp"
+#include "error_recovery.hpp"
 #include <atomic>
 #include <memory>
 #include <chrono>
@@ -19,32 +22,15 @@ namespace engine {
  * - Pops requests from the RequestQueue
  * - Formats prompts via backend->format_prompt() (incremental)
  * - Tokenizes prompts and calls backend->generate()
+ * - Detects tool calls in model output
+ * - Validates args, executes tools, injects results, and loops
  * - Adds assistant responses to HistoryManager
  * - Calls backend->finalize_response() to update prompt cache
  * - Tracks metrics (latency, TTFT, tokens/sec)
  * - Supports cancellation via atomic flag
- *
- * MVP Scope:
- * - Single-turn text generation (no tool calling)
- * - Streaming token callbacks
- * - Basic error handling
- * - Performance metrics
- *
- * Thread Safety:
- * - Designed to run on a single inference thread
- * - Cancellation flag is atomic for cross-thread signaling
- * - RequestQueue handles thread-safe communication
  */
 class AgenticLoop {
 public:
-    /**
-     * @brief Construct agentic loop with dependencies
-     *
-     * @param backend Backend implementation (LlamaBackend or MockBackend)
-     * @param history History manager instance
-     * @param config Agent configuration
-     * @param history_mutex Mutex for synchronizing history access (optional, for thread safety)
-     */
     AgenticLoop(
         std::shared_ptr<backend::IBackend> backend,
         std::shared_ptr<HistoryManager> history,
@@ -59,19 +45,21 @@ public:
     {}
 
     /**
-     * @brief Process a single request
-     *
-     * This is the core inference method:
-     * 1. Add user message to history
-     * 2. Check context window
-     * 3. Render conversation history
-     * 4. Tokenize prompt
-     * 5. Generate completion with streaming
-     * 6. Add assistant response to history
-     * 7. Track metrics
-     *
-     * @param request Request to process
-     * @return Expected<Response> Generated response or error
+     * @brief Set the tool registry for tool calling support
+     */
+    void set_tool_registry(std::shared_ptr<ToolRegistry> registry) {
+        tool_registry_ = std::move(registry);
+    }
+
+    /**
+     * @brief Set max tool loop iterations (default: 5)
+     */
+    void set_max_tool_iterations(int max) {
+        max_tool_iterations_ = max;
+    }
+
+    /**
+     * @brief Process a single request (with optional tool loop)
      */
     Expected<Response> process_request(const Request& request) {
         // Check cancellation
@@ -84,19 +72,14 @@ public:
 
         auto start_time = std::chrono::steady_clock::now();
 
-        // Prepare prompt with history locked to prevent races with user thread
-        std::string prompt;
+        // Add user message to history (with lock)
         {
             auto lock = lock_history();
-
-            // 1. Add user message to history
             if (auto result = history_->add_message(request.message); !result) {
                 return tl::unexpected(result.error());
             }
 
-            // 2. Check context window (MVP: warning only, no pruning)
             if (history_->is_context_exceeded()) {
-                // Rollback user message before returning error
                 history_->remove_last_message();
                 return tl::unexpected(Error{
                     ErrorCode::ContextWindowExceeded,
@@ -105,183 +88,204 @@ public:
                     " / " + std::to_string(history_->get_context_size())
                 });
             }
-
-            // 3. Render conversation history
-            auto prompt_result = backend_->format_prompt(history_->get_messages());
-            if (!prompt_result) {
-                // Rollback user message before returning error
-                history_->remove_last_message();
-                return tl::unexpected(prompt_result.error());
-            }
-            prompt = *prompt_result;
-            // Lock released here - we no longer need to access history until after generation
         }
 
-        // 4. Tokenize prompt
-        auto tokens_result = backend_->tokenize(prompt);
-        if (!tokens_result) {
-            // Rollback user message from history on failure
-            rollback_last_message();
-            return tl::unexpected(tokens_result.error());
-        }
-        const auto& prompt_tokens = *tokens_result;
-
-        // 5. Generate completion with streaming
+        // Metrics tracking across tool loop iterations
         std::chrono::steady_clock::time_point first_token_time;
         bool first_token_received = false;
-        int completion_tokens = 0;
+        int total_completion_tokens = 0;
+        int total_prompt_tokens = 0;
+        std::vector<Message> tool_call_history;
+        tool_call_history.reserve(max_tool_iterations_);
 
-        // Wrap streaming callback to track TTFT and token count
-        std::optional<std::function<void(std::string_view)>> wrapped_callback;
-        if (request.streaming_callback) {
-            wrapped_callback = [&, user_callback = *request.streaming_callback](std::string_view token) {
-                // Track first token time
-                if (!first_token_received) {
-                    first_token_time = std::chrono::steady_clock::now();
-                    first_token_received = true;
-                }
+        ErrorRecovery error_recovery;
+        int iteration = 0;
 
-                // Increment token count
-                ++completion_tokens;
+        while (iteration < max_tool_iterations_) {
+            ++iteration;
 
-                // Call user callback
-                user_callback(token);
-            };
-        } else {
-            // No user callback, but still track metrics
-            wrapped_callback = [&](std::string_view) {
-                if (!first_token_received) {
-                    first_token_time = std::chrono::steady_clock::now();
-                    first_token_received = true;
-                }
-                ++completion_tokens;
-            };
-        }
-
-        // Generate
-        auto generate_result = backend_->generate(
-            prompt_tokens,
-            config_.max_tokens,
-            config_.stop_sequences,
-            wrapped_callback
-        );
-
-        if (!generate_result) {
-            // Rollback user message from history on failure
-            rollback_last_message();
-            return tl::unexpected(generate_result.error());
-        }
-        const std::string& generated_text = *generate_result;
-
-        auto end_time = std::chrono::steady_clock::now();
-
-        // 6. Add assistant response to history (with mutex protection)
-        {
-            auto lock = lock_history();
-
-            Message assistant_msg = Message::assistant(generated_text);
-            if (auto result = history_->add_message(std::move(assistant_msg)); !result) {
-                return tl::unexpected(result.error());
+            // Check cancellation
+            if (cancelled_.load(std::memory_order_acquire)) {
+                return tl::unexpected(Error{
+                    ErrorCode::RequestCancelled,
+                    "Request cancelled during tool loop"
+                });
             }
 
-            // Update backend's prompt cache state (prev_len)
-            backend_->finalize_response(history_->get_messages());
-        }
-
-        // 7. Build response with metrics
-        Response response;
-        response.text = generated_text;
-
-        // Token usage
-        response.usage.prompt_tokens = static_cast<int>(prompt_tokens.size());
-        response.usage.completion_tokens = completion_tokens;
-        response.usage.total_tokens = response.usage.prompt_tokens + response.usage.completion_tokens;
-
-        // Metrics
-        auto total_latency = std::chrono::duration_cast<std::chrono::milliseconds>(
-            end_time - start_time
-        );
-        response.metrics.latency_ms = total_latency;
-
-        if (first_token_received) {
-            response.metrics.time_to_first_token_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                first_token_time - start_time
-            );
-
-            // Calculate tokens/sec for completion only
-            auto generation_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                end_time - first_token_time
-            );
-            if (generation_time.count() > 0) {
-                response.metrics.tokens_per_second =
-                    (completion_tokens * 1000.0) / generation_time.count();
+            // Format prompt
+            std::string prompt;
+            {
+                auto lock = lock_history();
+                auto prompt_result = backend_->format_prompt(history_->get_messages());
+                if (!prompt_result) {
+                    rollback_last_message();
+                    return tl::unexpected(prompt_result.error());
+                }
+                prompt = std::move(*prompt_result);
             }
+
+            // Tokenize
+            auto tokens_result = backend_->tokenize(prompt);
+            if (!tokens_result) {
+                rollback_last_message();
+                return tl::unexpected(tokens_result.error());
+            }
+            const auto& prompt_tokens = *tokens_result;
+            total_prompt_tokens += static_cast<int>(prompt_tokens.size());
+
+            // Generate with streaming callback
+            int completion_tokens = 0;
+            auto wrapped_callback = make_streaming_callback(
+                request, first_token_time, first_token_received, completion_tokens);
+
+            auto generate_result = backend_->generate(
+                prompt_tokens,
+                config_.max_tokens,
+                config_.stop_sequences,
+                wrapped_callback
+            );
+
+            if (!generate_result) {
+                rollback_last_message();
+                return tl::unexpected(generate_result.error());
+            }
+
+            total_completion_tokens += completion_tokens;
+            // Take ownership to enable moves (avoids copying LLM output)
+            std::string generated_text = std::move(*generate_result);
+
+            // Check for tool calls (only if registry is available and has tools)
+            if (tool_registry_ && tool_registry_->size() > 0) {
+                auto parse_result = ToolCallParser::parse(generated_text);
+
+                if (parse_result.tool_call.has_value()) {
+                    const auto& tc = *parse_result.tool_call;
+
+                    // Add assistant message with tool call to history
+                    if (auto err = commit_assistant_response(generated_text); !err) {
+                        return tl::unexpected(err.error());
+                    }
+
+                    // Validate arguments
+                    auto validation_error = error_recovery.validate_args(tc, *tool_registry_);
+                    if (!validation_error.empty()) {
+                        // Validation failed
+                        if (!error_recovery.can_retry(tc.name)) {
+                            return tl::unexpected(Error{
+                                ErrorCode::ToolRetriesExhausted,
+                                "Tool retries exhausted for '" + tc.name + "': " + validation_error
+                            });
+                        }
+
+                        error_recovery.record_retry(tc.name);
+
+                        // Build error content once, reuse for history and tracking
+                        std::string error_content = "Error: " + validation_error;
+                        {
+                            auto lock = lock_history();
+                            (void)history_->add_message(Message::tool(
+                                error_content + "\nPlease correct the arguments.", tc.id));
+                        }
+                        tool_call_history.push_back(
+                            Message::tool(std::move(error_content), tc.id));
+                        continue;  // Loop back for retry
+                    }
+
+                    // Execute tool
+                    auto invoke_result = tool_registry_->invoke(tc.name, tc.arguments);
+                    std::string tool_result_str;
+                    if (invoke_result) {
+                        tool_result_str = invoke_result->dump();
+                    } else {
+                        tool_result_str = "Error: " + invoke_result.error().message;
+                    }
+
+                    // Build tool result message once; copy to history, move to tracking
+                    Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
+                    {
+                        auto lock = lock_history();
+                        auto add_result = history_->add_message(tool_msg);
+                        if (!add_result) {
+                            return tl::unexpected(add_result.error());
+                        }
+                    }
+                    tool_call_history.push_back(std::move(tool_msg));
+
+                    continue;  // Loop back for model to process tool result
+                }
+            }
+
+            // No tool call detected — this is the final response
+            auto end_time = std::chrono::steady_clock::now();
+
+            // Add assistant response to history
+            if (auto err = commit_assistant_response(generated_text); !err) {
+                return tl::unexpected(err.error());
+            }
+
+            // Build response
+            Response response;
+            response.text = std::move(generated_text);
+            response.tool_calls = std::move(tool_call_history);
+
+            response.usage.prompt_tokens = total_prompt_tokens;
+            response.usage.completion_tokens = total_completion_tokens;
+            response.usage.total_tokens = total_prompt_tokens + total_completion_tokens;
+
+            auto total_latency = std::chrono::duration_cast<std::chrono::milliseconds>(
+                end_time - start_time);
+            response.metrics.latency_ms = total_latency;
+
+            if (first_token_received) {
+                response.metrics.time_to_first_token_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        first_token_time - start_time);
+
+                auto generation_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end_time - first_token_time);
+                if (generation_time.count() > 0) {
+                    response.metrics.tokens_per_second =
+                        (total_completion_tokens * 1000.0) / generation_time.count();
+                }
+            }
+
+            return response;
         }
 
-        return response;
+        // If we get here, we've exceeded the tool loop limit
+        return tl::unexpected(Error{
+            ErrorCode::ToolLoopLimitReached,
+            "Tool loop iteration limit reached (" +
+                std::to_string(max_tool_iterations_) + ")"
+        });
     }
 
     /**
-     * @brief Run the main inference loop
-     *
-     * Processes requests from the queue until shutdown.
-     * This method is intended to run on the inference thread.
-     *
-     * @param queue Request queue to process
+     * @brief Run the main inference loop (legacy helper)
      */
     void run(RequestQueue& queue) {
         while (!cancelled_.load(std::memory_order_acquire)) {
-            // Pop request (blocking)
             auto request_opt = queue.pop();
-
-            // Check shutdown
-            if (!request_opt) {
-                break;  // Queue shutdown
-            }
-
-            // Process request
+            if (!request_opt) break;
             auto result = process_request(*request_opt);
-
-            // Note: In the Agent class, we'll use promises to return results
-            // This method is a helper for the main loop structure
-            (void)result;  // Result handled by caller (Agent class)
+            (void)result;
         }
     }
 
-    /**
-     * @brief Cancel ongoing operations
-     *
-     * Sets atomic flag to stop processing.
-     * Thread-safe: Can be called from any thread.
-     */
     void cancel() {
         cancelled_.store(true, std::memory_order_release);
     }
 
-    /**
-     * @brief Check if loop is cancelled
-     *
-     * @return bool True if cancelled
-     */
     bool is_cancelled() const {
         return cancelled_.load(std::memory_order_acquire);
     }
 
-    /**
-     * @brief Reset cancellation flag
-     */
     void reset() {
         cancelled_.store(false, std::memory_order_release);
     }
 
 private:
-    /**
-     * @brief Acquire the history mutex if one was provided
-     *
-     * Returns a locked unique_lock when history_mutex_ is set, or a
-     * default-constructed (no-op) unique_lock when null. A default-constructed
-     * unique_lock owns no mutex and its destructor is a no-op.
-     */
+    /** @brief Acquire history lock if mutex is provided. */
     std::unique_lock<std::mutex> lock_history() {
         if (history_mutex_) {
             return std::unique_lock<std::mutex>(*history_mutex_);
@@ -289,24 +293,57 @@ private:
         return {};
     }
 
-    /**
-     * @brief Rollback the last message from history
-     *
-     * Used for error recovery when tokenization or generation fails
-     * after a user message has been added to history. Prevents the
-     * history from being left in an inconsistent state (consecutive
-     * same-role messages).
-     */
+    /** @brief Remove the last message from history (error recovery). */
     void rollback_last_message() {
         auto lock = lock_history();
         history_->remove_last_message();
     }
 
+    /** @brief Add assistant message to history and finalize backend state. */
+    Expected<void> commit_assistant_response(const std::string& text) {
+        auto lock = lock_history();
+        auto add_result = history_->add_message(Message::assistant(text));
+        if (!add_result) {
+            return tl::unexpected(add_result.error());
+        }
+        backend_->finalize_response(history_->get_messages());
+        return {};
+    }
+
+    /** @brief Create a streaming callback that tracks metrics and forwards to user callback. */
+    std::optional<std::function<void(std::string_view)>> make_streaming_callback(
+        const Request& request,
+        std::chrono::steady_clock::time_point& first_token_time,
+        bool& first_token_received,
+        int& completion_tokens
+    ) {
+        if (request.streaming_callback) {
+            return [&, user_callback = *request.streaming_callback](std::string_view token) {
+                if (!first_token_received) {
+                    first_token_time = std::chrono::steady_clock::now();
+                    first_token_received = true;
+                }
+                ++completion_tokens;
+                user_callback(token);
+            };
+        } else {
+            return [&](std::string_view) {
+                if (!first_token_received) {
+                    first_token_time = std::chrono::steady_clock::now();
+                    first_token_received = true;
+                }
+                ++completion_tokens;
+            };
+        }
+    }
+
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<HistoryManager> history_;
     Config config_;
-    std::mutex* history_mutex_;  // Optional mutex for thread-safe history access
+    std::mutex* history_mutex_;
     std::atomic<bool> cancelled_;
+    std::shared_ptr<ToolRegistry> tool_registry_;
+    int max_tool_iterations_ = 5;
 };
 
 } // namespace engine

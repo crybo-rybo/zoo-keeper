@@ -41,10 +41,11 @@
  * @endcode
  *
  * Key Components:
- * - zoo::Agent: Main entry point for inference
+ * - zoo::Agent: Main entry point for inference and tool registration
  * - zoo::Config: Configuration for model, sampling, and templates
  * - zoo::Message: Conversation messages (User, Assistant, System, Tool)
- * - zoo::Response: Inference results with text, metrics, and token usage
+ * - zoo::Response: Inference results with text, metrics, token usage, and tool call history
+ * - zoo::ToolCall: Represents a parsed tool invocation from the model
  * - zoo::Error: Structured error handling
  *
  * Thread Safety:
@@ -71,6 +72,9 @@
 // Engine components (optional, for advanced usage)
 #include "engine/history_manager.hpp"
 #include "engine/request_queue.hpp"
+#include "engine/tool_registry.hpp"
+#include "engine/tool_call_parser.hpp"
+#include "engine/error_recovery.hpp"
 #include "engine/agentic_loop.hpp"
 
 /**
@@ -96,8 +100,11 @@
  *
  * - **Simple API**: Single entry point via zoo::Agent class
  * - **Async Inference**: Non-blocking chat() with std::future
+ * - **Tool Calling**: Type-safe tool registration with automatic JSON schema generation
+ * - **Agentic Loop**: Automatic tool call detection, execution, and result injection
+ * - **Error Recovery**: Argument validation with retry logic for failed tool calls
  * - **Streaming**: Token-by-token callbacks for real-time output
- * - **History Management**: Automatic conversation tracking
+ * - **History Management**: Automatic conversation tracking with tool call history
  * - **Template Support**: Llama3, ChatML, and custom formats
  * - **Type Safety**: std::expected for composable error handling
  * - **Testable**: Dependency injection with MockBackend
@@ -133,7 +140,7 @@
  * Zoo-Keeper uses a three-layer architecture:
  *
  * 1. **Public API Layer**: zoo::Agent class
- * 2. **Engine Layer**: Request queue, history, templates, agentic loop
+ * 2. **Engine Layer**: Request queue, history, tool registry, tool call parser, error recovery, agentic loop
  * 3. **Backend Layer**: llama.cpp abstraction (IBackend interface)
  *
  * The Agent spawns an inference thread that processes requests asynchronously.

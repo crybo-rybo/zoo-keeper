@@ -1,7 +1,16 @@
 // Mock backend implementation
-// This file exists to satisfy the linker but contains no implementation
-// as MockBackend is header-only (defined in mock_backend.hpp)
+// This file provides stubs needed for linking tests without llama.cpp
 
 #include "mock_backend.hpp"
 
-// No implementation needed - all methods are defined inline in the header
+namespace zoo {
+namespace backend {
+
+// Stub for create_backend() so Agent::create() links without zoo_backend.
+// Tests always pass a MockBackend explicitly, so this is never called.
+std::unique_ptr<IBackend> create_backend() {
+    return nullptr;
+}
+
+} // namespace backend
+} // namespace zoo
