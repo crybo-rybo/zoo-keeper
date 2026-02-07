@@ -53,13 +53,13 @@ public:
 
 private:
     /**
-     * @brief Check if a stop sequence has been reached
+     * @brief Find a stop sequence at the end of generated text
      * @param generated_text The currently generated text
      * @param stop_sequences List of stop sequences to check
-     * @return true if any stop sequence is found at the end of generated_text
+     * @return Length of the matching stop sequence, or 0 if none found
      */
-    bool check_stop_sequence(const std::string& generated_text,
-                            const std::vector<std::string>& stop_sequences) const;
+    size_t find_stop_sequence(const std::string& generated_text,
+                              const std::vector<std::string>& stop_sequences) const;
 
     /**
      * @brief Create and configure the sampler chain from config
@@ -91,7 +91,9 @@ private:
     int vocab_size_ = 0;
     int kv_cache_token_count_ = 0;  // Track current KV cache usage
 
-    // Cached chat template pointer (static lifetime from model, not owned)
+    // Cached chat template pointer (model-lifetime: valid as long as model_ is alive).
+    // May be nullptr if model has no embedded template, in which case
+    // llama_chat_apply_template falls back to ChatML format.
     const char* tmpl_ = nullptr;
 
     // Prompt formatting state (mirrors simple-chat.cpp pattern)

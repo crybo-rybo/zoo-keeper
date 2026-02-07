@@ -276,12 +276,11 @@ public:
 
 private:
     /**
-     * @brief Rollback the last message from history
+     * @brief Acquire the history mutex if one was provided
      *
-     * Used for error recovery when tokenization or generation fails
-     * after a user message has been added to history. Prevents the
-     * history from being left in an inconsistent state (consecutive
-     * same-role messages).
+     * Returns a locked unique_lock when history_mutex_ is set, or a
+     * default-constructed (no-op) unique_lock when null. A default-constructed
+     * unique_lock owns no mutex and its destructor is a no-op.
      */
     std::unique_lock<std::mutex> lock_history() {
         if (history_mutex_) {
@@ -290,6 +289,14 @@ private:
         return {};
     }
 
+    /**
+     * @brief Rollback the last message from history
+     *
+     * Used for error recovery when tokenization or generation fails
+     * after a user message has been added to history. Prevents the
+     * history from being left in an inconsistent state (consecutive
+     * same-role messages).
+     */
     void rollback_last_message() {
         auto lock = lock_history();
         history_->remove_last_message();

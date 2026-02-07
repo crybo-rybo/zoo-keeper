@@ -3,6 +3,7 @@
 #include "../types.hpp"
 #include <vector>
 #include <algorithm>
+#include <string_view>
 
 namespace zoo {
 namespace engine {
@@ -180,7 +181,7 @@ private:
      * @param text Input text
      * @return int Estimated token count
      */
-    static int estimate_tokens(const std::string& text) {
+    static int estimate_tokens(std::string_view text) {
         return std::max(1, static_cast<int>(text.length() / 4));
     }
 

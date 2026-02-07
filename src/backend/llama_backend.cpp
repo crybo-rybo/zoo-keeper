@@ -101,7 +101,9 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
         });
     }
 
-    // Cache the model's chat template pointer (static lifetime from model)
+    // Cache the model's chat template pointer (model-lifetime: valid as long as model_ is alive).
+    // May be nullptr if model has no embedded template — llama_chat_apply_template
+    // falls back to ChatML format in that case.
     tmpl_ = llama_model_chat_template(model_, nullptr);
 
     // Initialize prompt formatting state
@@ -121,11 +123,24 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
     }
 
     static_assert(sizeof(int) == sizeof(llama_token), "int must match llama_token size");
+    static_assert(alignof(int) == alignof(llama_token), "int must match llama_token alignment");
 
     const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) == -1;
 
-    // Calculate the number of tokens needed for the text
-    const int n_prompt_tokens = -llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, false);
+    // Calculate the number of tokens needed for the text.
+    // llama_tokenize returns negative required size when output buffer is null/too small,
+    // or INT32_MIN on overflow.
+    const int32_t raw = llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, false);
+    if (raw == INT32_MIN) {
+        return tl::unexpected(Error{
+            ErrorCode::TokenizationFailed,
+            "Tokenization overflow (input too large)"
+        });
+    }
+    const int n_prompt_tokens = (raw < 0) ? -raw : raw;
+    if (n_prompt_tokens == 0) {
+        return std::vector<int>{};
+    }
     std::vector<int> tokens(n_prompt_tokens);
     if(llama_tokenize(
         vocab_,
@@ -158,12 +173,15 @@ Expected<std::string> LlamaBackend::generate(
     }
 
     std::string generated_text;
-    // Reserve capacity to reduce reallocations during generation
+    // Reserve capacity to reduce reallocations during generation.
+    // Heuristic: ~8 bytes per token average for UTF-8 text.
     generated_text.reserve(max_tokens > 0 ? static_cast<size_t>(max_tokens) * 8 : 4096);
 
     int token_count = 0;
 
-    // Create batch for the prompt
+    // Create batch for the prompt.
+    // const_cast is safe: llama_batch_get_one stores the pointer and llama_decode
+    // only reads through it — the token buffer is never mutated.
     llama_batch batch = llama_batch_get_one(
         const_cast<llama_token*>(reinterpret_cast<const llama_token*>(prompt_tokens.data())),
         static_cast<int32_t>(prompt_tokens.size())
@@ -224,20 +242,13 @@ Expected<std::string> LlamaBackend::generate(
             break;
         }
 
-        // Check stop sequences
-        if (!stop_sequences.empty() && check_stop_sequence(generated_text, stop_sequences)) {
-            // Trim the stop sequence from the end
-            for (const auto& stop_seq : stop_sequences) {
-                if (!stop_seq.empty() && generated_text.size() >= stop_seq.size()) {
-                    if (generated_text.compare(
-                            generated_text.size() - stop_seq.size(),
-                            stop_seq.size(), stop_seq) == 0) {
-                        generated_text.resize(generated_text.size() - stop_seq.size());
-                        break;
-                    }
-                }
+        // Check stop sequences and trim the match from the end
+        if (!stop_sequences.empty()) {
+            size_t match_len = find_stop_sequence(generated_text, stop_sequences);
+            if (match_len > 0) {
+                generated_text.resize(generated_text.size() - match_len);
+                break;
             }
-            break;
         }
 
         // Prepare the next batch
@@ -335,7 +346,7 @@ int LlamaBackend::get_vocab_size() const {
     return vocab_size_;
 }
 
-bool LlamaBackend::check_stop_sequence(
+size_t LlamaBackend::find_stop_sequence(
     const std::string& generated_text,
     const std::vector<std::string>& stop_sequences
 ) const {
@@ -347,11 +358,11 @@ bool LlamaBackend::check_stop_sequence(
             if (generated_text.compare(
                     generated_text.size() - stop_seq.size(),
                     stop_seq.size(), stop_seq) == 0) {
-                return true;
+                return stop_seq.size();
             }
         }
     }
-    return false;
+    return 0;
 }
 
 llama_sampler* LlamaBackend::create_sampler_chain(const Config& config) {
