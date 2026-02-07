@@ -430,3 +430,129 @@ TEST_F(ToolRegistryTest, ConcurrentReadsDuringWrite) {
     EXPECT_EQ(successes.load(), 200);
     EXPECT_GE(registry.size(), 1);
 }
+
+// ============================================================================
+// Edge case coverage
+// ============================================================================
+
+TEST_F(ToolRegistryTest, MixedParameterTypes) {
+    auto mixed_tool = [](int count, std::string name, double multiplier) -> std::string {
+        return name + ": " + std::to_string(static_cast<int>(count * multiplier));
+    };
+
+    registry.register_tool("mixed", "Tool with mixed types", {"count", "name", "multiplier"}, mixed_tool);
+
+    auto schema = registry.get_tool_schema("mixed");
+    auto props = schema["function"]["parameters"]["properties"];
+    EXPECT_EQ(props["count"]["type"], "integer");
+    EXPECT_EQ(props["name"]["type"], "string");
+    EXPECT_EQ(props["multiplier"]["type"], "number");
+
+    auto result = registry.invoke("mixed", {{"count", 5}, {"name", "test"}, {"multiplier", 2.5}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], "test: 12");
+}
+
+TEST_F(ToolRegistryTest, EmptyStringArgument) {
+    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+
+    auto result = registry.invoke("greet", {{"name", ""}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], "Hello, !");
+}
+
+TEST_F(ToolRegistryTest, UnicodeInArguments) {
+    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+
+    auto result = registry.invoke("greet", {{"name", "世界"}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], "Hello, 世界!");
+}
+
+TEST_F(ToolRegistryTest, VeryLongString) {
+    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+
+    std::string long_name(10000, 'x');
+    auto result = registry.invoke("greet", {{"name", long_name}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], "Hello, " + long_name + "!");
+}
+
+TEST_F(ToolRegistryTest, SpecialCharactersInString) {
+    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+
+    auto result = registry.invoke("greet", {{"name", "Alice \"Bob\" O'Connor"}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], "Hello, Alice \"Bob\" O'Connor!");
+}
+
+TEST_F(ToolRegistryTest, NegativeNumbers) {
+    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+
+    auto result = registry.invoke("add", {{"a", -5}, {"b", -3}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], -8);
+}
+
+TEST_F(ToolRegistryTest, ZeroValues) {
+    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+
+    auto result = registry.invoke("add", {{"a", 0}, {"b", 0}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], 0);
+}
+
+TEST_F(ToolRegistryTest, VeryLargeNumbers) {
+    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+
+    auto result = registry.invoke("add", {{"a", 1000000000}, {"b", 2000000000}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE((*result).contains("result"));
+}
+
+TEST_F(ToolRegistryTest, FloatPrecision) {
+    registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply);
+
+    auto result = registry.invoke("multiply", {{"a", 0.1}, {"b", 0.2}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NEAR((*result)["result"].get<double>(), 0.02, 0.0001);
+}
+
+TEST_F(ToolRegistryTest, ExtraArgumentsIgnored) {
+    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+
+    auto result = registry.invoke("add", {{"a", 3}, {"b", 4}, {"c", 999}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], 7);
+}
+
+TEST_F(ToolRegistryTest, ZeroArgToolThrows) {
+    auto throwing_tool = []() -> int {
+        throw std::runtime_error("Intentional error");
+    };
+
+    registry.register_tool("thrower", "A tool that throws", {}, throwing_tool);
+
+    auto result = registry.invoke("thrower", nlohmann::json::object());
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ToolExecutionFailed);
+    EXPECT_NE(result.error().message.find("Tool execution failed"), std::string::npos);
+}
+
+TEST_F(ToolRegistryTest, VeryLongToolName) {
+    std::string long_name(1000, 'x');
+    registry.register_tool(long_name, "Tool with very long name", {"a", "b"}, add);
+
+    EXPECT_TRUE(registry.has_tool(long_name));
+    auto result = registry.invoke(long_name, {{"a", 1}, {"b", 2}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], 3);
+}
+
+TEST_F(ToolRegistryTest, VeryLongDescription) {
+    std::string long_desc(10000, 'y');
+    registry.register_tool("test", long_desc, {"a", "b"}, add);
+
+    auto schema = registry.get_tool_schema("test");
+    EXPECT_EQ(schema["function"]["description"], long_desc);
+}
