@@ -228,7 +228,10 @@ Expected<std::string> LlamaBackend::generate(
             });
         }
 
-        // Use string_view for callback to avoid per-token allocation
+        // Use string_view for callback to avoid per-token allocation.
+        // TODO(#6): Tokens are streamed before stop-sequence check, so stop-sequence
+        // tokens may be sent to the callback but trimmed from the final Response.text.
+        // Fix requires buffering partial matches before invoking the callback.
         std::string_view token_view(buff, static_cast<size_t>(n));
         if(on_token.has_value())
         {
