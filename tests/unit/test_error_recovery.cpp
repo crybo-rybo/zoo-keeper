@@ -355,3 +355,199 @@ TEST_F(ToolCallParserTest, JsonWithBracesInsideStringValues) {
     EXPECT_EQ(result.tool_call->name, "echo");
     EXPECT_EQ(result.tool_call->arguments["text"], "value with { braces }");
 }
+
+// ============================================================================
+// ToolCallParser edge cases
+// ============================================================================
+
+TEST_F(ToolCallParserTest, UnicodeInToolCall) {
+    std::string input = R"({"name": "greet", "arguments": {"name": "世界"}})";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "greet");
+    EXPECT_EQ(result.tool_call->arguments["name"], "世界");
+}
+
+TEST_F(ToolCallParserTest, NestedObjectInArguments) {
+    std::string input = R"({"name": "process", "arguments": {"config": {"host": "localhost", "port": 8080}}})";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_TRUE(result.tool_call->arguments["config"].is_object());
+    EXPECT_EQ(result.tool_call->arguments["config"]["host"], "localhost");
+    EXPECT_EQ(result.tool_call->arguments["config"]["port"], 8080);
+}
+
+TEST_F(ToolCallParserTest, ArrayInArguments) {
+    std::string input = R"({"name": "sum", "arguments": {"numbers": [1, 2, 3, 4, 5]}})";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_TRUE(result.tool_call->arguments["numbers"].is_array());
+    EXPECT_EQ(result.tool_call->arguments["numbers"].size(), 5);
+}
+
+TEST_F(ToolCallParserTest, VeryLargeJson) {
+    std::string large_string(10000, 'x');
+    std::string input = "{\"name\": \"process\", \"arguments\": {\"data\": \"" + large_string + "\"}}";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->arguments["data"], large_string);
+}
+
+TEST_F(ToolCallParserTest, SecondJsonObjectIsToolCall) {
+    std::string input = R"({"status": "ok"} {"name": "greet", "arguments": {"name": "Alice"}})";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "greet");
+}
+
+TEST_F(ToolCallParserTest, NewlinesInJson) {
+    std::string input = "{\n  \"name\": \"add\",\n  \"arguments\": {\n    \"a\": 5,\n    \"b\": 10\n  }\n}";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->arguments["a"], 5);
+    EXPECT_EQ(result.tool_call->arguments["b"], 10);
+}
+
+TEST_F(ToolCallParserTest, UnbalancedBracesNotParsed) {
+    std::string input = R"({"name": "add", "arguments": {"a": 1, "b": 2)";
+    auto result = ToolCallParser::parse(input);
+    EXPECT_FALSE(result.tool_call.has_value());
+}
+
+TEST_F(ToolCallParserTest, MissingNameField) {
+    auto result = ToolCallParser::parse(R"({"arguments": {"a": 1, "b": 2}})");
+    EXPECT_FALSE(result.tool_call.has_value());
+}
+
+TEST_F(ToolCallParserTest, MissingArgumentsField) {
+    auto result = ToolCallParser::parse(R"({"name": "add"})");
+    EXPECT_FALSE(result.tool_call.has_value());
+}
+
+TEST_F(ToolCallParserTest, EmptyName) {
+    auto result = ToolCallParser::parse(R"({"name": "", "arguments": {"a": 1}})");
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "");
+}
+
+TEST_F(ToolCallParserTest, EmptyArgumentsObject) {
+    auto result = ToolCallParser::parse(R"({"name": "get_time", "arguments": {}})");
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_TRUE(result.tool_call->arguments.empty());
+}
+
+TEST_F(ToolCallParserTest, NullValues) {
+    auto result = ToolCallParser::parse(R"({"name": "process", "arguments": {"value": null}})");
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_TRUE(result.tool_call->arguments["value"].is_null());
+}
+
+TEST_F(ToolCallParserTest, BooleanInArguments) {
+    auto result = ToolCallParser::parse(R"({"name": "toggle", "arguments": {"enabled": true}})");
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->arguments["enabled"], true);
+}
+
+TEST_F(ToolCallParserTest, NumberFormats) {
+    auto result = ToolCallParser::parse(R"({"name": "calc", "arguments": {"int": 42, "float": 3.14, "exp": 1.5e10}})");
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->arguments["int"], 42);
+    EXPECT_NEAR(result.tool_call->arguments["float"].get<double>(), 3.14, 0.001);
+    EXPECT_NEAR(result.tool_call->arguments["exp"].get<double>(), 1.5e10, 1e9);
+}
+
+TEST_F(ToolCallParserTest, WhitespaceBeforeJson) {
+    std::string input = "   \n\t  {\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}";
+    auto result = ToolCallParser::parse(input);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.text_before, "   \n\t  ");
+}
+
+TEST_F(ToolCallParserTest, BackslashEscapeSequences) {
+    auto result = ToolCallParser::parse(R"({"name": "path", "arguments": {"file": "C:\\Users\\test\\file.txt"}})");
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->arguments["file"], "C:\\Users\\test\\file.txt");
+}
+
+// ============================================================================
+// ErrorRecovery edge cases
+// ============================================================================
+
+TEST_F(ErrorRecoveryTest, NullArgumentValue) {
+    ToolCall tc;
+    tc.name = "add";
+    tc.arguments = {{"a", nullptr}, {"b", 4}};
+
+    auto error = recovery.validate_args(tc, registry);
+    EXPECT_FALSE(error.empty());
+}
+
+TEST_F(ErrorRecoveryTest, AllArgumentsMissing) {
+    ToolCall tc;
+    tc.name = "add";
+    tc.arguments = {};
+
+    auto error = recovery.validate_args(tc, registry);
+    EXPECT_FALSE(error.empty());
+    EXPECT_NE(error.find("Missing required argument"), std::string::npos);
+}
+
+TEST_F(ErrorRecoveryTest, FloatProvidedForIntParameter) {
+    ToolCall tc;
+    tc.name = "add";
+    tc.arguments = {{"a", 3.5}, {"b", 4}};
+
+    auto error = recovery.validate_args(tc, registry);
+    EXPECT_FALSE(error.empty());
+}
+
+TEST_F(ErrorRecoveryTest, ArrayProvidedForScalar) {
+    ToolCall tc;
+    tc.name = "add";
+    tc.arguments = {{"a", nlohmann::json::array({1, 2, 3})}, {"b", 4}};
+
+    auto error = recovery.validate_args(tc, registry);
+    EXPECT_FALSE(error.empty());
+}
+
+TEST_F(ErrorRecoveryTest, EmptyToolName) {
+    ToolCall tc;
+    tc.name = "";
+    tc.arguments = {};
+
+    auto error = recovery.validate_args(tc, registry);
+    EXPECT_FALSE(error.empty());
+    EXPECT_NE(error.find("not found"), std::string::npos);
+}
+
+TEST_F(ErrorRecoveryTest, MaxRetriesConfigurableLoop) {
+    ErrorRecovery custom_recovery(5);
+
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_TRUE(custom_recovery.can_retry("tool"));
+        custom_recovery.record_retry("tool");
+    }
+
+    EXPECT_FALSE(custom_recovery.can_retry("tool"));
+    EXPECT_EQ(custom_recovery.get_retry_count("tool"), 5);
+}
+
+TEST_F(ErrorRecoveryTest, ResetClearsAllTools) {
+    recovery.record_retry("tool1");
+    recovery.record_retry("tool2");
+    recovery.record_retry("tool3");
+
+    recovery.reset();
+
+    EXPECT_EQ(recovery.get_retry_count("tool1"), 0);
+    EXPECT_EQ(recovery.get_retry_count("tool2"), 0);
+    EXPECT_EQ(recovery.get_retry_count("tool3"), 0);
+    EXPECT_TRUE(recovery.can_retry("tool1"));
+}
