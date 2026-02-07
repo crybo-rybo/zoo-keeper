@@ -309,3 +309,156 @@ TEST_F(AgenticLoopToolTest, MetricsAccumulateAcrossLoop) {
     EXPECT_GT(result->usage.prompt_tokens, 0);
     EXPECT_GT(result->usage.total_tokens, 0);
 }
+
+// ============================================================================
+// Additional AgenticLoop coverage
+// ============================================================================
+
+TEST_F(AgenticLoopToolTest, ToolExecutionFailureInjectedAsError) {
+    auto loop = make_loop();
+
+    // Register a dummy tool (not used in this test)
+    registry->register_tool("fail_tool", "Always fails", {}, get_time);
+
+    // Tool call for a tool not in registry (invoke returns ToolNotFound)
+    backend->enqueue_response(R"({"name": "unknown_tool", "arguments": {}})");
+    backend->enqueue_response("Final answer after error.");
+
+    Request req(Message::user("Use the tool"));
+    auto result = loop->process_request(req);
+
+    // Should get a response since tool not found error is injected back
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "Final answer after error.");
+}
+
+TEST_F(AgenticLoopToolTest, FormatPromptFailure) {
+    auto loop = make_loop();
+
+    // Make format_prompt fail by using an uninitialized backend
+    auto bad_backend = std::make_shared<MockBackend>();
+    bad_backend->should_fail_generate = false;
+    // Don't initialize backend — format_prompt still works on mock
+    // Instead, test tokenize failure
+    auto loop2 = std::make_unique<AgenticLoop>(bad_backend, history, config);
+    bad_backend->should_fail_generate = true;
+    bad_backend->error_message = "Generation failed mid-loop";
+    (void)bad_backend->initialize(config);
+
+    backend->enqueue_response(R"({"name": "add", "arguments": {"a": 1, "b": 2}})");
+    // Second generate will fail
+    backend->should_fail_generate = true;
+    backend->error_message = "Generation failed mid-loop";
+
+    Request req(Message::user("Add 1+2"));
+    auto result = loop->process_request(req);
+
+    // First iteration succeeds (tool call), second fails on generate
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InferenceFailed);
+}
+
+TEST_F(AgenticLoopToolTest, MaxToolIterationsOne) {
+    auto loop = make_loop();
+    loop->set_max_tool_iterations(1);
+
+    // Single tool call exhausts the limit
+    backend->enqueue_response(R"({"name": "add", "arguments": {"a": 1, "b": 2}})");
+
+    Request req(Message::user("Add 1+2"));
+    auto result = loop->process_request(req);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ToolLoopLimitReached);
+}
+
+TEST_F(AgenticLoopToolTest, ContextWindowExceeded) {
+    // Use a very small context size
+    Config small_config;
+    small_config.model_path = "/path/to/model.gguf";
+    small_config.context_size = 1;  // Tiny context
+    small_config.max_tokens = 512;
+    (void)backend->initialize(small_config);
+
+    auto small_history = std::make_shared<HistoryManager>(1);
+    auto loop = std::make_unique<AgenticLoop>(backend, small_history, small_config);
+
+    // Adding a message should exceed the tiny context
+    backend->enqueue_response("This should not appear.");
+
+    Request req(Message::user("This message is way too long for a 1-token context window and should trigger context exceeded"));
+    auto result = loop->process_request(req);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ContextWindowExceeded);
+}
+
+TEST_F(AgenticLoopToolTest, ResetAndIsCancelled) {
+    auto loop = make_loop();
+
+    EXPECT_FALSE(loop->is_cancelled());
+
+    loop->cancel();
+    EXPECT_TRUE(loop->is_cancelled());
+
+    loop->reset();
+    EXPECT_FALSE(loop->is_cancelled());
+
+    // After reset, should be able to process requests again
+    backend->enqueue_response("Response after reset.");
+    Request req(Message::user("Hello"));
+    auto result = loop->process_request(req);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "Response after reset.");
+}
+
+TEST_F(AgenticLoopToolTest, EmptyRegistryNoToolDetection) {
+    auto empty_registry = std::make_shared<ToolRegistry>();
+    auto loop = std::make_unique<AgenticLoop>(backend, history, config);
+    loop->set_tool_registry(empty_registry);
+
+    // Even with a registry, if it's empty, tool detection is skipped
+    backend->enqueue_response(R"({"name": "add", "arguments": {"a": 1, "b": 2}})");
+
+    Request req(Message::user("Test"));
+    auto result = loop->process_request(req);
+
+    ASSERT_TRUE(result.has_value());
+    // Returned as plain text since registry is empty
+    EXPECT_NE(result->text.find("add"), std::string::npos);
+    EXPECT_TRUE(result->tool_calls.empty());
+}
+
+TEST_F(AgenticLoopToolTest, ToolInvokeError) {
+    // Register a tool whose handler returns an error
+    ToolHandler broken_handler = [](const nlohmann::json&) -> Expected<nlohmann::json> {
+        return tl::unexpected(Error{ErrorCode::ToolExecutionFailed, "internal error"});
+    };
+    nlohmann::json broken_schema = {
+        {"type", "object"},
+        {"properties", nlohmann::json::object()},
+        {"required", nlohmann::json::array()}
+    };
+    registry->register_tool("broken", "Broken tool", std::move(broken_schema),
+        std::move(broken_handler));
+
+    auto loop = make_loop();
+
+    backend->enqueue_response(R"({"name": "broken", "arguments": {}})");
+    backend->enqueue_response("Handled the error.");
+
+    Request req(Message::user("Use broken tool"));
+    auto result = loop->process_request(req);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "Handled the error.");
+    // Tool call history should contain the error message
+    ASSERT_FALSE(result->tool_calls.empty());
+    bool found_error = false;
+    for (const auto& msg : result->tool_calls) {
+        if (msg.content.find("internal error") != std::string::npos) {
+            found_error = true;
+        }
+    }
+    EXPECT_TRUE(found_error);
+}

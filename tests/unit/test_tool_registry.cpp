@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <thread>
+#include <atomic>
 #include "zoo/engine/tool_registry.hpp"
 #include "fixtures/tool_definitions.hpp"
 
@@ -320,4 +322,111 @@ TEST_F(ToolRegistryTest, RequiredFieldsInSchema) {
     bool has_b = std::find(required.begin(), required.end(), "b") != required.end();
     EXPECT_TRUE(has_a);
     EXPECT_TRUE(has_b);
+}
+
+// ============================================================================
+// Additional coverage tests
+// ============================================================================
+
+TEST_F(ToolRegistryTest, ArityMismatchThrows) {
+    EXPECT_THROW(
+        registry.register_tool("add", "Add", {"a"}, add),
+        std::invalid_argument
+    );
+    EXPECT_THROW(
+        registry.register_tool("add", "Add", {"a", "b", "c"}, add),
+        std::invalid_argument
+    );
+    EXPECT_EQ(registry.size(), 0);
+}
+
+TEST_F(ToolRegistryTest, FloatTypeSchema) {
+    auto float_func = [](float x) -> float { return x * 2.0f; };
+    registry.register_tool("double_it", "Double a float", {"x"}, float_func);
+
+    auto schema = registry.get_tool_schema("double_it");
+    EXPECT_EQ(schema["function"]["parameters"]["properties"]["x"]["type"], "number");
+}
+
+TEST_F(ToolRegistryTest, GetParametersSchemaReturnsPointer) {
+    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+
+    auto* params = registry.get_parameters_schema("add");
+    ASSERT_NE(params, nullptr);
+    EXPECT_EQ((*params)["type"], "object");
+    EXPECT_TRUE(params->contains("properties"));
+    EXPECT_TRUE(params->contains("required"));
+}
+
+TEST_F(ToolRegistryTest, GetParametersSchemaNullptrForMissing) {
+    EXPECT_EQ(registry.get_parameters_schema("nonexistent"), nullptr);
+}
+
+TEST_F(ToolRegistryTest, ConstLambdaWithCapture) {
+    int multiplier = 3;
+    auto const_lambda = [multiplier](int x) -> int {
+        return x * multiplier;
+    };
+    registry.register_tool("triple", "Triple a number", {"x"}, const_lambda);
+
+    auto result = registry.invoke("triple", {{"x", 5}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], 15);
+}
+
+TEST_F(ToolRegistryTest, StdFunctionRegistration) {
+    std::function<std::string(std::string)> func = [](std::string s) {
+        return "prefix_" + s;
+    };
+    registry.register_tool("prefix", "Add prefix", {"s"}, func);
+
+    EXPECT_TRUE(registry.has_tool("prefix"));
+    auto result = registry.invoke("prefix", {{"s", "test"}});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ((*result)["result"], "prefix_test");
+}
+
+TEST_F(ToolRegistryTest, HandlerThrowsStdException) {
+    auto throwing = [](int x) -> int {
+        if (x < 0) throw std::runtime_error("negative input");
+        return x;
+    };
+    registry.register_tool("check", "Check positive", {"x"}, throwing);
+
+    auto result = registry.invoke("check", {{"x", -1}});
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ToolExecutionFailed);
+    EXPECT_NE(result.error().message.find("negative input"), std::string::npos);
+}
+
+TEST_F(ToolRegistryTest, ConcurrentReadsDuringWrite) {
+    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+
+    std::atomic<bool> start{false};
+    std::atomic<int> successes{0};
+
+    auto reader = [&]() {
+        while (!start.load()) {}
+        for (int i = 0; i < 100; ++i) {
+            if (registry.has_tool("add")) successes++;
+            (void)registry.get_tool_names();
+            (void)registry.size();
+        }
+    };
+
+    auto writer = [&]() {
+        while (!start.load()) {}
+        for (int i = 0; i < 100; ++i) {
+            registry.register_tool("t_" + std::to_string(i), "Tool", {"a", "b"}, add);
+        }
+    };
+
+    std::thread t1(reader);
+    std::thread t2(reader);
+    std::thread t3(writer);
+    start.store(true);
+    t1.join(); t2.join(); t3.join();
+
+    EXPECT_EQ(successes.load(), 200);
+    EXPECT_GE(registry.size(), 1);
 }
