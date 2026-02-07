@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Zoo-Keeper is a header-only C++17 library built on top of llama.cpp that functions as a complete Agent Engine for local LLM inference. It abstracts agentic AI systems by providing automated conversation history management, type-safe tool registration, asynchronous inference with cancellation support, and intelligent context window management.
 
-**Status:** MVP Implementation Complete (Phase 1)
+**Status:** Phase 2 (Tool System) Complete
 
 ## Git Workflow
 
@@ -81,7 +81,7 @@ cmake -B build -DZOO_ENABLE_COVERAGE=ON && cmake --build build && ctest --test-d
 ### Three-Layer Design
 
 1. **Public API Layer** - Single entry point via `zoo::Agent` class
-2. **Engine Layer** - Core logic components (Request Queue, History Manager, Tool Registry, Agentic Loop, Error Recovery)
+2. **Engine Layer** - Core logic components (Request Queue, History Manager, Tool Registry, Tool Call Parser, Error Recovery, Agentic Loop)
 3. **Backend Layer** - Abstracted llama.cpp interface with production and mock implementations
 
 ### Threading Model
@@ -141,15 +141,33 @@ Uses GoogleTest/GoogleMock. Follow TDD: Red (failing test) → Green (minimal co
 - `zoo::Config` - Immutable configuration (model path, context size, sampling params, template)
 - `zoo::Message` - Value type with role (System/User/Assistant/Tool) and content
 - `zoo::Response` - Result containing text, tool history, token usage, latency metrics
+- `zoo::ToolCall` - Represents a parsed tool call with id, name, and arguments
+- `zoo::engine::ToolEntry` - Metadata and handler for a registered tool
+- `zoo::engine::ToolRegistry` - Thread-safe registry for tool definitions and invocation
+- `zoo::engine::ToolCallParser` - Detects and extracts tool calls from model output
+- `zoo::engine::ErrorRecovery` - Validates tool arguments and tracks retry attempts
 
 ## Tool Registration
 
 Template-based registration supporting `int`, `float`, `double`, `bool`, `std::string` parameters:
 ```cpp
-agent.register_tool<Func>("name", "description", func);
+// Function signature extraction example
+int add(int a, int b) { return a + b; }
+
+// Registration with parameter names
+agent.register_tool("add", "Adds two numbers", {"a", "b"}, add);
 ```
 
-Generates JSON schema automatically from function signature.
+Generates JSON schema automatically from function signature. The `param_names` vector must match the function's arity.
+
+## Error Codes (Phase 2 Additions)
+
+New error codes for the tool system:
+- `ErrorCode::ToolNotFound` (500) - Requested tool not found in registry
+- `ErrorCode::ToolExecutionFailed` (501) - Tool handler threw exception or returned error
+- `ErrorCode::InvalidToolSignature` (502) - Tool signature does not match supported types
+- `ErrorCode::ToolRetriesExhausted` (503) - Maximum retry attempts exceeded for tool
+- `ErrorCode::ToolLoopLimitReached` (504) - Maximum tool loop iterations exceeded
 
 ## Reference Documents
 

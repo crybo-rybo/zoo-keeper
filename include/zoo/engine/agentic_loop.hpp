@@ -285,6 +285,7 @@ public:
     }
 
 private:
+    /** @brief Acquire history lock if mutex is provided. */
     std::unique_lock<std::mutex> lock_history() {
         if (history_mutex_) {
             return std::unique_lock<std::mutex>(*history_mutex_);
@@ -292,11 +293,13 @@ private:
         return {};
     }
 
+    /** @brief Remove the last message from history (error recovery). */
     void rollback_last_message() {
         auto lock = lock_history();
         history_->remove_last_message();
     }
 
+    /** @brief Add assistant message to history and finalize backend state. */
     Expected<void> commit_assistant_response(const std::string& text) {
         auto lock = lock_history();
         auto add_result = history_->add_message(Message::assistant(text));
@@ -307,6 +310,7 @@ private:
         return {};
     }
 
+    /** @brief Create a streaming callback that tracks metrics and forwards to user callback. */
     std::optional<std::function<void(std::string_view)>> make_streaming_callback(
         const Request& request,
         std::chrono::steady_clock::time_point& first_token_time,

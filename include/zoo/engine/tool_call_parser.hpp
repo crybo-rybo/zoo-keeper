@@ -94,8 +94,14 @@ public:
 
 private:
     /**
-     * Find the end position of a balanced JSON object starting at start.
-     * Returns npos if braces are unbalanced.
+     * @brief Find the end position of a balanced JSON object starting at start.
+     *
+     * Handles string escaping and nested objects to correctly identify the
+     * closing brace that matches the opening brace at the start position.
+     *
+     * @param text The text to search within
+     * @param start Starting position (must point to an opening brace '{')
+     * @return Position of the matching closing brace, or std::string::npos if unbalanced
      */
     static size_t find_json_object_end(const std::string& text, size_t start) {
         if (start >= text.size() || text[start] != '{') return std::string::npos;
@@ -136,6 +142,14 @@ private:
         return std::string::npos;  // Unbalanced
     }
 
+    /**
+     * @brief Generate a unique tool call ID.
+     *
+     * Uses an atomic counter to ensure unique IDs across multiple tool calls.
+     * Format: "call_N" where N is a sequential counter.
+     *
+     * @return Unique tool call identifier
+     */
     static std::string generate_id() {
         static std::atomic<int> counter{0};
         return "call_" + std::to_string(counter.fetch_add(1, std::memory_order_relaxed) + 1);

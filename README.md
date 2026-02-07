@@ -1,15 +1,18 @@
 # Zoo-Keeper Agent Engine
 
-[![Tests](https://img.shields.io/badge/tests-115%2F115%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-152%2F152%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
-A modern C++17 header-only Agent Engine for local LLM inference, built on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper provides a complete agentic AI framework with automated conversation history management, type-safe error handling, and asynchronous inference with streaming support.
+A modern C++17 header-only Agent Engine for local LLM inference, built on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper provides a complete agentic AI framework with automated conversation history management, type-safe tool calling, error recovery, and asynchronous inference with streaming support.
 
-**Status:** MVP Implementation Complete (Phase 1)
+**Status:** Phase 2 (Tool System) Complete
 
 ## Features
 
 - **Asynchronous Inference**: Non-blocking chat API with `std::future` support
-- **Conversation Management**: Automatic history tracking with token estimation
+- **Tool Calling System**: Type-safe tool registration with automatic JSON schema generation
+- **Agentic Loop**: Automatic tool call detection, execution, and result injection
+- **Error Recovery**: Argument validation with configurable retry logic for failed tool calls
+- **Conversation Management**: Automatic history tracking with tool call history
 - **Multiple Prompt Templates**: Built-in support for Llama3, ChatML, and custom formats
 - **Streaming Support**: Token-by-token callbacks for real-time output
 - **Type-Safe Errors**: Modern `std::expected` error handling without exceptions
@@ -129,6 +132,33 @@ agent->chat(zoo::Message::user("My name is Alice")).get();
 agent->chat(zoo::Message::user("What's my name?")).get();  // Will remember "Alice"
 ```
 
+### Tool Registration and Calling
+
+```cpp
+// Define a tool function
+int add(int a, int b) {
+    return a + b;
+}
+
+// Register the tool with parameter names
+agent->register_tool("add", "Adds two numbers together", {"a", "b"}, add);
+
+// The model can now call this tool during inference
+auto response = agent->chat(zoo::Message::user("What is 42 + 58?")).get();
+
+if (response) {
+    std::cout << "Response: " << response->text << std::endl;
+
+    // Check if any tools were called during inference
+    if (!response->tool_calls.empty()) {
+        std::cout << "Tool calls made: " << response->tool_calls.size() << std::endl;
+        for (const auto& tool_msg : response->tool_calls) {
+            std::cout << "  " << tool_msg.content << std::endl;
+        }
+    }
+}
+```
+
 ### Error Handling
 
 ```cpp
@@ -186,7 +216,7 @@ if (agent_result) {
 Zoo-Keeper uses a three-layer architecture:
 
 1. **Public API Layer**: Simple entry point via `zoo::Agent` class
-2. **Engine Layer**: Core components (Request Queue, History Manager, Agentic Loop)
+2. **Engine Layer**: Core components (Request Queue, History Manager, Tool Registry, Tool Call Parser, Error Recovery, Agentic Loop)
 3. **Backend Layer**: Abstracted llama.cpp interface with mock support for testing
 
 ### Threading Model
@@ -205,7 +235,7 @@ Zoo-Keeper includes comprehensive unit tests using GoogleTest:
 cmake -B build -DZOO_BUILD_TESTS=ON
 cmake --build build
 
-# Run all tests (115 tests)
+# Run all tests (152 tests)
 ctest --test-dir build
 
 # Run specific test suite
@@ -219,6 +249,10 @@ Test coverage includes:
 - Core types and validation
 - Thread-safe request queue
 - Conversation history management
+- Tool registry and schema generation
+- Tool call parsing and validation
+- Error recovery with retry logic
+- Agentic loop with tool execution
 - Template rendering (Llama3, ChatML, Custom)
 - Mock backend integration
 - Full pipeline simulation
@@ -230,28 +264,40 @@ Test coverage includes:
 - **[Developer Guide](CLAUDE.md)**: Build commands, architecture details, and contribution guidelines
 - **API Documentation**: Generate with Doxygen (see `include/zoo/zoo.hpp` for mainpage)
 
-## MVP Limitations & Roadmap
+## Implementation Status & Roadmap
 
-The current MVP implementation (Phase 1) has intentional shortcuts documented in the plan:
+### Phase 1: MVP (Complete)
+- ✅ Asynchronous inference with `std::future`
+- ✅ Request queue with producer-consumer pattern
+- ✅ Conversation history management
+- ✅ Template support (Llama3, ChatML, Custom)
+- ✅ Streaming callbacks
+- ✅ Type-safe error handling with `std::expected`
+- ✅ Mock backend for testing
+- ✅ Comprehensive unit test suite (115 tests)
 
-### MVP Shortcuts
+### Phase 2: Tool System (Complete)
+- ✅ Type-safe tool registration with template-based schema generation
+- ✅ Tool call detection and parsing from model output
+- ✅ Automatic tool execution with JSON argument handling
+- ✅ Agentic loop with tool result injection
+- ✅ Argument validation against JSON schema
+- ✅ Error recovery with configurable retry logic
+- ✅ Tool call history tracking in Response
+- ✅ Comprehensive tool system tests (37 additional tests)
+
+### Current Limitations
 - **Token Counting**: Character-based estimation (4 chars ≈ 1 token)
-- **Context Pruning**: Not implemented (will overflow)
-- **KV Cache Reuse**: Cold start each turn
-- **Tool Support**: Not implemented (Phase 2)
-- **RAG Context**: Not implemented (Phase 2)
-
-### Phase 2 (Planned)
-- Actual backend tokenization with caching
-- Context pruning with FIFO strategy
-- KV cache optimization
-- Tool registration and execution
-- RAG context injection
+- **Context Pruning**: Not implemented (will overflow on very long conversations)
+- **KV Cache Reuse**: Cold start each turn (performance optimization pending)
+- **RAG Context**: Not implemented (Phase 3)
 
 ### Phase 3 (Planned)
-- Error recovery and self-correction
+- Actual backend tokenization with caching
+- Context pruning with FIFO strategy
+- KV cache optimization for multi-turn efficiency
+- RAG context injection for ephemeral knowledge
 - Advanced sampling strategies
-- Multi-model support
 - Performance optimizations
 
 ## License
