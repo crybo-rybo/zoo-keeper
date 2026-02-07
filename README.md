@@ -186,7 +186,7 @@ if (agent_result) {
 Zoo-Keeper uses a three-layer architecture:
 
 1. **Public API Layer**: Simple entry point via `zoo::Agent` class
-2. **Engine Layer**: Core components (Request Queue, History Manager, Template Engine, Agentic Loop)
+2. **Engine Layer**: Core components (Request Queue, History Manager, Agentic Loop)
 3. **Backend Layer**: Abstracted llama.cpp interface with mock support for testing
 
 ### Threading Model

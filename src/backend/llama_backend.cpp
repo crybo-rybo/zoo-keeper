@@ -1,7 +1,6 @@
 #include "zoo/backend/llama_backend.hpp"
 #include <llama.h>
 #include <algorithm>
-#include <cstring>
 
 namespace zoo {
 namespace backend {
@@ -104,7 +103,8 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
     }
 
     // Initialize prompt formatting state
-    formatted_.resize(context_size_);
+    // Use context_size * 4 since context_size is in tokens (~4 chars/token)
+    formatted_.resize(context_size_ * 4);
     prev_len_ = 0;
     kv_cache_token_count_ = 0;
     return {};
@@ -120,7 +120,7 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
 
     const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) == -1;
 
-    // calcaulate the number of tokens needed for the text
+    // Calculate the number of tokens needed for the text
     const int n_prompt_tokens = -llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, false);
     std::vector<llama_token> tokens(n_prompt_tokens);
     if(llama_tokenize(
@@ -271,6 +271,8 @@ Expected<std::string> LlamaBackend::format_prompt(const std::vector<Message>& me
         });
     }
 
+    // Get model's chat template (nullptr means model has no embedded template;
+    // llama_chat_apply_template will fall back to ChatML format)
     const char* tmpl = llama_model_chat_template(model_, nullptr);
 
     // Build llama_chat_message vector with safe string lifetimes
@@ -341,7 +343,9 @@ bool LlamaBackend::check_stop_sequence(
 
         // Check if generated text ends with this stop sequence
         if (generated_text.size() >= stop_seq.size()) {
-            if (generated_text.substr(generated_text.size() - stop_seq.size()) == stop_seq) {
+            if (generated_text.compare(
+                    generated_text.size() - stop_seq.size(),
+                    stop_seq.size(), stop_seq) == 0) {
                 return true;
             }
         }

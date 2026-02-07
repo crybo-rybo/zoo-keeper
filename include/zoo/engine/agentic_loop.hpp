@@ -101,6 +101,8 @@ public:
 
             // 2. Check context window (MVP: warning only, no pruning)
             if (history_->is_context_exceeded()) {
+                // Rollback user message before returning error
+                history_->remove_last_message();
                 return tl::unexpected(Error{
                     ErrorCode::ContextWindowExceeded,
                     "Context window exceeded",
@@ -112,6 +114,8 @@ public:
             // 3. Render conversation history
             auto prompt_result = backend_->format_prompt(history_->get_messages());
             if (!prompt_result) {
+                // Rollback user message before returning error
+                history_->remove_last_message();
                 return tl::unexpected(prompt_result.error());
             }
             prompt = *prompt_result;
@@ -121,6 +125,8 @@ public:
         // 4. Tokenize prompt
         auto tokens_result = backend_->tokenize(prompt);
         if (!tokens_result) {
+            // Rollback user message from history on failure
+            rollback_last_message();
             return tl::unexpected(tokens_result.error());
         }
         const auto& prompt_tokens = *tokens_result;
@@ -166,6 +172,8 @@ public:
         );
 
         if (!generate_result) {
+            // Rollback user message from history on failure
+            rollback_last_message();
             return tl::unexpected(generate_result.error());
         }
         const std::string& generated_text = *generate_result;
@@ -274,19 +282,23 @@ public:
         cancelled_.store(false, std::memory_order_release);
     }
 
+private:
     /**
-     * @brief Update the history mutex pointer
+     * @brief Rollback the last message from history
      *
-     * Used by Agent move operations to fix the mutex pointer after moving.
-     * Thread-safe: Can be called from any thread.
-     *
-     * @param mutex New mutex pointer
+     * Used for error recovery when tokenization or generation fails
+     * after a user message has been added to history. Prevents the
+     * history from being left in an inconsistent state (consecutive
+     * same-role messages).
      */
-    void set_history_mutex(std::mutex* mutex) {
-        history_mutex_ = mutex;
+    void rollback_last_message() {
+        std::unique_lock<std::mutex> lock;
+        if (history_mutex_) {
+            lock = std::unique_lock<std::mutex>(*history_mutex_);
+        }
+        history_->remove_last_message();
     }
 
-private:
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<HistoryManager> history_;
     Config config_;

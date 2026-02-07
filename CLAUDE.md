@@ -81,7 +81,7 @@ cmake -B build -DZOO_ENABLE_COVERAGE=ON && cmake --build build && ctest --test-d
 ### Three-Layer Design
 
 1. **Public API Layer** - Single entry point via `zoo::Agent` class
-2. **Engine Layer** - Core logic components (Request Queue, History Manager, Tool Registry, Agentic Loop, Template Engine, Error Recovery)
+2. **Engine Layer** - Core logic components (Request Queue, History Manager, Tool Registry, Agentic Loop, Error Recovery)
 3. **Backend Layer** - Abstracted llama.cpp interface with production and mock implementations
 
 ### Threading Model
@@ -107,7 +107,6 @@ tests/
 │   ├── test_history_manager.cpp
 │   ├── test_tool_registry.cpp
 │   ├── test_agentic_loop.cpp
-│   ├── test_template_engine.cpp
 │   ├── test_error_recovery.cpp
 │   └── test_agent.cpp
 ├── mocks/
