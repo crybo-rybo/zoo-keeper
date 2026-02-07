@@ -74,19 +74,6 @@ TEST_F(ErrorRecoveryTest, WrongArgType) {
 }
 
 // ============================================================================
-// ER-004: Validation failure -> error message injected as System message
-// ============================================================================
-
-TEST_F(ErrorRecoveryTest, ErrorMessageBuilt) {
-    auto msg = ErrorRecovery::build_error_message("add", "Missing required argument: b");
-
-    EXPECT_EQ(msg.role, Role::System);
-    EXPECT_NE(msg.content.find("add"), std::string::npos);
-    EXPECT_NE(msg.content.find("Missing required argument: b"), std::string::npos);
-    EXPECT_NE(msg.content.find("correct"), std::string::npos);
-}
-
-// ============================================================================
 // ER-005: Self-correction succeeds on retry
 // ============================================================================
 

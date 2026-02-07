@@ -346,7 +346,7 @@ struct Response {
     std::string text;                 ///< Generated response text
     TokenUsage usage;                 ///< Token consumption statistics
     Metrics metrics;                  ///< Performance timing data
-    std::vector<Message> tool_calls;  ///< Tool invocations (reserved for future use)
+    std::vector<Message> tool_calls;  ///< Tool call and result history from agentic loop
 
     bool operator==(const Response& other) const {
         return text == other.text &&

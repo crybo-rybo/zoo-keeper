@@ -30,7 +30,17 @@ public:
         }
 
         auto schema = registry.get_tool_schema(tool_call.name);
-        auto params = schema["function"]["parameters"];
+
+        // Safely navigate the schema JSON path: schema["function"]["parameters"]
+        // A malformed or manually-constructed schema may lack these keys.
+        if (!schema.contains("function") || !schema["function"].is_object()) {
+            return "Malformed tool schema: missing 'function' object";
+        }
+        const auto& func = schema["function"];
+        if (!func.contains("parameters") || !func["parameters"].is_object()) {
+            return "Malformed tool schema: missing 'function.parameters' object";
+        }
+        const auto& params = func["parameters"];
 
         // Check required fields
         if (params.contains("required")) {
@@ -46,6 +56,9 @@ public:
         if (params.contains("properties")) {
             for (auto& [key, prop] : params["properties"].items()) {
                 if (tool_call.arguments.contains(key)) {
+                    if (!prop.contains("type") || !prop["type"].is_string()) {
+                        continue;  // Skip type check if property schema lacks type info
+                    }
                     std::string expected_type = prop["type"].get<std::string>();
                     const auto& val = tool_call.arguments[key];
 
@@ -58,16 +71,6 @@ public:
         }
 
         return "";  // Valid
-    }
-
-    /**
-     * Build an error message to inject into conversation as a system message.
-     */
-    static Message build_error_message(const std::string& tool_name,
-                                       const std::string& error) {
-        std::string content = "Tool call error for '" + tool_name + "': " + error +
-                              "\nPlease correct the arguments and try again.";
-        return Message::system(std::move(content));
     }
 
     /**
