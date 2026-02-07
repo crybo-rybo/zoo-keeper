@@ -115,9 +115,17 @@ public:
             }
         }
 
-        // Simulate streaming if callback provided
+        // Check stop sequences and trim before streaming (simple substring check)
+        for (const auto& stop : stop_sequences) {
+            size_t pos = response.find(stop);
+            if (pos != std::string::npos) {
+                response = response.substr(0, pos);
+                break;
+            }
+        }
+
+        // Simulate streaming if callback provided — only stream the trimmed response
         if (on_token.has_value()) {
-            // Split response into "tokens" (words for simplicity)
             std::istringstream iss(response);
             std::string word;
             streamed_tokens.clear();
@@ -127,15 +135,6 @@ public:
                 streamed_tokens.push_back(word);
                 (*on_token)(word);
                 token_callback_count++;
-            }
-        }
-
-        // Check stop sequences (simple substring check)
-        for (const auto& stop : stop_sequences) {
-            size_t pos = response.find(stop);
-            if (pos != std::string::npos) {
-                response = response.substr(0, pos);
-                break;
             }
         }
 

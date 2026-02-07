@@ -228,20 +228,15 @@ Expected<std::string> LlamaBackend::generate(
             });
         }
 
-        // Use string_view for callback to avoid per-token allocation.
-        // TODO(#6): Tokens are streamed before stop-sequence check, so stop-sequence
-        // tokens may be sent to the callback but trimmed from the final Response.text.
-        // Fix requires buffering partial matches before invoking the callback.
-        std::string_view token_view(buff, static_cast<size_t>(n));
-        if(on_token.has_value())
-        {
-            (*on_token)(token_view);
-        }
         generated_text.append(buff, static_cast<size_t>(n));
         ++token_count;
 
         // Enforce max_tokens limit
         if (max_tokens > 0 && token_count >= max_tokens) {
+            // Fire callback for the final token before breaking
+            if (on_token.has_value()) {
+                (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
+            }
             break;
         }
 
@@ -250,8 +245,13 @@ Expected<std::string> LlamaBackend::generate(
             size_t match_len = find_stop_sequence(generated_text, stop_sequences);
             if (match_len > 0) {
                 generated_text.resize(generated_text.size() - match_len);
-                break;
+                break;  // Don't fire callback — this token was part of a stop sequence
             }
+        }
+
+        // Fire callback only after confirming this token is not part of a stop sequence
+        if (on_token.has_value()) {
+            (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
         }
 
         // Prepare the next batch
