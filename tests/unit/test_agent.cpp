@@ -173,6 +173,32 @@ TEST_F(AgentTest, MockBackendStopSequences) {
     EXPECT_EQ(*result, "Hello ");
 }
 
+TEST_F(AgentTest, MockBackendStopSequenceNotStreamed) {
+    MockBackend backend;
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    (void)backend.initialize(config);
+
+    backend.default_response = "Hello STOP world";
+
+    std::vector<std::string> streamed;
+    auto callback = [&streamed](std::string_view token) {
+        streamed.push_back(std::string(token));
+    };
+
+    auto tokens = backend.tokenize("Test");
+    ASSERT_TRUE(tokens.has_value());
+
+    auto result = backend.generate(*tokens, 512, {"STOP"}, callback);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "Hello ");
+
+    // Streamed text should match final text — no stop-sequence tokens
+    std::string streamed_text;
+    for (const auto& t : streamed) streamed_text += t;
+    EXPECT_EQ(streamed_text.find("STOP"), std::string::npos);
+}
+
 TEST_F(AgentTest, MockBackendReset) {
     MockBackend backend;
     Config config;
