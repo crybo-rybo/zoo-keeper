@@ -1,6 +1,5 @@
 #include "zoo/backend/llama_backend.hpp"
 #include <llama.h>
-#include <algorithm>
 
 namespace zoo {
 namespace backend {
@@ -144,8 +143,8 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
 
 Expected<std::string> LlamaBackend::generate(
     const std::vector<int>& prompt_tokens,
-    int max_tokens,
-    const std::vector<std::string>& stop_sequences,
+    int /*max_tokens*/,
+    const std::vector<std::string>& /*stop_sequences*/,
     const std::optional<std::function<void(std::string_view)>>& on_token
 ) {
     if (ctx_ == nullptr || model_ == nullptr || sampler_ == nullptr) {

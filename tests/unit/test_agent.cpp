@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include "mocks/mock_backend.hpp"
 #include "zoo/types.hpp"
-#include "zoo/engine/request_queue.hpp"
 #include "zoo/engine/history_manager.hpp"
 
 using namespace zoo;
@@ -36,7 +35,7 @@ TEST_F(AgentTest, MockBackendTokenization) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     auto tokens = backend.tokenize("Hello, world!");
     ASSERT_TRUE(tokens.has_value());
@@ -47,7 +46,7 @@ TEST_F(AgentTest, MockBackendGeneration) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.default_response = "Test response";
 
@@ -63,7 +62,7 @@ TEST_F(AgentTest, MockBackendStreamingCallback) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.default_response = "Hello world test";
     backend.mode = MockBackend::ResponseMode::TokenByToken;
@@ -101,7 +100,7 @@ TEST_F(AgentTest, MockBackendGenerateError) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.should_fail_generate = true;
     backend.error_message = "Simulated generation failure";
@@ -118,14 +117,14 @@ TEST_F(AgentTest, MockBackendKVCacheTracking) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     EXPECT_EQ(backend.get_kv_cache_token_count(), 0);
 
     auto prompt_tokens = backend.tokenize("Test prompt");
     ASSERT_TRUE(prompt_tokens.has_value());
 
-    backend.generate(*prompt_tokens, 512, {});
+    (void)backend.generate(*prompt_tokens, 512, {});
     EXPECT_GT(backend.get_kv_cache_token_count(), 0);
 
     backend.clear_kv_cache();
@@ -136,7 +135,7 @@ TEST_F(AgentTest, MockBackendResponseQueue) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.enqueue_response("First response");
     backend.enqueue_response("Second response");
@@ -162,7 +161,7 @@ TEST_F(AgentTest, MockBackendStopSequences) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.default_response = "Hello STOP world";
 
@@ -178,12 +177,12 @@ TEST_F(AgentTest, MockBackendReset) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.enqueue_response("Test");
     auto tokens = backend.tokenize("Test");
     ASSERT_TRUE(tokens.has_value());
-    backend.generate(*tokens, 512, {});
+    (void)backend.generate(*tokens, 512, {});
 
     EXPECT_TRUE(backend.initialized);
     EXPECT_GT(backend.kv_cache_tokens, 0);
@@ -205,10 +204,10 @@ TEST_F(AgentTest, HistoryManagerWithFormatPrompt) {
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     history.set_system_prompt("You are a helpful assistant.");
-    history.add_message(Message::user("Hello!"));
+    (void)history.add_message(Message::user("Hello!"));
 
     auto formatted = backend.format_prompt(history.get_messages());
     ASSERT_TRUE(formatted.has_value());
@@ -223,14 +222,14 @@ TEST_F(AgentTest, FullPipelineSimulation) {
 
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
     backend.default_response = "Hello! How can I assist you today?";
 
     // Setup
     history.set_system_prompt("You are a helpful AI assistant.");
 
     // User turn
-    history.add_message(Message::user("Hi there!"));
+    (void)history.add_message(Message::user("Hi there!"));
     auto formatted = backend.format_prompt(history.get_messages());
     ASSERT_TRUE(formatted.has_value());
 
@@ -242,7 +241,7 @@ TEST_F(AgentTest, FullPipelineSimulation) {
     EXPECT_EQ(*response, "Hello! How can I assist you today?");
 
     // Add assistant response and finalize
-    history.add_message(Message::assistant(*response));
+    (void)history.add_message(Message::assistant(*response));
     backend.finalize_response(history.get_messages());
 
     EXPECT_EQ(history.get_messages().size(), 3);  // System + User + Assistant
@@ -255,31 +254,31 @@ TEST_F(AgentTest, MultiTurnConversationSimulation) {
 
     Config config;
     config.model_path = "/path/to/model.gguf";
-    backend.initialize(config);
+    (void)backend.initialize(config);
 
     backend.enqueue_response("Paris is the capital of France.");
     backend.enqueue_response("Approximately 2.2 million people.");
 
     // Turn 1
-    history.add_message(Message::user("What is the capital of France?"));
+    (void)history.add_message(Message::user("What is the capital of France?"));
     auto formatted1 = backend.format_prompt(history.get_messages());
     ASSERT_TRUE(formatted1.has_value());
     auto tokens1 = backend.tokenize(*formatted1);
     ASSERT_TRUE(tokens1.has_value());
     auto response1 = backend.generate(*tokens1, 512, {});
     ASSERT_TRUE(response1.has_value());
-    history.add_message(Message::assistant(*response1));
+    (void)history.add_message(Message::assistant(*response1));
     backend.finalize_response(history.get_messages());
 
     // Turn 2
-    history.add_message(Message::user("What is its population?"));
+    (void)history.add_message(Message::user("What is its population?"));
     auto formatted2 = backend.format_prompt(history.get_messages());
     ASSERT_TRUE(formatted2.has_value());
     auto tokens2 = backend.tokenize(*formatted2);
     ASSERT_TRUE(tokens2.has_value());
     auto response2 = backend.generate(*tokens2, 512, {});
     ASSERT_TRUE(response2.has_value());
-    history.add_message(Message::assistant(*response2));
+    (void)history.add_message(Message::assistant(*response2));
     backend.finalize_response(history.get_messages());
 
     EXPECT_EQ(history.get_messages().size(), 4);

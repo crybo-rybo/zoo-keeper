@@ -49,8 +49,8 @@ TEST_F(HistoryManagerTest, AddMultipleMessages) {
 }
 
 TEST_F(HistoryManagerTest, Clear) {
-    manager.add_message(Message::user("Test 1"));
-    manager.add_message(Message::assistant("Test 2"));
+    (void)manager.add_message(Message::user("Test 1"));
+    (void)manager.add_message(Message::assistant("Test 2"));
 
     EXPECT_GT(manager.get_messages().size(), 0);
     EXPECT_GT(manager.get_estimated_tokens(), 0);
@@ -86,7 +86,7 @@ TEST_F(HistoryManagerTest, ReplaceSystemPrompt) {
 }
 
 TEST_F(HistoryManagerTest, SetSystemPromptAfterMessages) {
-    manager.add_message(Message::user("Hello"));
+    (void)manager.add_message(Message::user("Hello"));
 
     manager.set_system_prompt("System prompt added after user message.");
 
@@ -130,7 +130,7 @@ TEST_F(HistoryManagerTest, FirstMessageCanBeAssistant) {
 }
 
 TEST_F(HistoryManagerTest, SystemMessageOnlyAtStart) {
-    manager.add_message(Message::user("Hello"));
+    (void)manager.add_message(Message::user("Hello"));
 
     auto sys_msg = Message::system("Late system message");
     auto result = manager.add_message(sys_msg);
@@ -140,7 +140,7 @@ TEST_F(HistoryManagerTest, SystemMessageOnlyAtStart) {
 }
 
 TEST_F(HistoryManagerTest, NoConsecutiveSameRoles) {
-    manager.add_message(Message::user("First user message"));
+    (void)manager.add_message(Message::user("First user message"));
 
     auto result = manager.add_message(Message::user("Second user message"));
 
@@ -158,8 +158,8 @@ TEST_F(HistoryManagerTest, AlternatingRolesAllowed) {
 }
 
 TEST_F(HistoryManagerTest, ConsecutiveToolMessagesAllowed) {
-    manager.add_message(Message::user("User message"));
-    manager.add_message(Message::assistant("Calling tools..."));
+    (void)manager.add_message(Message::user("User message"));
+    (void)manager.add_message(Message::assistant("Calling tools..."));
 
     // Multiple tool responses are allowed
     EXPECT_TRUE(manager.add_message(Message::tool("Result 1", "call_1")).has_value());
@@ -175,7 +175,7 @@ TEST_F(HistoryManagerTest, ConsecutiveToolMessagesAllowed) {
 TEST_F(HistoryManagerTest, TokenEstimation) {
     // Rough heuristic: 4 chars ≈ 1 token
     auto msg = Message::user("1234");  // Should be ~1 token
-    manager.add_message(msg);
+    (void)manager.add_message(msg);
 
     // Actual estimation may vary slightly, but should be close
     EXPECT_GE(manager.get_estimated_tokens(), 1);
@@ -183,17 +183,17 @@ TEST_F(HistoryManagerTest, TokenEstimation) {
 }
 
 TEST_F(HistoryManagerTest, TokenEstimationAccumulates) {
-    manager.add_message(Message::user("1234"));  // ~1 token
+    (void)manager.add_message(Message::user("1234"));  // ~1 token
     int after_first = manager.get_estimated_tokens();
 
-    manager.add_message(Message::assistant("12345678"));  // ~2 tokens
+    (void)manager.add_message(Message::assistant("12345678"));  // ~2 tokens
     int after_second = manager.get_estimated_tokens();
 
     EXPECT_GT(after_second, after_first);
 }
 
 TEST_F(HistoryManagerTest, TokenEstimationAfterClear) {
-    manager.add_message(Message::user("Some message that takes tokens"));
+    (void)manager.add_message(Message::user("Some message that takes tokens"));
     EXPECT_GT(manager.get_estimated_tokens(), 0);
 
     manager.clear();
@@ -202,7 +202,7 @@ TEST_F(HistoryManagerTest, TokenEstimationAfterClear) {
 
 TEST_F(HistoryManagerTest, MinimumOneToken) {
     // Even a single character should count as at least 1 token
-    manager.add_message(Message::user("x"));
+    (void)manager.add_message(Message::user("x"));
     EXPECT_GE(manager.get_estimated_tokens(), 1);
 }
 
@@ -217,9 +217,9 @@ TEST_F(HistoryManagerTest, ContextNotExceededInitially) {
 TEST_F(HistoryManagerTest, ContextNotExceededSmallMessages) {
     for (int i = 0; i < 10; ++i) {
         if (i % 2 == 0) {
-            manager.add_message(Message::user("Short message"));
+            (void)manager.add_message(Message::user("Short message"));
         } else {
-            manager.add_message(Message::assistant("Short reply"));
+            (void)manager.add_message(Message::assistant("Short reply"));
         }
     }
 
@@ -231,7 +231,7 @@ TEST_F(HistoryManagerTest, ContextExceeded) {
 
     // Add a very long message
     std::string long_content(1000, 'x');  // 1000 chars ≈ 250 tokens
-    small_manager.add_message(Message::user(long_content));
+    (void)small_manager.add_message(Message::user(long_content));
 
     EXPECT_TRUE(small_manager.is_context_exceeded());
 }
@@ -241,9 +241,9 @@ TEST_F(HistoryManagerTest, ContextExceededMultipleMessages) {
 
     for (int i = 0; i < 20; ++i) {
         if (i % 2 == 0) {
-            small_manager.add_message(Message::user("Some longer message"));  // 19 chars = 4 tokens
+            (void)small_manager.add_message(Message::user("Some longer message"));  // 19 chars = 4 tokens
         } else {
-            small_manager.add_message(Message::assistant("Some reply"));  // 10 chars = 2 tokens
+            (void)small_manager.add_message(Message::assistant("Some reply"));  // 10 chars = 2 tokens
         }
     }
 
@@ -271,7 +271,7 @@ TEST_F(HistoryManagerTest, VeryLongMessage) {
 }
 
 TEST_F(HistoryManagerTest, GetMessagesReturnsConst) {
-    manager.add_message(Message::user("Test"));
+    (void)manager.add_message(Message::user("Test"));
 
     const auto& messages = manager.get_messages();
     EXPECT_EQ(messages.size(), 1);
@@ -299,23 +299,23 @@ TEST_F(HistoryManagerTest, TypicalConversation) {
 }
 
 TEST_F(HistoryManagerTest, ConversationWithToolCalls) {
-    manager.add_message(Message::user("What's the weather?"));
-    manager.add_message(Message::assistant("Let me check the weather API."));
-    manager.add_message(Message::tool("Temperature: 72F, Sunny", "weather_call_1"));
-    manager.add_message(Message::assistant("It's 72 degrees and sunny!"));
+    (void)manager.add_message(Message::user("What's the weather?"));
+    (void)manager.add_message(Message::assistant("Let me check the weather API."));
+    (void)manager.add_message(Message::tool("Temperature: 72F, Sunny", "weather_call_1"));
+    (void)manager.add_message(Message::assistant("It's 72 degrees and sunny!"));
 
     EXPECT_EQ(manager.get_messages().size(), 4);
 }
 
 TEST_F(HistoryManagerTest, MultipleToolCallsInSequence) {
-    manager.add_message(Message::user("Check weather and time"));
-    manager.add_message(Message::assistant("Checking both..."));
+    (void)manager.add_message(Message::user("Check weather and time"));
+    (void)manager.add_message(Message::assistant("Checking both..."));
 
     // Multiple tool responses
     EXPECT_TRUE(manager.add_message(Message::tool("72F, Sunny", "weather_call")).has_value());
     EXPECT_TRUE(manager.add_message(Message::tool("3:45 PM", "time_call")).has_value());
 
-    manager.add_message(Message::assistant("It's 72F and sunny, and the time is 3:45 PM."));
+    (void)manager.add_message(Message::assistant("It's 72F and sunny, and the time is 3:45 PM."));
 
     EXPECT_EQ(manager.get_messages().size(), 5);
 }
@@ -325,8 +325,8 @@ TEST_F(HistoryManagerTest, MultipleToolCallsInSequence) {
 // ============================================================================
 
 TEST_F(HistoryManagerTest, RemoveLastMessage) {
-    manager.add_message(Message::user("Hello"));
-    manager.add_message(Message::assistant("Hi there"));
+    (void)manager.add_message(Message::user("Hello"));
+    (void)manager.add_message(Message::assistant("Hi there"));
 
     EXPECT_EQ(manager.get_messages().size(), 2);
     EXPECT_TRUE(manager.remove_last_message());
@@ -335,10 +335,10 @@ TEST_F(HistoryManagerTest, RemoveLastMessage) {
 }
 
 TEST_F(HistoryManagerTest, RemoveLastMessageUpdatesTokenEstimate) {
-    manager.add_message(Message::user("Hello world test message"));
+    (void)manager.add_message(Message::user("Hello world test message"));
     int tokens_after_one = manager.get_estimated_tokens();
 
-    manager.add_message(Message::assistant("Response text here"));
+    (void)manager.add_message(Message::assistant("Response text here"));
     int tokens_after_two = manager.get_estimated_tokens();
     EXPECT_GT(tokens_after_two, tokens_after_one);
 
@@ -352,9 +352,9 @@ TEST_F(HistoryManagerTest, RemoveLastMessageFromEmptyHistory) {
 
 TEST_F(HistoryManagerTest, RemoveLastMessageAllowsRetry) {
     // Simulate: user message added, generation fails, rollback, retry
-    manager.add_message(Message::user("First question"));
-    manager.add_message(Message::assistant("Answer"));
-    manager.add_message(Message::user("Second question"));
+    (void)manager.add_message(Message::user("First question"));
+    (void)manager.add_message(Message::assistant("Answer"));
+    (void)manager.add_message(Message::user("Second question"));
 
     // Simulate generation failure - rollback user message
     manager.remove_last_message();
