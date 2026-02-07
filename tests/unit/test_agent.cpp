@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "mocks/mock_backend.hpp"
 #include "zoo/types.hpp"
+#include "zoo/agent.hpp"
 #include "zoo/engine/history_manager.hpp"
+#include "fixtures/tool_definitions.hpp"
 
 using namespace zoo;
 using namespace zoo::testing;
@@ -309,4 +311,100 @@ TEST_F(AgentTest, MultiTurnConversationSimulation) {
 
     EXPECT_EQ(history.get_messages().size(), 4);
     EXPECT_FALSE(history.is_context_exceeded());
+}
+
+// ============================================================================
+// Agent Tool Integration Tests
+// ============================================================================
+
+TEST_F(AgentTest, AgentRegisterTool) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Hello!";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    EXPECT_EQ(agent->tool_count(), 0);
+
+    agent->register_tool("add", "Add two numbers", {"a", "b"}, tools::add);
+    EXPECT_EQ(agent->tool_count(), 1);
+
+    agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
+    EXPECT_EQ(agent->tool_count(), 2);
+}
+
+TEST_F(AgentTest, AgentToolCallEndToEnd) {
+    auto backend = std::make_unique<MockBackend>();
+    // First response is a tool call, second is the final answer
+    backend->enqueue_response(R"({"name": "add", "arguments": {"a": 10, "b": 20}})");
+    backend->enqueue_response("The sum of 10 and 20 is 30.");
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    agent->register_tool("add", "Add two integers", {"a", "b"}, tools::add);
+
+    auto future = agent->chat(Message::user("What is 10 + 20?"));
+    auto response = future.get();
+
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ(response->text, "The sum of 10 and 20 is 30.");
+    EXPECT_FALSE(response->tool_calls.empty());
+}
+
+TEST_F(AgentTest, AgentNoToolsPlainResponse) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "The answer is 42.";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto future = agent->chat(Message::user("What is the meaning of life?"));
+    auto response = future.get();
+
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ(response->text, "The answer is 42.");
+    EXPECT_TRUE(response->tool_calls.empty());
+}
+
+TEST_F(AgentTest, AgentRegisterToolAfterChat) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->enqueue_response("Plain response.");
+    backend->enqueue_response(R"({"name": "greet", "arguments": {"name": "World"}})");
+    backend->enqueue_response("I greeted World for you.");
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // First chat without tools
+    auto future1 = agent->chat(Message::user("Hello"));
+    auto response1 = future1.get();
+    ASSERT_TRUE(response1.has_value());
+    EXPECT_EQ(response1->text, "Plain response.");
+
+    // Register tool after first chat
+    agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
+
+    // Second chat with tool
+    auto future2 = agent->chat(Message::user("Greet World"));
+    auto response2 = future2.get();
+    ASSERT_TRUE(response2.has_value());
+    EXPECT_EQ(response2->text, "I greeted World for you.");
+    EXPECT_FALSE(response2->tool_calls.empty());
 }

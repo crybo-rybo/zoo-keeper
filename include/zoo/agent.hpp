@@ -4,6 +4,7 @@
 #include "backend/IBackend.hpp"
 #include "engine/history_manager.hpp"
 #include "engine/request_queue.hpp"
+#include "engine/tool_registry.hpp"
 #include "engine/agentic_loop.hpp"
 #include <thread>
 #include <future>
@@ -246,6 +247,33 @@ public:
         history_->clear();
     }
 
+    /**
+     * @brief Register a tool with automatic schema generation
+     *
+     * Registers a callable as a tool that the model can invoke during inference.
+     * Parameter types are extracted from the function signature and used to
+     * generate a JSON schema.
+     *
+     * Supported parameter types: int, float, double, bool, std::string
+     *
+     * @param name Tool name (used by model to invoke)
+     * @param description Human-readable description of what the tool does
+     * @param param_names Names for each parameter (must match function arity)
+     * @param func Callable to invoke when tool is called
+     */
+    template<typename Func>
+    void register_tool(const std::string& name, const std::string& description,
+                       const std::vector<std::string>& param_names, Func func) {
+        tool_registry_->register_tool(name, description, param_names, std::move(func));
+    }
+
+    /**
+     * @brief Get the number of registered tools
+     */
+    size_t tool_count() const {
+        return tool_registry_->size();
+    }
+
 private:
     /**
      * @brief Private constructor - use create() factory method
@@ -258,6 +286,7 @@ private:
         , backend_(std::shared_ptr<backend::IBackend>(std::move(backend)))
         , history_(std::make_shared<engine::HistoryManager>(config.context_size))
         , request_queue_(std::make_shared<engine::RequestQueue>())
+        , tool_registry_(std::make_shared<engine::ToolRegistry>())
         , agentic_loop_(std::make_shared<engine::AgenticLoop>(
             backend_,
             history_,
@@ -266,6 +295,9 @@ private:
         ))
         , running_(true)
     {
+        // Wire tool registry to agentic loop
+        agentic_loop_->set_tool_registry(tool_registry_);
+
         // Set initial system prompt if provided
         if (config.system_prompt) {
             history_->set_system_prompt(*config.system_prompt);
@@ -330,6 +362,7 @@ private:
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<engine::HistoryManager> history_;
     std::shared_ptr<engine::RequestQueue> request_queue_;
+    std::shared_ptr<engine::ToolRegistry> tool_registry_;
     std::shared_ptr<engine::AgenticLoop> agentic_loop_;
 
     // Threading

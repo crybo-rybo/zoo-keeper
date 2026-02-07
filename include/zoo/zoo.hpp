@@ -71,6 +71,9 @@
 // Engine components (optional, for advanced usage)
 #include "engine/history_manager.hpp"
 #include "engine/request_queue.hpp"
+#include "engine/tool_registry.hpp"
+#include "engine/tool_call_parser.hpp"
+#include "engine/error_recovery.hpp"
 #include "engine/agentic_loop.hpp"
 
 /**

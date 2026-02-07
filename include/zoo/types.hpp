@@ -118,10 +118,12 @@ enum class ErrorCode {
     RequestTimeout = 402,
     QueueFull = 403,
 
-    // Tool errors (500-599) - for future use
+    // Tool errors (500-599)
     ToolNotFound = 500,
     ToolExecutionFailed = 501,
     InvalidToolSignature = 502,
+    ToolRetriesExhausted = 503,
+    ToolLoopLimitReached = 504,
 
     // Unknown
     Unknown = 999

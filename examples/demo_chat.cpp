@@ -26,9 +26,25 @@
 #include <chrono>
 #include <iomanip>
 #include <future>
+#include <ctime>
 
 // Global flag for Ctrl+C handling
 std::atomic<bool> g_interrupted{false};
+
+// ============================================================================
+// Example Tools
+// ============================================================================
+
+int calculate_add(int a, int b) { return a + b; }
+int calculate_subtract(int a, int b) { return a - b; }
+double calculate_multiply(double a, double b) { return a * b; }
+
+std::string get_current_time() {
+    auto now = std::time(nullptr);
+    char buf[64];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+    return std::string(buf);
+}
 
 void signal_handler(int signal) {
     if (signal == SIGINT) {
@@ -193,6 +209,13 @@ int main(int argc, char** argv) {
         return 1;
     }
     auto agent = std::move(*agent_result);  // Now a std::unique_ptr<Agent>
+
+    // Register example tools
+    agent->register_tool("add", "Add two integers", {"a", "b"}, calculate_add);
+    agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
+    agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
+    agent->register_tool("get_current_time", "Get the current date and time", {}, get_current_time);
+    std::cout << "Registered " << agent->tool_count() << " tools.\n";
 
     // Print welcome
     print_welcome(config, !args.no_stream);
