@@ -53,13 +53,13 @@ public:
 
 private:
     /**
-     * @brief Check if a stop sequence has been reached
+     * @brief Find a stop sequence at the end of generated text
      * @param generated_text The currently generated text
      * @param stop_sequences List of stop sequences to check
-     * @return true if any stop sequence is found at the end of generated_text
+     * @return Length of the matching stop sequence, or 0 if none found
      */
-    bool check_stop_sequence(const std::string& generated_text,
-                            const std::vector<std::string>& stop_sequences) const;
+    size_t find_stop_sequence(const std::string& generated_text,
+                              const std::vector<std::string>& stop_sequences) const;
 
     /**
      * @brief Create and configure the sampler chain from config
@@ -71,17 +71,14 @@ private:
     /**
      * @brief Build llama_chat_message vector from zoo::Message list
      *
-     * Handles safe string lifetime management to avoid dangling pointers.
+     * Points directly at source data — role_to_string() returns static const char*
+     * and messages are passed by const& outliving the returned vector at every call site.
      *
-     * @param messages Source messages
-     * @param roles Output vector for role strings (must outlive returned vector)
-     * @param contents Output vector for content strings (must outlive returned vector)
+     * @param messages Source messages (must outlive returned vector)
      * @return std::vector<llama_chat_message> Vector of llama chat messages
      */
     std::vector<llama_chat_message> build_llama_messages(
-        const std::vector<Message>& messages,
-        std::vector<std::string>& roles,
-        std::vector<std::string>& contents) const;
+        const std::vector<Message>& messages) const;
 
     // llama.cpp state (owned)
     llama_model* model_ = nullptr;
@@ -93,6 +90,11 @@ private:
     int context_size_ = 0;
     int vocab_size_ = 0;
     int kv_cache_token_count_ = 0;  // Track current KV cache usage
+
+    // Cached chat template pointer (model-lifetime: valid as long as model_ is alive).
+    // May be nullptr if model has no embedded template, in which case
+    // llama_chat_apply_template falls back to ChatML format.
+    const char* tmpl_ = nullptr;
 
     // Prompt formatting state (mirrors simple-chat.cpp pattern)
     int prev_len_ = 0;                   // Length of previously formatted text

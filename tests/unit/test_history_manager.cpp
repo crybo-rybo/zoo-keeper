@@ -350,6 +350,30 @@ TEST_F(HistoryManagerTest, RemoveLastMessageFromEmptyHistory) {
     EXPECT_FALSE(manager.remove_last_message());
 }
 
+TEST_F(HistoryManagerTest, AddMessageMoveOverload) {
+    auto msg = Message::user("Hello, world!");
+    std::string content_copy = msg.content;
+
+    auto result = manager.add_message(std::move(msg));
+
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(manager.get_messages().size(), 1);
+    EXPECT_EQ(manager.get_messages()[0].content, content_copy);
+    EXPECT_GT(manager.get_estimated_tokens(), 0);
+    // After move, original msg.content may be empty (moved-from state)
+}
+
+TEST_F(HistoryManagerTest, AddMessageMoveValidation) {
+    // Move overload should still validate role sequences
+    (void)manager.add_message(Message::user("Hello"));
+
+    auto msg = Message::user("Another user message");
+    auto result = manager.add_message(std::move(msg));
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidMessageSequence);
+}
+
 TEST_F(HistoryManagerTest, RemoveLastMessageAllowsRetry) {
     // Simulate: user message added, generation fails, rollback, retry
     (void)manager.add_message(Message::user("First question"));

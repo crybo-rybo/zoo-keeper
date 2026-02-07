@@ -25,7 +25,7 @@ enum class Role {
     Tool        ///< Result from tool execution
 };
 
-inline std::string role_to_string(Role role) {
+[[nodiscard]] inline const char* role_to_string(Role role) {
     switch (role) {
         case Role::System: return "system";
         case Role::User: return "user";

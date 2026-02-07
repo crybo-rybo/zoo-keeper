@@ -87,12 +87,7 @@ public:
         // Prepare prompt with history locked to prevent races with user thread
         std::string prompt;
         {
-            // Lock history for the duration of message addition and rendering
-            // This prevents races with set_system_prompt, get_history, clear_history
-            std::unique_lock<std::mutex> lock;
-            if (history_mutex_) {
-                lock = std::unique_lock<std::mutex>(*history_mutex_);
-            }
+            auto lock = lock_history();
 
             // 1. Add user message to history
             if (auto result = history_->add_message(request.message); !result) {
@@ -182,13 +177,10 @@ public:
 
         // 6. Add assistant response to history (with mutex protection)
         {
-            std::unique_lock<std::mutex> lock;
-            if (history_mutex_) {
-                lock = std::unique_lock<std::mutex>(*history_mutex_);
-            }
+            auto lock = lock_history();
 
             Message assistant_msg = Message::assistant(generated_text);
-            if (auto result = history_->add_message(assistant_msg); !result) {
+            if (auto result = history_->add_message(std::move(assistant_msg)); !result) {
                 return tl::unexpected(result.error());
             }
 
@@ -284,6 +276,20 @@ public:
 
 private:
     /**
+     * @brief Acquire the history mutex if one was provided
+     *
+     * Returns a locked unique_lock when history_mutex_ is set, or a
+     * default-constructed (no-op) unique_lock when null. A default-constructed
+     * unique_lock owns no mutex and its destructor is a no-op.
+     */
+    std::unique_lock<std::mutex> lock_history() {
+        if (history_mutex_) {
+            return std::unique_lock<std::mutex>(*history_mutex_);
+        }
+        return {};
+    }
+
+    /**
      * @brief Rollback the last message from history
      *
      * Used for error recovery when tokenization or generation fails
@@ -292,10 +298,7 @@ private:
      * same-role messages).
      */
     void rollback_last_message() {
-        std::unique_lock<std::mutex> lock;
-        if (history_mutex_) {
-            lock = std::unique_lock<std::mutex>(*history_mutex_);
-        }
+        auto lock = lock_history();
         history_->remove_last_message();
     }
 

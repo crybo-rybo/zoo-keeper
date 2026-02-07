@@ -1,5 +1,5 @@
 {
-  "tests": 114,
+  "tests": 91,
   "name": "AllTests",
   "testsuites": [
     {
@@ -285,7 +285,7 @@
     },
     {
       "name": "HistoryManagerTest",
-      "tests": 29,
+      "tests": 35,
       "testsuite": [
         {
           "name": "InitialState",
@@ -431,228 +431,107 @@
           "name": "MultipleToolCallsInSequence",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
           "line": 310
-        }
-      ]
-    },
-    {
-      "name": "TemplateEngineTest",
-      "tests": 28,
-      "testsuite": [
-        {
-          "name": "Llama3SimpleConversation",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 30
         },
         {
-          "name": "Llama3MinimalConversation",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 41
+          "name": "RemoveLastMessage",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 327
         },
         {
-          "name": "Llama3IncludesBOT",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 52
+          "name": "RemoveLastMessageUpdatesTokenEstimate",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 337
         },
         {
-          "name": "Llama3HeaderFormat",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 63
+          "name": "RemoveLastMessageFromEmptyHistory",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 349
         },
         {
-          "name": "Llama3EndsWithAssistantHeader",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 75
+          "name": "AddMessageMoveOverload",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 353
         },
         {
-          "name": "Llama3MultipleRoles",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 93
+          "name": "AddMessageMoveValidation",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 366
         },
         {
-          "name": "ChatMLSimpleConversation",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 117
-        },
-        {
-          "name": "ChatMLMinimalConversation",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 128
-        },
-        {
-          "name": "ChatMLFormat",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 139
-        },
-        {
-          "name": "ChatMLEndsWithAssistantStart",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 151
-        },
-        {
-          "name": "ChatMLMultipleMessages",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 162
-        },
-        {
-          "name": "CustomTemplateSimple",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 191
-        },
-        {
-          "name": "CustomTemplateMultiplePlaceholders",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 206
-        },
-        {
-          "name": "CustomTemplateNoPlaceholders",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 218
-        },
-        {
-          "name": "CustomTemplateNotProvided",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 233
-        },
-        {
-          "name": "EmptyMessageList",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 247
-        },
-        {
-          "name": "ChatMLEmptyMessageList",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 256
-        },
-        {
-          "name": "CustomEmptyMessageList",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 265
-        },
-        {
-          "name": "EmptyMessageContent",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 278
-        },
-        {
-          "name": "VeryLongMessage",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 287
-        },
-        {
-          "name": "SpecialCharactersInContent",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 297
-        },
-        {
-          "name": "ToolMessages",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 309
-        },
-        {
-          "name": "GetTemplate",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 325
-        },
-        {
-          "name": "Llama3PreservesMessageContent",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 340
-        },
-        {
-          "name": "ChatMLPreservesMessageContent",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 356
-        },
-        {
-          "name": "CustomPreservesMessageContent",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 370
-        },
-        {
-          "name": "Llama3LastMessageAssistant",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 387
-        },
-        {
-          "name": "ChatMLLastMessageAssistant",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_template_engine.cpp",
-          "line": 408
+          "name": "RemoveLastMessageAllowsRetry",
+          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_history_manager.cpp",
+          "line": 377
         }
       ]
     },
     {
       "name": "AgentTest",
-      "tests": 14,
+      "tests": 13,
       "testsuite": [
         {
           "name": "MockBackendInitialization",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 30
+          "line": 24
         },
         {
           "name": "MockBackendTokenization",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 41
+          "line": 34
         },
         {
           "name": "MockBackendGeneration",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 52
+          "line": 45
         },
         {
           "name": "MockBackendStreamingCallback",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 68
+          "line": 61
         },
         {
           "name": "MockBackendErrorInjection",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 92
+          "line": 85
         },
         {
           "name": "MockBackendGenerateError",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 106
+          "line": 99
         },
         {
           "name": "MockBackendKVCacheTracking",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 123
+          "line": 116
         },
         {
           "name": "MockBackendResponseQueue",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 141
+          "line": 134
         },
         {
           "name": "MockBackendStopSequences",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 167
+          "line": 160
         },
         {
           "name": "MockBackendReset",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 183
+          "line": 176
         },
         {
-          "name": "HistoryManagerWithTemplateEngine",
+          "name": "HistoryManagerWithFormatPrompt",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 208
-        },
-        {
-          "name": "TemplateEngineWithMockBackend",
-          "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 224
+          "line": 201
         },
         {
           "name": "FullPipelineSimulation",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 242
+          "line": 218
         },
         {
           "name": "MultiTurnConversationSimulation",
           "file": "\/Users\/conorrybacki\/Programs\/zoo-keeper\/tests\/unit\/test_agent.cpp",
-          "line": 282
+          "line": 250
         }
       ]
     }
