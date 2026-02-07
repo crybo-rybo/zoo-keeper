@@ -1,9 +1,8 @@
 #pragma once
 
 #include "types.hpp"
-#include "backend/interface.hpp"
+#include "backend/IBackend.hpp"
 #include "engine/history_manager.hpp"
-#include "engine/template_engine.hpp"
 #include "engine/request_queue.hpp"
 #include "engine/agentic_loop.hpp"
 #include <thread>
@@ -258,15 +257,10 @@ private:
         : config_(config)
         , backend_(std::shared_ptr<backend::IBackend>(std::move(backend)))
         , history_(std::make_shared<engine::HistoryManager>(config.context_size))
-        , template_engine_(std::make_shared<engine::TemplateEngine>(
-            config.prompt_template,
-            config.custom_template
-        ))
         , request_queue_(std::make_shared<engine::RequestQueue>())
         , agentic_loop_(std::make_shared<engine::AgenticLoop>(
             backend_,
             history_,
-            template_engine_,
             config,
             &history_mutex_
         ))
@@ -335,7 +329,6 @@ private:
     // Components (shared ownership for thread safety)
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<engine::HistoryManager> history_;
-    std::shared_ptr<engine::TemplateEngine> template_engine_;
     std::shared_ptr<engine::RequestQueue> request_queue_;
     std::shared_ptr<engine::AgenticLoop> agentic_loop_;
 

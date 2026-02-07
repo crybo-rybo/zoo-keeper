@@ -8,7 +8,6 @@ add_executable(zoo_tests
     unit/test_types.cpp
     unit/test_request_queue.cpp
     unit/test_history_manager.cpp
-    unit/test_template_engine.cpp
     unit/test_agent.cpp
     mocks/mock_backend.cpp
 )
