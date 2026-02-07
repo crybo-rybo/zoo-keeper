@@ -1,8 +1,7 @@
 #pragma once
 
-#include "interface.hpp"
+#include "IBackend.hpp"
 #include "../types.hpp"
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,6 +10,7 @@ struct llama_model;
 struct llama_context;
 struct llama_sampler;
 struct llama_vocab;
+struct llama_chat_message;
 
 namespace zoo {
 namespace backend {
@@ -37,8 +37,7 @@ public:
 
     // IBackend interface implementation
     Expected<void> initialize(const Config& config) override;
-    Expected<std::vector<int>> tokenize(const std::string& text, bool add_bos = false) override;
-    Expected<std::string> detokenize(const std::vector<int>& tokens) override;
+    Expected<std::vector<int>> tokenize(const std::string& text) override;
     Expected<std::string> generate(
         const std::vector<int>& prompt_tokens,
         int max_tokens,
@@ -47,7 +46,8 @@ public:
     ) override;
     int get_kv_cache_token_count() const override;
     void clear_kv_cache() override;
-    bool supports_template(PromptTemplate tmpl) const override;
+    Expected<std::string> format_prompt(const std::vector<Message>& messages) override;
+    void finalize_response(const std::vector<Message>& messages) override;
     int get_context_size() const override;
     int get_vocab_size() const override;
 
@@ -68,6 +68,21 @@ private:
      */
     llama_sampler* create_sampler_chain(const Config& config);
 
+    /**
+     * @brief Build llama_chat_message vector from zoo::Message list
+     *
+     * Handles safe string lifetime management to avoid dangling pointers.
+     *
+     * @param messages Source messages
+     * @param roles Output vector for role strings (must outlive returned vector)
+     * @param contents Output vector for content strings (must outlive returned vector)
+     * @return std::vector<llama_chat_message> Vector of llama chat messages
+     */
+    std::vector<llama_chat_message> build_llama_messages(
+        const std::vector<Message>& messages,
+        std::vector<std::string>& roles,
+        std::vector<std::string>& contents) const;
+
     // llama.cpp state (owned)
     llama_model* model_ = nullptr;
     llama_context* ctx_ = nullptr;
@@ -78,6 +93,10 @@ private:
     int context_size_ = 0;
     int vocab_size_ = 0;
     int kv_cache_token_count_ = 0;  // Track current KV cache usage
+
+    // Prompt formatting state (mirrors simple-chat.cpp pattern)
+    int prev_len_ = 0;                   // Length of previously formatted text
+    std::vector<char> formatted_;         // Reusable formatted prompt buffer
 };
 
 } // namespace backend

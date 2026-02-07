@@ -433,7 +433,6 @@ The Mock Backend must support:
 | | `test_history_manager.cpp` | History Manager unit tests |
 | | `test_tool_registry.cpp` | Tool Registry unit tests |
 | | `test_agentic_loop.cpp` | Agentic Loop unit tests |
-| | `test_template_engine.cpp` | Template Engine unit tests |
 | | `test_error_recovery.cpp` | Error Recovery unit tests |
 | | `test_agent.cpp` | Agent integration tests (with mock backend) |
 | `tests/mocks/` | `mock_backend.hpp` | Mock Backend interface declaration |

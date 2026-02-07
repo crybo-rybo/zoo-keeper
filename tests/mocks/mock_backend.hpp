@@ -1,6 +1,6 @@
 #pragma once
 
-#include "zoo/backend/interface.hpp"
+#include "zoo/backend/IBackend.hpp"
 #include <map>
 #include <queue>
 #include <sstream>
@@ -60,14 +60,10 @@ public:
         return {};
     }
 
-    Expected<std::vector<int>> tokenize(const std::string& text, bool add_bos = false) override {
+    Expected<std::vector<int>> tokenize(const std::string& text) override {
         // Simple estimation: ~4 chars per token
         std::vector<int> tokens;
         int num_tokens = std::max(1, static_cast<int>(text.length() / 4));
-
-        if (add_bos) {
-            tokens.push_back(1);  // BOS token
-        }
 
         // Generate dummy token IDs
         for (int i = 0; i < num_tokens; ++i) {
@@ -75,11 +71,6 @@ public:
         }
 
         return tokens;
-    }
-
-    Expected<std::string> detokenize(const std::vector<int>& tokens) override {
-        // Simple mock: convert token count to text
-        return "detokenized_" + std::to_string(tokens.size()) + "_tokens";
     }
 
     Expected<std::string> generate(
@@ -160,6 +151,19 @@ public:
 
     void clear_kv_cache() override {
         kv_cache_tokens = 0;
+    }
+
+    Expected<std::string> format_prompt(const std::vector<Message>& messages) override {
+        // Simple concatenation for testing
+        std::ostringstream out;
+        for (const auto& msg : messages) {
+            out << role_to_string(msg.role) << ": " << msg.content << "\n";
+        }
+        return out.str();
+    }
+
+    void finalize_response(const std::vector<Message>&) override {
+        // No-op for mock
     }
 
     int get_context_size() const override {

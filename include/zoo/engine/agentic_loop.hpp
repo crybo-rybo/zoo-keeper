@@ -1,9 +1,8 @@
 #pragma once
 
 #include "../types.hpp"
-#include "../backend/interface.hpp"
+#include "../backend/IBackend.hpp"
 #include "history_manager.hpp"
-#include "template_engine.hpp"
 #include "request_queue.hpp"
 #include <atomic>
 #include <memory>
@@ -18,9 +17,10 @@ namespace engine {
  *
  * The AgenticLoop runs on the inference thread and:
  * - Pops requests from the RequestQueue
- * - Renders conversation history using TemplateEngine
+ * - Formats prompts via backend->format_prompt() (incremental)
  * - Tokenizes prompts and calls backend->generate()
  * - Adds assistant responses to HistoryManager
+ * - Calls backend->finalize_response() to update prompt cache
  * - Tracks metrics (latency, TTFT, tokens/sec)
  * - Supports cancellation via atomic flag
  *
@@ -42,20 +42,17 @@ public:
      *
      * @param backend Backend implementation (LlamaBackend or MockBackend)
      * @param history History manager instance
-     * @param template_engine Template engine instance
      * @param config Agent configuration
      * @param history_mutex Mutex for synchronizing history access (optional, for thread safety)
      */
     AgenticLoop(
         std::shared_ptr<backend::IBackend> backend,
         std::shared_ptr<HistoryManager> history,
-        std::shared_ptr<TemplateEngine> template_engine,
         const Config& config,
         std::mutex* history_mutex = nullptr
     )
         : backend_(std::move(backend))
         , history_(std::move(history))
-        , template_engine_(std::move(template_engine))
         , config_(config)
         , history_mutex_(history_mutex)
         , cancelled_(false)
@@ -104,6 +101,8 @@ public:
 
             // 2. Check context window (MVP: warning only, no pruning)
             if (history_->is_context_exceeded()) {
+                // Rollback user message before returning error
+                history_->remove_last_message();
                 return tl::unexpected(Error{
                     ErrorCode::ContextWindowExceeded,
                     "Context window exceeded",
@@ -113,8 +112,10 @@ public:
             }
 
             // 3. Render conversation history
-            auto prompt_result = template_engine_->render(history_->get_messages());
+            auto prompt_result = backend_->format_prompt(history_->get_messages());
             if (!prompt_result) {
+                // Rollback user message before returning error
+                history_->remove_last_message();
                 return tl::unexpected(prompt_result.error());
             }
             prompt = *prompt_result;
@@ -122,8 +123,10 @@ public:
         }
 
         // 4. Tokenize prompt
-        auto tokens_result = backend_->tokenize(prompt, true);  // add_bos = true
+        auto tokens_result = backend_->tokenize(prompt);
         if (!tokens_result) {
+            // Rollback user message from history on failure
+            rollback_last_message();
             return tl::unexpected(tokens_result.error());
         }
         const auto& prompt_tokens = *tokens_result;
@@ -169,6 +172,8 @@ public:
         );
 
         if (!generate_result) {
+            // Rollback user message from history on failure
+            rollback_last_message();
             return tl::unexpected(generate_result.error());
         }
         const std::string& generated_text = *generate_result;
@@ -186,6 +191,9 @@ public:
             if (auto result = history_->add_message(assistant_msg); !result) {
                 return tl::unexpected(result.error());
             }
+
+            // Update backend's prompt cache state (prev_len)
+            backend_->finalize_response(history_->get_messages());
         }
 
         // 7. Build response with metrics
@@ -274,22 +282,25 @@ public:
         cancelled_.store(false, std::memory_order_release);
     }
 
+private:
     /**
-     * @brief Update the history mutex pointer
+     * @brief Rollback the last message from history
      *
-     * Used by Agent move operations to fix the mutex pointer after moving.
-     * Thread-safe: Can be called from any thread.
-     *
-     * @param mutex New mutex pointer
+     * Used for error recovery when tokenization or generation fails
+     * after a user message has been added to history. Prevents the
+     * history from being left in an inconsistent state (consecutive
+     * same-role messages).
      */
-    void set_history_mutex(std::mutex* mutex) {
-        history_mutex_ = mutex;
+    void rollback_last_message() {
+        std::unique_lock<std::mutex> lock;
+        if (history_mutex_) {
+            lock = std::unique_lock<std::mutex>(*history_mutex_);
+        }
+        history_->remove_last_message();
     }
 
-private:
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<HistoryManager> history_;
-    std::shared_ptr<TemplateEngine> template_engine_;
     Config config_;
     std::mutex* history_mutex_;  // Optional mutex for thread-safe history access
     std::atomic<bool> cancelled_;

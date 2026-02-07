@@ -66,11 +66,10 @@
 #include "agent.hpp"
 
 // Backend interface (for custom implementations and testing)
-#include "backend/interface.hpp"
+#include "backend/IBackend.hpp"
 
 // Engine components (optional, for advanced usage)
 #include "engine/history_manager.hpp"
-#include "engine/template_engine.hpp"
 #include "engine/request_queue.hpp"
 #include "engine/agentic_loop.hpp"
 

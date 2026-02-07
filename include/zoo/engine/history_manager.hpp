@@ -112,6 +112,23 @@ public:
     }
 
     /**
+     * @brief Remove the last message from history
+     *
+     * Used for error recovery when generation fails after adding
+     * a user message. Updates token estimate accordingly.
+     *
+     * @return bool True if a message was removed, false if history was empty
+     */
+    bool remove_last_message() {
+        if (messages_.empty()) {
+            return false;
+        }
+        estimated_tokens_ -= estimate_tokens(messages_.back().content);
+        messages_.pop_back();
+        return true;
+    }
+
+    /**
      * @brief Clear all messages
      */
     void clear() {

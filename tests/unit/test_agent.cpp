@@ -3,14 +3,9 @@
 #include "zoo/types.hpp"
 #include "zoo/engine/request_queue.hpp"
 #include "zoo/engine/history_manager.hpp"
-#include "zoo/engine/template_engine.hpp"
 
 using namespace zoo;
 using namespace zoo::testing;
-
-// Note: This is a placeholder test file for the Agent class
-// The Agent class will be implemented in a future phase
-// These tests demonstrate the expected interface and behavior
 
 class AgentTest : public ::testing::Test {
 protected:
@@ -24,11 +19,10 @@ protected:
 };
 
 // ============================================================================
-// Placeholder Tests for Agent Class
+// MockBackend Unit Tests
 // ============================================================================
 
 TEST_F(AgentTest, MockBackendInitialization) {
-    // Test that MockBackend can be initialized
     MockBackend backend;
     Config config;
     config.model_path = "/path/to/model.gguf";
@@ -205,47 +199,26 @@ TEST_F(AgentTest, MockBackendReset) {
 // Integration Tests (Components Working Together)
 // ============================================================================
 
-TEST_F(AgentTest, HistoryManagerWithTemplateEngine) {
-    // Test that HistoryManager and TemplateEngine work together
+TEST_F(AgentTest, HistoryManagerWithFormatPrompt) {
+    // Test that HistoryManager and MockBackend::format_prompt work together
     engine::HistoryManager history(8192);
-    engine::TemplateEngine engine(PromptTemplate::Llama3);
-
-    history.set_system_prompt("You are a helpful assistant.");
-    history.add_message(Message::user("Hello!"));
-
-    auto messages = history.get_messages();
-    auto rendered = engine.render(messages);
-
-    ASSERT_TRUE(rendered.has_value());
-    EXPECT_NE(rendered->find("You are a helpful assistant."), std::string::npos);
-    EXPECT_NE(rendered->find("Hello!"), std::string::npos);
-}
-
-TEST_F(AgentTest, TemplateEngineWithMockBackend) {
-    // Test template rendering followed by backend tokenization
-    engine::TemplateEngine engine(PromptTemplate::Llama3);
     MockBackend backend;
-
     Config config;
     config.model_path = "/path/to/model.gguf";
     backend.initialize(config);
 
-    std::vector<Message> messages = {Message::user("Test")};
-    auto rendered = engine.render(messages);
-    ASSERT_TRUE(rendered.has_value());
+    history.set_system_prompt("You are a helpful assistant.");
+    history.add_message(Message::user("Hello!"));
 
-    auto tokens = backend.tokenize(*rendered);
-    ASSERT_TRUE(tokens.has_value());
-    EXPECT_GT(tokens->size(), 0);
+    auto formatted = backend.format_prompt(history.get_messages());
+    ASSERT_TRUE(formatted.has_value());
+    EXPECT_NE(formatted->find("You are a helpful assistant."), std::string::npos);
+    EXPECT_NE(formatted->find("Hello!"), std::string::npos);
 }
 
 TEST_F(AgentTest, FullPipelineSimulation) {
     // Simulate the full agent pipeline without actual Agent class
-    // This tests how components would work together
-
-    // 1. Setup
     engine::HistoryManager history(8192);
-    engine::TemplateEngine template_engine(PromptTemplate::Llama3);
     MockBackend backend;
 
     Config config;
@@ -253,28 +226,24 @@ TEST_F(AgentTest, FullPipelineSimulation) {
     backend.initialize(config);
     backend.default_response = "Hello! How can I assist you today?";
 
-    // 2. Add system prompt
+    // Setup
     history.set_system_prompt("You are a helpful AI assistant.");
 
-    // 3. Add user message
+    // User turn
     history.add_message(Message::user("Hi there!"));
+    auto formatted = backend.format_prompt(history.get_messages());
+    ASSERT_TRUE(formatted.has_value());
 
-    // 4. Render conversation
-    auto messages = history.get_messages();
-    auto rendered = template_engine.render(messages);
-    ASSERT_TRUE(rendered.has_value());
-
-    // 5. Tokenize
-    auto tokens = backend.tokenize(*rendered);
+    auto tokens = backend.tokenize(*formatted);
     ASSERT_TRUE(tokens.has_value());
 
-    // 6. Generate response
     auto response = backend.generate(*tokens, 512, {});
     ASSERT_TRUE(response.has_value());
     EXPECT_EQ(*response, "Hello! How can I assist you today?");
 
-    // 7. Add assistant response to history
+    // Add assistant response and finalize
     history.add_message(Message::assistant(*response));
+    backend.finalize_response(history.get_messages());
 
     EXPECT_EQ(history.get_messages().size(), 3);  // System + User + Assistant
 }
@@ -282,7 +251,6 @@ TEST_F(AgentTest, FullPipelineSimulation) {
 TEST_F(AgentTest, MultiTurnConversationSimulation) {
     // Simulate multiple conversation turns
     engine::HistoryManager history(8192);
-    engine::TemplateEngine template_engine(PromptTemplate::Llama3);
     MockBackend backend;
 
     Config config;
@@ -294,23 +262,25 @@ TEST_F(AgentTest, MultiTurnConversationSimulation) {
 
     // Turn 1
     history.add_message(Message::user("What is the capital of France?"));
-    auto rendered1 = template_engine.render(history.get_messages());
-    ASSERT_TRUE(rendered1.has_value());
-    auto tokens1 = backend.tokenize(*rendered1);
+    auto formatted1 = backend.format_prompt(history.get_messages());
+    ASSERT_TRUE(formatted1.has_value());
+    auto tokens1 = backend.tokenize(*formatted1);
     ASSERT_TRUE(tokens1.has_value());
     auto response1 = backend.generate(*tokens1, 512, {});
     ASSERT_TRUE(response1.has_value());
     history.add_message(Message::assistant(*response1));
+    backend.finalize_response(history.get_messages());
 
     // Turn 2
     history.add_message(Message::user("What is its population?"));
-    auto rendered2 = template_engine.render(history.get_messages());
-    ASSERT_TRUE(rendered2.has_value());
-    auto tokens2 = backend.tokenize(*rendered2);
+    auto formatted2 = backend.format_prompt(history.get_messages());
+    ASSERT_TRUE(formatted2.has_value());
+    auto tokens2 = backend.tokenize(*formatted2);
     ASSERT_TRUE(tokens2.has_value());
     auto response2 = backend.generate(*tokens2, 512, {});
     ASSERT_TRUE(response2.has_value());
     history.add_message(Message::assistant(*response2));
+    backend.finalize_response(history.get_messages());
 
     EXPECT_EQ(history.get_messages().size(), 4);
     EXPECT_FALSE(history.is_context_exceeded());

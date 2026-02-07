@@ -38,18 +38,9 @@ public:
      * @brief Tokenize a string into token IDs
      *
      * @param text Input text to tokenize
-     * @param add_bos Whether to add BOS token
      * @return Expected<std::vector<int>> Token IDs or error
      */
-    virtual Expected<std::vector<int>> tokenize(const std::string& text, bool add_bos = false) = 0;
-
-    /**
-     * @brief Detokenize token IDs back to text
-     *
-     * @param tokens Token IDs to convert
-     * @return Expected<std::string> Text or error
-     */
-    virtual Expected<std::string> detokenize(const std::vector<int>& tokens) = 0;
+    virtual Expected<std::vector<int>> tokenize(const std::string& text) = 0;
 
     /**
      * @brief Generate completion given a prompt
@@ -86,17 +77,30 @@ public:
     virtual void clear_kv_cache() = 0;
 
     /**
-     * @brief Check if backend supports a specific prompt template
+     * @brief Format the prompt with the model's chat template
      *
-     * Used for auto-detection from GGUF metadata (future feature).
+     * Applies the chat template to the full message history and returns only the
+     * incremental portion (new text since last call). This enables KV cache reuse
+     * across turns -- only the new tokens need to be decoded.
      *
-     * @param tmpl Template to check
-     * @return bool Whether template is supported
+     * Maintains internal state (prev_len, formatted buffer) that tracks what has
+     * already been processed. Must be paired with finalize_response() after generation.
+     *
+     * @param messages Full conversation history
+     * @return Expected<std::string> Incremental prompt text or error
      */
-    virtual bool supports_template(PromptTemplate tmpl) const {
-        (void)tmpl;  // Unused in MVP
-        return false;
-    }
+    virtual Expected<std::string> format_prompt(const std::vector<Message>& messages) = 0;
+
+    /**
+     * @brief Update prompt cache state after assistant response is added
+     *
+     * Must be called after adding the assistant's response to history.
+     * Updates internal prev_len so the next format_prompt() call returns
+     * only the new user message portion.
+     *
+     * @param messages Full conversation history (including assistant response)
+     */
+    virtual void finalize_response(const std::vector<Message>& messages) = 0;
 
     /**
      * @brief Get model context size

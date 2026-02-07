@@ -319,3 +319,50 @@ TEST_F(HistoryManagerTest, MultipleToolCallsInSequence) {
 
     EXPECT_EQ(manager.get_messages().size(), 5);
 }
+
+// ============================================================================
+// Remove Last Message (Error Recovery)
+// ============================================================================
+
+TEST_F(HistoryManagerTest, RemoveLastMessage) {
+    manager.add_message(Message::user("Hello"));
+    manager.add_message(Message::assistant("Hi there"));
+
+    EXPECT_EQ(manager.get_messages().size(), 2);
+    EXPECT_TRUE(manager.remove_last_message());
+    EXPECT_EQ(manager.get_messages().size(), 1);
+    EXPECT_EQ(manager.get_messages().back().role, Role::User);
+}
+
+TEST_F(HistoryManagerTest, RemoveLastMessageUpdatesTokenEstimate) {
+    manager.add_message(Message::user("Hello world test message"));
+    int tokens_after_one = manager.get_estimated_tokens();
+
+    manager.add_message(Message::assistant("Response text here"));
+    int tokens_after_two = manager.get_estimated_tokens();
+    EXPECT_GT(tokens_after_two, tokens_after_one);
+
+    manager.remove_last_message();
+    EXPECT_EQ(manager.get_estimated_tokens(), tokens_after_one);
+}
+
+TEST_F(HistoryManagerTest, RemoveLastMessageFromEmptyHistory) {
+    EXPECT_FALSE(manager.remove_last_message());
+}
+
+TEST_F(HistoryManagerTest, RemoveLastMessageAllowsRetry) {
+    // Simulate: user message added, generation fails, rollback, retry
+    manager.add_message(Message::user("First question"));
+    manager.add_message(Message::assistant("Answer"));
+    manager.add_message(Message::user("Second question"));
+
+    // Simulate generation failure - rollback user message
+    manager.remove_last_message();
+    EXPECT_EQ(manager.get_messages().size(), 2);
+    EXPECT_EQ(manager.get_messages().back().role, Role::Assistant);
+
+    // Retry should succeed (not rejected as consecutive User)
+    auto result = manager.add_message(Message::user("Second question retry"));
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(manager.get_messages().size(), 3);
+}
