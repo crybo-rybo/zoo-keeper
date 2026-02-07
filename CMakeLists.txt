@@ -11,7 +11,11 @@ option(ZOO_BUILD_TESTS "Build test suite" OFF)
 option(ZOO_BUILD_EXAMPLES "Build examples" OFF)
 option(ZOO_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 option(ZOO_ENABLE_SANITIZERS "Enable ASan/TSan/UBSan" OFF)
-option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" ON)
+if(APPLE)
+    option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" ON)
+else()
+    option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" OFF)
+endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
 
 # Include dependencies
