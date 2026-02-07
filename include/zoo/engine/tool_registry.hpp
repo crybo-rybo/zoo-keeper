@@ -3,6 +3,7 @@
 #include "../types.hpp"
 #include <nlohmann/json.hpp>
 #include <functional>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,6 +17,7 @@ namespace engine {
 // Tool Handler Type
 // ============================================================================
 
+/** @brief Callable type for tool execution; takes JSON arguments and returns JSON result or Error. */
 using ToolHandler = std::function<Expected<nlohmann::json>(const nlohmann::json&)>;
 
 // ============================================================================
@@ -138,17 +140,27 @@ nlohmann::json wrap_result(T&& value) {
 // Tool Registration Entry
 // ============================================================================
 
+/** @brief Holds metadata and handler for a single registered tool. */
 struct ToolEntry {
-    std::string name;
-    std::string description;
-    nlohmann::json parameters_schema;
-    ToolHandler handler;
+    std::string name;                    ///< Unique tool name used for invocation
+    std::string description;             ///< Human-readable description of what the tool does
+    nlohmann::json parameters_schema;    ///< JSON Schema describing expected parameters
+    ToolHandler handler;                 ///< Callable that executes the tool logic
 };
 
 // ============================================================================
 // ToolRegistry
 // ============================================================================
 
+/**
+ * @brief Registry for tool definitions, schema generation, and invocation.
+ *
+ * Supports both template-based registration (automatic schema generation from
+ * function signatures) and manual registration with explicit JSON schemas.
+ *
+ * @threadsafety All public methods are thread-safe. Read operations use shared
+ * locks; write operations (register_tool) use exclusive locks.
+ */
 class ToolRegistry {
 public:
     /**
@@ -210,18 +222,28 @@ public:
     }
 
     /**
-     * Manual registration with explicit schema.
+     * @brief Manual registration with an explicit JSON schema and handler.
+     *
+     * @param name Tool name (must be unique)
+     * @param description Human-readable tool description
+     * @param schema JSON Schema describing the tool's parameters
+     * @param handler Callable that executes the tool logic
      */
     void register_tool(const std::string& name, const std::string& description,
                        nlohmann::json schema, ToolHandler handler) {
+        std::unique_lock lock(mutex_);
         tools_[name] = ToolEntry{name, description, std::move(schema), std::move(handler)};
     }
 
+    /** @brief Check whether a tool with the given name is registered. */
     bool has_tool(const std::string& name) const {
+        std::shared_lock lock(mutex_);
         return tools_.find(name) != tools_.end();
     }
 
+    /** @brief Invoke a registered tool by name with the given JSON arguments. */
     Expected<nlohmann::json> invoke(const std::string& name, const nlohmann::json& args) const {
+        std::shared_lock lock(mutex_);
         auto it = tools_.find(name);
         if (it == tools_.end()) {
             return tl::unexpected(Error{
@@ -232,7 +254,9 @@ public:
         return it->second.handler(args);
     }
 
+    /** @brief Get the JSON function-calling schema for a single tool, or empty JSON if not found. */
     nlohmann::json get_tool_schema(const std::string& name) const {
+        std::shared_lock lock(mutex_);
         auto it = tools_.find(name);
         if (it == tools_.end()) {
             return nlohmann::json{};
@@ -248,7 +272,9 @@ public:
         };
     }
 
+    /** @brief Get an array of JSON function-calling schemas for all registered tools. */
     nlohmann::json get_all_schemas() const {
+        std::shared_lock lock(mutex_);
         nlohmann::json schemas = nlohmann::json::array();
         for (const auto& [name, entry] : tools_) {
             schemas.push_back(nlohmann::json{
@@ -263,7 +289,9 @@ public:
         return schemas;
     }
 
+    /** @brief Return a list of all registered tool names. */
     std::vector<std::string> get_tool_names() const {
+        std::shared_lock lock(mutex_);
         std::vector<std::string> names;
         names.reserve(tools_.size());
         for (const auto& [name, _] : tools_) {
@@ -272,12 +300,15 @@ public:
         return names;
     }
 
+    /** @brief Return the number of registered tools. */
     size_t size() const {
+        std::shared_lock lock(mutex_);
         return tools_.size();
     }
 
 private:
     std::unordered_map<std::string, ToolEntry> tools_;
+    mutable std::shared_mutex mutex_;
 };
 
 } // namespace engine

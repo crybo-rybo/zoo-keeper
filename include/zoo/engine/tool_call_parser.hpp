@@ -2,6 +2,7 @@
 
 #include "../types.hpp"
 #include <nlohmann/json.hpp>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <optional>
@@ -12,10 +13,11 @@ namespace zoo {
 // ToolCall struct
 // ============================================================================
 
+/** @brief Represents a parsed tool call extracted from model output. */
 struct ToolCall {
-    std::string id;
-    std::string name;
-    nlohmann::json arguments;
+    std::string id;              ///< Unique identifier for this tool call invocation
+    std::string name;            ///< Name of the tool to invoke
+    nlohmann::json arguments;    ///< JSON object of arguments to pass to the tool
 
     bool operator==(const ToolCall& other) const {
         return id == other.id && name == other.name && arguments == other.arguments;
@@ -29,18 +31,28 @@ namespace engine {
 // ToolCallParser
 // ============================================================================
 
+/**
+ * @brief Detects and extracts tool calls from raw model output text.
+ *
+ * Scans for JSON objects containing "name" and "arguments" fields, which
+ * indicate the model is requesting a tool invocation.
+ */
 class ToolCallParser {
 public:
+    /** @brief Result of parsing model output for a tool call. */
     struct ParseResult {
-        std::optional<ToolCall> tool_call;
-        std::string text_before;  // Text before the tool call JSON
+        std::optional<ToolCall> tool_call;  ///< The extracted tool call, if any
+        std::string text_before;            ///< Text before the tool call JSON
     };
 
     /**
-     * Parse model output to detect a tool call.
+     * @brief Parse model output to detect a tool call.
      *
      * Looks for a JSON object with "name" and "arguments" fields.
      * Returns the parsed ToolCall if found, along with any text before it.
+     *
+     * @param output Raw text output from the model
+     * @return ParseResult containing the detected tool call and preceding text
      */
     static ParseResult parse(const std::string& output) {
         ParseResult result;
@@ -123,8 +135,8 @@ private:
     }
 
     static std::string generate_id() {
-        static int counter = 0;
-        return "call_" + std::to_string(++counter);
+        static std::atomic<int> counter{0};
+        return "call_" + std::to_string(counter.fetch_add(1, std::memory_order_relaxed) + 1);
     }
 };
 
