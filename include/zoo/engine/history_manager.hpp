@@ -60,6 +60,29 @@ public:
     }
 
     /**
+     * @brief Add a message to history (move overload)
+     *
+     * Validates role sequence and moves the message into history.
+     *
+     * @param message Message to move into history
+     * @return Expected<void> Success or validation error
+     */
+    Expected<void> add_message(Message&& message) {
+        // Basic role validation
+        if (auto err = validate_role_sequence(message.role); !err) {
+            return tl::unexpected(err.error());
+        }
+
+        // Update token estimate before moving
+        estimated_tokens_ += estimate_tokens(message.content);
+
+        // Move into history
+        messages_.push_back(std::move(message));
+
+        return {};
+    }
+
+    /**
      * @brief Set system prompt
      *
      * Replaces or adds system message at the beginning of history.
@@ -187,7 +210,7 @@ private:
         }
 
         // System messages only allowed at start
-        if (role == Role::System && !messages_.empty()) {
+        if (role == Role::System) {
             // Allow only if replacing first system message (handled by set_system_prompt)
             return tl::unexpected(Error{
                 ErrorCode::InvalidMessageSequence,

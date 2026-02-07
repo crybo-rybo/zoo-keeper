@@ -101,6 +101,9 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
         });
     }
 
+    // Cache the model's chat template pointer (static lifetime from model)
+    tmpl_ = llama_model_chat_template(model_, nullptr);
+
     // Initialize prompt formatting state
     // Use context_size * 4 since context_size is in tokens (~4 chars/token)
     formatted_.resize(context_size_ * 4);
@@ -117,16 +120,18 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
         });
     }
 
+    static_assert(sizeof(int) == sizeof(llama_token), "int must match llama_token size");
+
     const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) == -1;
 
     // Calculate the number of tokens needed for the text
     const int n_prompt_tokens = -llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, false);
-    std::vector<llama_token> tokens(n_prompt_tokens);
+    std::vector<int> tokens(n_prompt_tokens);
     if(llama_tokenize(
         vocab_,
         text.c_str(),
         text.length(),
-        tokens.data(),
+        reinterpret_cast<llama_token*>(tokens.data()),
         tokens.size(),
         is_first,
         false) < 0) {
@@ -136,15 +141,13 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
         });
     }
 
-    // Convert to int vector
-    std::vector<int> result(tokens.begin(), tokens.end());
-    return result;
+    return tokens;
 }
 
 Expected<std::string> LlamaBackend::generate(
     const std::vector<int>& prompt_tokens,
-    int /*max_tokens*/,
-    const std::vector<std::string>& /*stop_sequences*/,
+    int max_tokens,
+    const std::vector<std::string>& stop_sequences,
     const std::optional<std::function<void(std::string_view)>>& on_token
 ) {
     if (ctx_ == nullptr || model_ == nullptr || sampler_ == nullptr) {
@@ -155,8 +158,12 @@ Expected<std::string> LlamaBackend::generate(
     }
 
     std::string generated_text;
-    //
-    // Create batch for for the prompt
+    // Reserve capacity to reduce reallocations during generation
+    generated_text.reserve(max_tokens > 0 ? static_cast<size_t>(max_tokens) * 8 : 4096);
+
+    int token_count = 0;
+
+    // Create batch for the prompt
     llama_batch batch = llama_batch_get_one(
         const_cast<llama_token*>(reinterpret_cast<const llama_token*>(prompt_tokens.data())),
         static_cast<int32_t>(prompt_tokens.size())
@@ -174,13 +181,7 @@ Expected<std::string> LlamaBackend::generate(
                 " context_size=" + std::to_string(context_size_)
             });
         }
-    
-        // TODO - determine if this is necessary / why we need it
-        // Clear KV cache before processing new prompt
-        // auto memory = llama_get_memory(ctx_);
-        // llama_memory_clear(memory, false);
-        // kv_cache_token_count_ = 0;
-    
+
         // Process prompt (prefill phase)
         if (llama_decode(ctx_, batch) != 0) {
             return tl::unexpected(Error{
@@ -198,7 +199,7 @@ Expected<std::string> LlamaBackend::generate(
             break;
         }
 
-        // Convert token to string - trigger callback if necessary
+        // Convert token to string
         char buff[256];
         const int n = llama_token_to_piece(vocab_, new_token, buff, sizeof(buff), 0, true);
         if(n < 0)
@@ -208,22 +209,40 @@ Expected<std::string> LlamaBackend::generate(
                 "Failed to convert token to piece"
             });
         }
-        std::string token_text(buff, n);
-        // Call streaming callback if provided...
+
+        // Use string_view for callback to avoid per-token allocation
+        std::string_view token_view(buff, static_cast<size_t>(n));
         if(on_token.has_value())
         {
-            (*on_token)(token_text);
+            (*on_token)(token_view);
         }
-        generated_text += token_text;
-        //
-        // prepare the next batch
+        generated_text.append(buff, static_cast<size_t>(n));
+        ++token_count;
+
+        // Enforce max_tokens limit
+        if (max_tokens > 0 && token_count >= max_tokens) {
+            break;
+        }
+
+        // Check stop sequences
+        if (!stop_sequences.empty() && check_stop_sequence(generated_text, stop_sequences)) {
+            // Trim the stop sequence from the end
+            for (const auto& stop_seq : stop_sequences) {
+                if (!stop_seq.empty() && generated_text.size() >= stop_seq.size()) {
+                    if (generated_text.compare(
+                            generated_text.size() - stop_seq.size(),
+                            stop_seq.size(), stop_seq) == 0) {
+                        generated_text.resize(generated_text.size() - stop_seq.size());
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+
+        // Prepare the next batch
         batch = llama_batch_get_one(&new_token, 1);
     }
-
-    // Update KV cache count
-    //kv_cache_token_count_ = static_cast<int>(prompt_tokens.size());
-
-
 
     return generated_text;
 }
@@ -242,21 +261,12 @@ void LlamaBackend::clear_kv_cache() {
 }
 
 std::vector<llama_chat_message> LlamaBackend::build_llama_messages(
-    const std::vector<Message>& messages,
-    std::vector<std::string>& roles,
-    std::vector<std::string>& contents) const
+    const std::vector<Message>& messages) const
 {
-    roles.reserve(messages.size());
-    contents.reserve(messages.size());
-    for (const auto& msg : messages) {
-        roles.push_back(role_to_string(msg.role));
-        contents.push_back(msg.content);
-    }
-
     std::vector<llama_chat_message> llama_msgs;
     llama_msgs.reserve(messages.size());
-    for (size_t i = 0; i < messages.size(); ++i) {
-        llama_msgs.push_back({roles[i].c_str(), contents[i].c_str()});
+    for (const auto& msg : messages) {
+        llama_msgs.push_back({role_to_string(msg.role), msg.content.c_str()});
     }
     return llama_msgs;
 }
@@ -270,24 +280,19 @@ Expected<std::string> LlamaBackend::format_prompt(const std::vector<Message>& me
         });
     }
 
-    // Get model's chat template (nullptr means model has no embedded template;
-    // llama_chat_apply_template will fall back to ChatML format)
-    const char* tmpl = llama_model_chat_template(model_, nullptr);
-
-    // Build llama_chat_message vector with safe string lifetimes
-    std::vector<std::string> roles, contents;
-    auto llama_msgs = build_llama_messages(messages, roles, contents);
+    // Build llama_chat_message vector (zero-allocation: pointers to static strings and source data)
+    auto llama_msgs = build_llama_messages(messages);
 
     // Apply template with generation prompt (add_generation_prompt = true)
     int new_len = llama_chat_apply_template(
-        tmpl, llama_msgs.data(), llama_msgs.size(),
+        tmpl_, llama_msgs.data(), llama_msgs.size(),
         true, formatted_.data(), formatted_.size());
 
     // Resize buffer if needed and retry
     if (new_len > static_cast<int>(formatted_.size())) {
         formatted_.resize(new_len);
         new_len = llama_chat_apply_template(
-            tmpl, llama_msgs.data(), llama_msgs.size(),
+            tmpl_, llama_msgs.data(), llama_msgs.size(),
             true, formatted_.data(), formatted_.size());
     }
 
@@ -309,15 +314,12 @@ void LlamaBackend::finalize_response(const std::vector<Message>& messages)
         return;
     }
 
-    const char* tmpl = llama_model_chat_template(model_, nullptr);
-
-    // Build llama_chat_message vector with safe string lifetimes
-    std::vector<std::string> roles, contents;
-    auto llama_msgs = build_llama_messages(messages, roles, contents);
+    // Build llama_chat_message vector (zero-allocation)
+    auto llama_msgs = build_llama_messages(messages);
 
     // Dry run with add_generation_prompt=false to measure full conversation length
     int new_prev_len = llama_chat_apply_template(
-        tmpl, llama_msgs.data(), llama_msgs.size(),
+        tmpl_, llama_msgs.data(), llama_msgs.size(),
         false, nullptr, 0);
 
     if (new_prev_len > 0) {

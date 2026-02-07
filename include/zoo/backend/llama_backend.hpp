@@ -71,17 +71,14 @@ private:
     /**
      * @brief Build llama_chat_message vector from zoo::Message list
      *
-     * Handles safe string lifetime management to avoid dangling pointers.
+     * Points directly at source data — role_to_string() returns static const char*
+     * and messages are passed by const& outliving the returned vector at every call site.
      *
-     * @param messages Source messages
-     * @param roles Output vector for role strings (must outlive returned vector)
-     * @param contents Output vector for content strings (must outlive returned vector)
+     * @param messages Source messages (must outlive returned vector)
      * @return std::vector<llama_chat_message> Vector of llama chat messages
      */
     std::vector<llama_chat_message> build_llama_messages(
-        const std::vector<Message>& messages,
-        std::vector<std::string>& roles,
-        std::vector<std::string>& contents) const;
+        const std::vector<Message>& messages) const;
 
     // llama.cpp state (owned)
     llama_model* model_ = nullptr;
@@ -93,6 +90,9 @@ private:
     int context_size_ = 0;
     int vocab_size_ = 0;
     int kv_cache_token_count_ = 0;  // Track current KV cache usage
+
+    // Cached chat template pointer (static lifetime from model, not owned)
+    const char* tmpl_ = nullptr;
 
     // Prompt formatting state (mirrors simple-chat.cpp pattern)
     int prev_len_ = 0;                   // Length of previously formatted text
