@@ -244,7 +244,7 @@ public:
     void register_tool(const std::string& name, const std::string& description,
                        nlohmann::json schema, ToolHandler handler) {
         std::unique_lock lock(mutex_);
-        tools_[name] = ToolEntry{name, description, std::move(schema), std::move(handler)};
+        tools_.insert_or_assign(name, ToolEntry{name, description, std::move(schema), std::move(handler)});
     }
 
     /** @brief Check whether a tool with the given name is registered. */
@@ -273,15 +273,24 @@ public:
         if (it == tools_.end()) {
             return nlohmann::json{};
         }
+        return build_schema_json(it->second);
+    }
 
-        return nlohmann::json{
-            {"type", "function"},
-            {"function", {
-                {"name", it->second.name},
-                {"description", it->second.description},
-                {"parameters", it->second.parameters_schema}
-            }}
-        };
+    /**
+     * @brief Direct access to the parameters schema without the wrapper envelope.
+     *
+     * Avoids constructing the full {"type":"function","function":{...}} wrapper
+     * when only the parameters are needed (e.g., argument validation).
+     *
+     * @return Pointer to the parameters_schema, or nullptr if tool not found.
+     */
+    const nlohmann::json* get_parameters_schema(const std::string& name) const {
+        std::shared_lock lock(mutex_);
+        auto it = tools_.find(name);
+        if (it == tools_.end()) {
+            return nullptr;
+        }
+        return &it->second.parameters_schema;
     }
 
     /** @brief Get an array of JSON function-calling schemas for all registered tools. */
@@ -289,14 +298,7 @@ public:
         std::shared_lock lock(mutex_);
         nlohmann::json schemas = nlohmann::json::array();
         for (const auto& [name, entry] : tools_) {
-            schemas.push_back(nlohmann::json{
-                {"type", "function"},
-                {"function", {
-                    {"name", entry.name},
-                    {"description", entry.description},
-                    {"parameters", entry.parameters_schema}
-                }}
-            });
+            schemas.push_back(build_schema_json(entry));
         }
         return schemas;
     }
@@ -319,6 +321,17 @@ public:
     }
 
 private:
+    static nlohmann::json build_schema_json(const ToolEntry& entry) {
+        return nlohmann::json{
+            {"type", "function"},
+            {"function", {
+                {"name", entry.name},
+                {"description", entry.description},
+                {"parameters", entry.parameters_schema}
+            }}
+        };
+    }
+
     std::unordered_map<std::string, ToolEntry> tools_;
     mutable std::shared_mutex mutex_;
 };

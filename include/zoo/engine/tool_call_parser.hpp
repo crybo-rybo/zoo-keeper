@@ -4,7 +4,6 @@
 #include <nlohmann/json.hpp>
 #include <atomic>
 #include <string>
-#include <vector>
 #include <optional>
 
 namespace zoo {
@@ -60,17 +59,20 @@ public:
         // Find the first '{' that could be a tool call JSON
         auto pos = output.find('{');
         while (pos != std::string::npos) {
-            // Try to parse JSON starting at this position
-            auto json_str = extract_json_object(output, pos);
-            if (!json_str.empty()) {
+            // Find balanced JSON end position (no substring allocation)
+            auto end_pos = find_json_object_end(output, pos);
+            if (end_pos != std::string::npos) {
                 try {
-                    auto j = nlohmann::json::parse(json_str);
+                    // Parse directly from iterators to avoid intermediate string allocation
+                    auto begin_it = output.cbegin() + static_cast<std::string::difference_type>(pos);
+                    auto end_it = output.cbegin() + static_cast<std::string::difference_type>(end_pos + 1);
+                    auto j = nlohmann::json::parse(begin_it, end_it);
 
                     // Check if it has the tool call structure
                     if (j.is_object() && j.contains("name") && j.contains("arguments")) {
                         ToolCall tc;
                         tc.name = j["name"].get<std::string>();
-                        tc.arguments = j["arguments"];
+                        tc.arguments = std::move(j["arguments"]);
                         tc.id = j.value("id", generate_id());
 
                         result.tool_call = std::move(tc);
@@ -92,11 +94,11 @@ public:
 
 private:
     /**
-     * Extract a balanced JSON object starting at pos.
-     * Returns empty string if braces are unbalanced.
+     * Find the end position of a balanced JSON object starting at start.
+     * Returns npos if braces are unbalanced.
      */
-    static std::string extract_json_object(const std::string& text, size_t start) {
-        if (start >= text.size() || text[start] != '{') return "";
+    static size_t find_json_object_end(const std::string& text, size_t start) {
+        if (start >= text.size() || text[start] != '{') return std::string::npos;
 
         int depth = 0;
         bool in_string = false;
@@ -125,13 +127,13 @@ private:
                 else if (c == '}') {
                     --depth;
                     if (depth == 0) {
-                        return text.substr(start, i - start + 1);
+                        return i;
                     }
                 }
             }
         }
 
-        return "";  // Unbalanced
+        return std::string::npos;  // Unbalanced
     }
 
     static std::string generate_id() {

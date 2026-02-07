@@ -96,6 +96,7 @@ public:
         int total_completion_tokens = 0;
         int total_prompt_tokens = 0;
         std::vector<Message> tool_call_history;
+        tool_call_history.reserve(max_tool_iterations_);
 
         ErrorRecovery error_recovery;
         int iteration = 0;
@@ -120,7 +121,7 @@ public:
                     rollback_last_message();
                     return tl::unexpected(prompt_result.error());
                 }
-                prompt = *prompt_result;
+                prompt = std::move(*prompt_result);
             }
 
             // Tokenize
@@ -150,7 +151,8 @@ public:
             }
 
             total_completion_tokens += completion_tokens;
-            const std::string& generated_text = *generate_result;
+            // Take ownership to enable moves (avoids copying LLM output)
+            std::string generated_text = std::move(*generate_result);
 
             // Check for tool calls (only if registry is available and has tools)
             if (tool_registry_ && tool_registry_->size() > 0) {
@@ -160,14 +162,8 @@ public:
                     const auto& tc = *parse_result.tool_call;
 
                     // Add assistant message with tool call to history
-                    {
-                        auto lock = lock_history();
-                        auto add_result = history_->add_message(
-                            Message::assistant(generated_text));
-                        if (!add_result) {
-                            return tl::unexpected(add_result.error());
-                        }
-                        backend_->finalize_response(history_->get_messages());
+                    if (auto err = commit_assistant_response(generated_text); !err) {
+                        return tl::unexpected(err.error());
                     }
 
                     // Validate arguments
@@ -183,17 +179,15 @@ public:
 
                         error_recovery.record_retry(tc.name);
 
-                        // Inject error message as tool result
-                        auto error_msg = Message::tool(
-                            "Error: " + validation_error + "\nPlease correct the arguments.",
-                            tc.id);
+                        // Build error content once, reuse for history and tracking
+                        std::string error_content = "Error: " + validation_error;
                         {
                             auto lock = lock_history();
-                            (void)history_->add_message(std::move(error_msg));
+                            (void)history_->add_message(Message::tool(
+                                error_content + "\nPlease correct the arguments.", tc.id));
                         }
-
                         tool_call_history.push_back(
-                            Message::tool("Error: " + validation_error, tc.id));
+                            Message::tool(std::move(error_content), tc.id));
                         continue;  // Loop back for retry
                     }
 
@@ -206,18 +200,16 @@ public:
                         tool_result_str = "Error: " + invoke_result.error().message;
                     }
 
-                    // Add tool result to history
+                    // Build tool result message once; copy to history, move to tracking
+                    Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
                     {
                         auto lock = lock_history();
-                        auto add_result = history_->add_message(
-                            Message::tool(tool_result_str, tc.id));
+                        auto add_result = history_->add_message(tool_msg);
                         if (!add_result) {
                             return tl::unexpected(add_result.error());
                         }
                     }
-
-                    tool_call_history.push_back(
-                        Message::tool(tool_result_str, tc.id));
+                    tool_call_history.push_back(std::move(tool_msg));
 
                     continue;  // Loop back for model to process tool result
                 }
@@ -227,18 +219,13 @@ public:
             auto end_time = std::chrono::steady_clock::now();
 
             // Add assistant response to history
-            {
-                auto lock = lock_history();
-                Message assistant_msg = Message::assistant(generated_text);
-                if (auto result = history_->add_message(std::move(assistant_msg)); !result) {
-                    return tl::unexpected(result.error());
-                }
-                backend_->finalize_response(history_->get_messages());
+            if (auto err = commit_assistant_response(generated_text); !err) {
+                return tl::unexpected(err.error());
             }
 
             // Build response
             Response response;
-            response.text = generated_text;
+            response.text = std::move(generated_text);
             response.tool_calls = std::move(tool_call_history);
 
             response.usage.prompt_tokens = total_prompt_tokens;
@@ -308,6 +295,16 @@ private:
     void rollback_last_message() {
         auto lock = lock_history();
         history_->remove_last_message();
+    }
+
+    Expected<void> commit_assistant_response(const std::string& text) {
+        auto lock = lock_history();
+        auto add_result = history_->add_message(Message::assistant(text));
+        if (!add_result) {
+            return tl::unexpected(add_result.error());
+        }
+        backend_->finalize_response(history_->get_messages());
+        return {};
     }
 
     std::optional<std::function<void(std::string_view)>> make_streaming_callback(
