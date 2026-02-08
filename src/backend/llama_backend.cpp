@@ -7,7 +7,11 @@ namespace backend {
 LlamaBackend::LlamaBackend() {
     // Suppress llama.cpp/ggml internal logging to prevent output noise
     // (Metal pipeline compilation, model metadata, tensor loading, etc.)
-    llama_log_set([](enum ggml_log_level, const char*, void*) {}, nullptr);
+    llama_log_set([](enum ggml_log_level level, const char* text, void*) {
+        if (level >= GGML_LOG_LEVEL_WARN) {
+            fprintf(stderr, "%s", text);
+        }
+    }, nullptr);
 
     // Initialize llama.cpp backend (call once at program start)
     // This is idempotent and safe to call multiple times
