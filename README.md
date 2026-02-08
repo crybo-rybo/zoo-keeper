@@ -300,14 +300,6 @@ Test coverage includes:
 - Advanced sampling strategies
 - Performance optimizations
 
-## License
-
-[Your License Here - e.g., MIT]
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
 ## Acknowledgments
 
 - Built on [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
