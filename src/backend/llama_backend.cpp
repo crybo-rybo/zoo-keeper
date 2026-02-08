@@ -5,6 +5,10 @@ namespace zoo {
 namespace backend {
 
 LlamaBackend::LlamaBackend() {
+    // Suppress llama.cpp/ggml internal logging to prevent output noise
+    // (Metal pipeline compilation, model metadata, tensor loading, etc.)
+    llama_log_set([](enum ggml_log_level, const char*, void*) {}, nullptr);
+
     // Initialize llama.cpp backend (call once at program start)
     // This is idempotent and safe to call multiple times
     llama_backend_init();
@@ -39,7 +43,8 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
 
     // Set up model parameters
     auto model_params = llama_model_default_params();
-    model_params.n_gpu_layers = config.n_gpu_layers;
+    model_params.n_gpu_layers = 99;
+    //model_params.n_gpu_layers = config.n_gpu_layers;
     // model_params.use_mmap = config.use_mmap;
     // model_params.use_mlock = config.use_mlock;
 
@@ -54,8 +59,11 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
 
     // Set up context parameters
     auto ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = static_cast<uint32_t>(config.context_size);
-    ctx_params.n_batch = 512;  // Reasonable default for batch processing
+    ctx_params.n_ctx = 8192;
+    ctx_params.n_batch = 512;
+    ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    //ctx_params.n_ctx = static_cast<uint32_t>(config.context_size);
+    //ctx_params.n_batch = 512;  // Reasonable default for batch processing
     // ctx_params.n_ubatch = 512; // Physical batch size
     // ctx_params.n_threads = -1; // Auto-detect thread count
     // ctx_params.n_threads_batch = -1; // Auto-detect
@@ -130,7 +138,7 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
     // Calculate the number of tokens needed for the text.
     // llama_tokenize returns negative required size when output buffer is null/too small,
     // or INT32_MIN on overflow.
-    const int32_t raw = llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, false);
+    const int32_t raw = llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, true);
     if (raw == INT32_MIN) {
         return tl::unexpected(Error{
             ErrorCode::TokenizationFailed,
@@ -149,7 +157,7 @@ Expected<std::vector<int>> LlamaBackend::tokenize(const std::string& text) {
         reinterpret_cast<llama_token*>(tokens.data()),
         tokens.size(),
         is_first,
-        false) < 0) {
+        true) < 0) {
         return tl::unexpected(Error{
             ErrorCode::TokenizationFailed,
             "Tokenization failed - output buffer too small or other error"
@@ -377,7 +385,11 @@ llama_sampler* LlamaBackend::create_sampler_chain(const Config& config) {
     if (chain == nullptr) {
         return nullptr;
     }
-
+   llama_sampler_chain_add(chain, llama_sampler_init_min_p(0.05f, 1));
+   llama_sampler_chain_add(chain, llama_sampler_init_temp(0.8f));
+   llama_sampler_chain_add(chain, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    return chain;
+    /*
     // Add samplers in the recommended order:
     // 1. Repetition penalty
     // 2. Top-K
@@ -438,6 +450,7 @@ llama_sampler* LlamaBackend::create_sampler_chain(const Config& config) {
     }
 
     return chain;
+    */
 }
 
 // Factory function implementation
