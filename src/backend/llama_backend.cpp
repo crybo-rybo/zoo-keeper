@@ -43,10 +43,9 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
 
     // Set up model parameters
     auto model_params = llama_model_default_params();
-    model_params.n_gpu_layers = 99;
-    //model_params.n_gpu_layers = config.n_gpu_layers;
-    // model_params.use_mmap = config.use_mmap;
-    // model_params.use_mlock = config.use_mlock;
+    model_params.n_gpu_layers = config.n_gpu_layers;
+    model_params.use_mmap = config.use_mmap;
+    model_params.use_mlock = config.use_mlock;
 
     // Load model
     model_ = llama_model_load_from_file(config.model_path.c_str(), model_params);
@@ -59,14 +58,12 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
 
     // Set up context parameters
     auto ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 8192;
-    ctx_params.n_batch = 512;
+    ctx_params.n_ctx = static_cast<uint32_t>(config.context_size);
+    ctx_params.n_batch = 512;  // Reasonable default for batch processing
+    ctx_params.n_ubatch = 512; // Physical batch size
+    ctx_params.n_threads = -1; // Auto-detect thread count
+    ctx_params.n_threads_batch = -1; // Auto-detect
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
-    //ctx_params.n_ctx = static_cast<uint32_t>(config.context_size);
-    //ctx_params.n_batch = 512;  // Reasonable default for batch processing
-    // ctx_params.n_ubatch = 512; // Physical batch size
-    // ctx_params.n_threads = -1; // Auto-detect thread count
-    // ctx_params.n_threads_batch = -1; // Auto-detect
 
     // Create context
     ctx_ = llama_init_from_model(model_, ctx_params);
@@ -385,11 +382,7 @@ llama_sampler* LlamaBackend::create_sampler_chain(const Config& config) {
     if (chain == nullptr) {
         return nullptr;
     }
-   llama_sampler_chain_add(chain, llama_sampler_init_min_p(0.05f, 1));
-   llama_sampler_chain_add(chain, llama_sampler_init_temp(0.8f));
-   llama_sampler_chain_add(chain, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-    return chain;
-    /*
+    
     // Add samplers in the recommended order:
     // 1. Repetition penalty
     // 2. Top-K
@@ -450,7 +443,7 @@ llama_sampler* LlamaBackend::create_sampler_chain(const Config& config) {
     }
 
     return chain;
-    */
+
 }
 
 // Factory function implementation
