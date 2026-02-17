@@ -4,6 +4,8 @@
 #include <map>
 #include <queue>
 #include <sstream>
+#include <thread>
+#include <chrono>
 
 namespace zoo {
 namespace testing {
@@ -51,6 +53,9 @@ public:
     int token_callback_count = 0;
     std::vector<std::string> streamed_tokens;
 
+    // Delay control for testing queue backpressure
+    int generation_delay_ms = 0;                             ///< Artificial delay in generate() (ms)
+
     Expected<void> initialize(const Config& config) override {
         if (should_fail_initialize) {
             return tl::unexpected(Error{ErrorCode::BackendInitFailed, error_message});
@@ -87,6 +92,11 @@ public:
 
         if (should_fail_generate) {
             return tl::unexpected(Error{ErrorCode::InferenceFailed, error_message});
+        }
+
+        // Artificial delay for testing queue backpressure
+        if (generation_delay_ms > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(generation_delay_ms));
         }
 
         last_prompt_tokens = prompt_tokens;
