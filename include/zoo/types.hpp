@@ -5,6 +5,9 @@
 #include <chrono>
 #include <optional>
 #include <functional>
+#include <atomic>
+#include <memory>
+#include <future>
 #include <tl/expected.hpp>
 
 namespace zoo {
@@ -439,8 +442,31 @@ struct Response {
 };
 
 // ============================================================================
-// Request Type (Internal)
+// Request Types
 // ============================================================================
+
+/// Unique identifier for a chat request, used for per-request cancellation.
+using RequestId = uint64_t;
+
+/**
+ * @brief Handle returned from Agent::chat() for per-request cancellation
+ *
+ * Contains a unique request ID and the future for the response.
+ * Use the ID with Agent::cancel() to cancel a specific request.
+ */
+struct RequestHandle {
+    RequestId id;                         ///< Unique request identifier
+    std::future<Expected<Response>> future; ///< Future for the response
+
+    // Move-only (std::future is not copyable)
+    RequestHandle() : id(0) {}
+    RequestHandle(RequestId id, std::future<Expected<Response>> future)
+        : id(id), future(std::move(future)) {}
+    RequestHandle(RequestHandle&&) = default;
+    RequestHandle& operator=(RequestHandle&&) = default;
+    RequestHandle(const RequestHandle&) = delete;
+    RequestHandle& operator=(const RequestHandle&) = delete;
+};
 
 /**
  * @brief Internal request representation with metadata
@@ -455,6 +481,8 @@ struct Request {
     ChatOptions options;                                              ///< Per-request options (RAG, etc.)
     std::optional<std::function<void(std::string_view)>> streaming_callback; ///< Per-token callback override
     std::chrono::steady_clock::time_point submitted_at;               ///< Timestamp for latency tracking
+    RequestId id = 0;                                                 ///< Unique request identifier
+    std::shared_ptr<std::atomic<bool>> cancelled;                     ///< Per-request cancellation flag
 
     Request(
         Message msg,
@@ -465,6 +493,7 @@ struct Request {
         , options(std::move(opts))
         , streaming_callback(std::move(callback))
         , submitted_at(std::chrono::steady_clock::now())
+        , cancelled(std::make_shared<std::atomic<bool>>(false))
     {}
 
     Request(

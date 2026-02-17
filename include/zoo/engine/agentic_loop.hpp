@@ -80,8 +80,16 @@ public:
 
     /**
      * @brief Process a single request (with optional tool loop)
+     *
+     * @param request The request to process
+     * @param per_request_cancel Optional per-request cancellation token.
+     *        When set to true, the request will be cancelled at the next
+     *        iteration boundary (tool loop check or before processing).
      */
-    Expected<Response> process_request(const Request& request) {
+    Expected<Response> process_request(
+        const Request& request,
+        std::shared_ptr<std::atomic<bool>> per_request_cancel = nullptr
+    ) {
         bool using_ephemeral_rag = false;
         auto finish = [this, &using_ephemeral_rag](Expected<Response> result) -> Expected<Response> {
             if (using_ephemeral_rag) {
@@ -92,8 +100,15 @@ public:
             return result;
         };
 
+        // Helper to check both global and per-request cancellation
+        auto is_cancelled = [this, &per_request_cancel]() {
+            if (cancelled_.load(std::memory_order_acquire)) return true;
+            if (per_request_cancel && per_request_cancel->load(std::memory_order_acquire)) return true;
+            return false;
+        };
+
         // Check cancellation
-        if (cancelled_.load(std::memory_order_acquire)) {
+        if (is_cancelled()) {
             return finish(tl::unexpected(Error{
                 ErrorCode::RequestCancelled,
                 "Request cancelled"
@@ -189,8 +204,8 @@ public:
         while (iteration < max_tool_iterations_) {
             ++iteration;
 
-            // Check cancellation
-            if (cancelled_.load(std::memory_order_acquire)) {
+            // Check cancellation (global and per-request)
+            if (is_cancelled()) {
                 return finish(tl::unexpected(Error{
                     ErrorCode::RequestCancelled,
                     "Request cancelled during tool loop"
