@@ -33,8 +33,8 @@ int main() {
     // Connect to an MCP server
     zoo::mcp::McpClient::Config mcp;
     mcp.server_id = "filesystem";
-    mcp.command = "npx";
-    mcp.args = {"-y", "@modelcontextprotocol/server-filesystem", "/tmp"};
+    mcp.transport.command = "npx";
+    mcp.transport.args = {"-y", "@modelcontextprotocol/server-filesystem", "/tmp"};
 
     auto result = agent->add_mcp_server(mcp);
     if (!result) {
@@ -55,10 +55,11 @@ int main() {
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `server_id` | `std::string` | (required) | Unique identifier for this server connection |
-| `command` | `std::string` | (required) | Executable to spawn (e.g. `"npx"`, `"python"`) |
-| `args` | `std::vector<std::string>` | `{}` | Command-line arguments for the server process |
+| `transport.command` | `std::string` | (required) | Executable to spawn (e.g. `"npx"`, `"python"`) |
+| `transport.args` | `std::vector<std::string>` | `{}` | Command-line arguments for the server process |
+| `session.protocol_version` | `std::string` | `"2024-11-05"` | MCP protocol version sent in initialize |
 | `prefix_tools` | `bool` | `true` | Prefix tool names with `mcp_<server_id>:` |
-| `tool_timeout` | `std::chrono::seconds` | `30s` | Timeout for individual tool call requests |
+| `tool_timeout` | `std::chrono::milliseconds` | `30s` | Timeout for individual tool call requests |
 
 ## How Tool Federation Works
 

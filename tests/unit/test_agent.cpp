@@ -609,3 +609,46 @@ TEST_F(AgentTest, GetHistoryThreadSafe) {
 
     EXPECT_EQ(successes.load(), 100);
 }
+
+#ifdef ZOO_ENABLE_MCP
+TEST_F(AgentTest, McpListServersEmptyInitially) {
+    auto backend = std::make_unique<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    EXPECT_EQ(agent->mcp_server_count(), 0U);
+    EXPECT_TRUE(agent->list_mcp_servers().empty());
+}
+
+TEST_F(AgentTest, McpGetServerMissingReturnsError) {
+    auto backend = std::make_unique<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto result = agent->get_mcp_server("missing");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::McpToolNotAvailable);
+}
+
+TEST_F(AgentTest, McpRemoveServerMissingReturnsError) {
+    auto backend = std::make_unique<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto result = agent->remove_mcp_server("missing");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::McpToolNotAvailable);
+}
+#endif

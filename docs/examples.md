@@ -190,8 +190,8 @@ Connect to an MCP-compatible tool server and use its tools transparently:
 // Configure an MCP server connection
 zoo::mcp::McpClient::Config mcp_config;
 mcp_config.server_id = "filesystem";
-mcp_config.command = "npx";
-mcp_config.args = {"-y", "@modelcontextprotocol/server-filesystem", "/tmp"};
+mcp_config.transport.command = "npx";
+mcp_config.transport.args = {"-y", "@modelcontextprotocol/server-filesystem", "/tmp"};
 mcp_config.prefix_tools = true;       // tools named mcp_filesystem:<tool_name>
 mcp_config.tool_timeout = std::chrono::seconds(30);
 
@@ -216,8 +216,8 @@ Multiple MCP servers can be connected simultaneously:
 ```cpp
 zoo::mcp::McpClient::Config git_config;
 git_config.server_id = "git";
-git_config.command = "npx";
-git_config.args = {"-y", "@modelcontextprotocol/server-git"};
+git_config.transport.command = "npx";
+git_config.transport.args = {"-y", "@modelcontextprotocol/server-git"};
 agent->add_mcp_server(git_config);
 
 std::cout << "Connected servers: " << agent->mcp_server_count() << std::endl;
