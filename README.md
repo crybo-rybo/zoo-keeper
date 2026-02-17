@@ -1,6 +1,6 @@
 # Zoo-Keeper Agent Engine
 
-[![Tests](https://img.shields.io/badge/tests-230%2F230%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-236%2F236%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 A modern C++17 header-only Agent Engine for local LLM inference, built on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper provides a complete agentic AI framework with automated conversation history management, type-safe tool calling, error recovery, and asynchronous inference with streaming support.
 
@@ -251,7 +251,7 @@ Zoo-Keeper includes comprehensive unit tests using GoogleTest:
 cmake -B build -DZOO_BUILD_TESTS=ON
 cmake --build build
 
-# Run all tests (152 tests)
+# Run all tests (236 tests)
 ctest --test-dir build
 
 # Run specific test suite
@@ -290,7 +290,7 @@ Test coverage includes:
 - ✅ Streaming callbacks
 - ✅ Type-safe error handling with `std::expected`
 - ✅ Mock backend for testing
-- ✅ Comprehensive unit test suite (115 tests)
+- ✅ Comprehensive unit test suite (236 tests)
 
 ### Phase 2: Tool System (Complete)
 - ✅ Type-safe tool registration with template-based schema generation
@@ -300,7 +300,7 @@ Test coverage includes:
 - ✅ Argument validation against JSON schema
 - ✅ Error recovery with configurable retry logic
 - ✅ Tool call history tracking in Response
-- ✅ Comprehensive tool system tests (37 additional tests)
+- ✅ Comprehensive tool system tests (included in 236 total tests)
 
 ### Current Limitations
 - **Token Counting**: Character-based estimation (4 chars ≈ 1 token)
