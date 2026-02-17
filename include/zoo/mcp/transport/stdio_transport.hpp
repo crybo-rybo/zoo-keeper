@@ -16,9 +16,7 @@
 #endif
 
 #include <atomic>
-#include <map>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -46,7 +44,6 @@ public:
     struct Config {
         std::string command;                                          ///< Command to execute (e.g., "npx", "python")
         std::vector<std::string> args;                                ///< Arguments (e.g., {"-y", "@modelcontextprotocol/server-filesystem", "/tmp"})
-        std::optional<std::map<std::string, std::string>> env;        ///< Optional environment variables
     };
 
     explicit StdioTransport(Config config)
@@ -76,27 +73,8 @@ public:
         }
         cmd_parts.push_back(nullptr);
 
-        // Build environment if specified
-        std::vector<std::string> env_strings;
-        std::vector<const char*> env_parts;
-        if (config_.env.has_value()) {
-            for (const auto& [key, value] : *config_.env) {
-                env_strings.push_back(key + "=" + value);
-            }
-            for (const auto& s : env_strings) {
-                env_parts.push_back(s.c_str());
-            }
-            env_parts.push_back(nullptr);
-        }
-
         int options = subprocess_option_enable_async |
-                      subprocess_option_combined_stdout_stderr;
-
-        // If environment is specified, use subprocess_option_inherit_environment
-        // and set environment variables before spawning
-        if (!config_.env.has_value()) {
-            options |= subprocess_option_inherit_environment;
-        }
+                      subprocess_option_inherit_environment;
 
         int result = subprocess_create(
             cmd_parts.data(),
@@ -126,15 +104,22 @@ public:
             return;
         }
 
+        // Signal the read loop to stop
         connected_.store(false);
 
-        // Close stdin to signal the child process to exit
-        subprocess_destroy(&process_);
+        // Close only stdin to trigger child exit and EOF on stdout
+        FILE* stdin_fp = subprocess_stdin(&process_);
+        if (stdin_fp) {
+            fclose(stdin_fp);
+        }
 
-        // Wait for read thread to finish
+        // Wait for read thread to finish (it will see EOF and break)
         if (read_thread_.joinable()) {
             read_thread_.join();
         }
+
+        // Now safe to destroy subprocess — read thread is done
+        subprocess_destroy(&process_);
     }
 
     bool is_connected() const override {

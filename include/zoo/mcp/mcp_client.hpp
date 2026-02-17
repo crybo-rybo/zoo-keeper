@@ -142,6 +142,7 @@ public:
         }
 
         discovered_tools_ = tools;
+        tools_discovered_ = true;
         return tools;
     }
 
@@ -152,7 +153,7 @@ public:
      * over the transport via JSON-RPC tools/call.
      */
     Expected<void> register_tools_with(engine::ToolRegistry& registry) {
-        if (discovered_tools_.empty()) {
+        if (!tools_discovered_) {
             auto discover_result = discover_tools();
             if (!discover_result) {
                 return tl::unexpected(discover_result.error());
@@ -242,9 +243,13 @@ private:
     }
 
     engine::ToolHandler wrap_mcp_tool(const McpToolDefinition& def) {
-        auto self = shared_from_this();
+        auto weak_self = weak_from_this();
         std::string tool_name = def.name;
-        return [self, tool_name](const nlohmann::json& args) -> Expected<nlohmann::json> {
+        return [weak_self, tool_name](const nlohmann::json& args) -> Expected<nlohmann::json> {
+            auto self = weak_self.lock();
+            if (!self) {
+                return tl::unexpected(Error{ErrorCode::McpDisconnected, "MCP client has been destroyed"});
+            }
             auto result = self->call_tool(tool_name, args);
             if (!result) {
                 return tl::unexpected(result.error());
@@ -258,6 +263,7 @@ private:
     Config config_;
     std::unique_ptr<protocol::Session> session_;
     std::vector<McpToolDefinition> discovered_tools_;
+    bool tools_discovered_ = false;
 };
 
 } // namespace mcp

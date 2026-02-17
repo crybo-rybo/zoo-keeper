@@ -58,7 +58,7 @@ public:
     }
 
     ~Session() {
-        if (state_ == SessionState::Ready) {
+        if (state_.load() == SessionState::Ready) {
             shutdown();
         }
     }
@@ -70,23 +70,23 @@ public:
      * On failure, transitions back to Disconnected.
      */
     Expected<void> initialize() {
-        if (state_ != SessionState::Disconnected) {
+        if (state_.load() != SessionState::Disconnected) {
             return tl::unexpected(Error{
                 ErrorCode::McpSessionFailed,
-                "Cannot initialize: session is in state " + std::string(session_state_to_string(state_))
+                "Cannot initialize: session is in state " + std::string(session_state_to_string(state_.load()))
             });
         }
 
         // Step 1: Connect transport
-        state_ = SessionState::Connecting;
+        state_.store(SessionState::Connecting);
         auto connect_result = transport_->connect();
         if (!connect_result) {
-            state_ = SessionState::Disconnected;
+            state_.store(SessionState::Disconnected);
             return tl::unexpected(connect_result.error());
         }
 
         // Step 2: Send initialize request
-        state_ = SessionState::Initializing;
+        state_.store(SessionState::Initializing);
 
         nlohmann::json init_params = {
             {"protocolVersion", config_.protocol_version},
@@ -97,11 +97,19 @@ public:
             }}
         };
 
-        auto init_result = send_request("initialize", init_params);
-        auto future_result = init_result.get();
+        auto init_future = send_request("initialize", init_params);
+
+        auto status = init_future.wait_for(config_.request_timeout);
+        if (status == std::future_status::timeout) {
+            state_.store(SessionState::Disconnected);
+            transport_->disconnect();
+            return tl::unexpected(Error{ErrorCode::McpTimeout, "Initialize request timed out"});
+        }
+
+        auto future_result = init_future.get();
 
         if (!future_result) {
-            state_ = SessionState::Disconnected;
+            state_.store(SessionState::Disconnected);
             transport_->disconnect();
             return tl::unexpected(future_result.error());
         }
@@ -109,7 +117,7 @@ public:
         // Parse server response
         auto parse_result = parse_initialize_result(*future_result);
         if (!parse_result) {
-            state_ = SessionState::Disconnected;
+            state_.store(SessionState::Disconnected);
             transport_->disconnect();
             return tl::unexpected(parse_result.error());
         }
@@ -120,12 +128,12 @@ public:
         // Step 3: Send initialized notification
         auto notify_result = send_notification("notifications/initialized");
         if (!notify_result) {
-            state_ = SessionState::Disconnected;
+            state_.store(SessionState::Disconnected);
             transport_->disconnect();
             return tl::unexpected(notify_result.error());
         }
 
-        state_ = SessionState::Ready;
+        state_.store(SessionState::Ready);
         return {};
     }
 
@@ -133,11 +141,11 @@ public:
      * @brief Gracefully shut down the session.
      */
     void shutdown() {
-        if (state_ != SessionState::Ready && state_ != SessionState::Initializing) {
+        if (state_.load() != SessionState::Ready && state_.load() != SessionState::Initializing) {
             return;
         }
 
-        state_ = SessionState::ShuttingDown;
+        state_.store(SessionState::ShuttingDown);
 
         // Cancel all pending requests
         router_.cancel_all("Session shutting down");
@@ -145,7 +153,7 @@ public:
         // Disconnect transport
         transport_->disconnect();
 
-        state_ = SessionState::Disconnected;
+        state_.store(SessionState::Disconnected);
     }
 
     /**
@@ -184,7 +192,7 @@ public:
         return transport_->send(encoded);
     }
 
-    SessionState get_state() const { return state_; }
+    SessionState get_state() const { return state_.load(); }
     const ServerCapabilities& get_server_capabilities() const { return server_capabilities_; }
     const ServerInfo& get_server_info() const { return server_info_; }
     MessageRouter& get_router() { return router_; }
@@ -264,7 +272,7 @@ private:
     Config config_;
     MessageRouter router_;
 
-    SessionState state_ = SessionState::Disconnected;
+    std::atomic<SessionState> state_{SessionState::Disconnected};
     ServerCapabilities server_capabilities_;
     ServerInfo server_info_;
 };

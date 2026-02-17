@@ -66,8 +66,13 @@ public:
         if (decoded.is_response()) {
             route_response(*decoded.response);
         } else if (decoded.is_notification()) {
-            if (notification_handler_) {
-                notification_handler_(decoded.request->method, decoded.request->params);
+            NotificationHandler handler;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                handler = notification_handler_;
+            }
+            if (handler) {
+                handler(decoded.request->method, decoded.request->params);
             }
         }
     }
@@ -111,6 +116,7 @@ public:
      * @brief Set a handler for incoming notifications (no ID).
      */
     void set_notification_handler(NotificationHandler handler) {
+        std::lock_guard<std::mutex> lock(mutex_);
         notification_handler_ = std::move(handler);
     }
 
