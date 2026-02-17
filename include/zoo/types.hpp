@@ -5,6 +5,8 @@
 #include <chrono>
 #include <optional>
 #include <functional>
+#include <future>
+#include <memory>
 #include <tl/expected.hpp>
 
 namespace zoo {
@@ -455,6 +457,7 @@ struct Request {
     ChatOptions options;                                              ///< Per-request options (RAG, etc.)
     std::optional<std::function<void(std::string_view)>> streaming_callback; ///< Per-token callback override
     std::chrono::steady_clock::time_point submitted_at;               ///< Timestamp for latency tracking
+    std::shared_ptr<std::promise<Expected<Response>>> promise;        ///< Bundled promise for result delivery
 
     Request(
         Message msg,
