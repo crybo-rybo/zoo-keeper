@@ -1,6 +1,6 @@
 # Zoo-Keeper
 
-[![Tests](https://img.shields.io/badge/tests-236%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-301%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 A header-only C++17 Agent Engine for local LLM inference, built on [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper handles the hard parts of building agentic AI -- conversation management, tool calling, context window pressure, and retrieval-augmented generation -- so you can focus on your application.
 
@@ -9,6 +9,7 @@ A header-only C++17 Agent Engine for local LLM inference, built on [llama.cpp](h
 - **Async Inference** -- non-blocking `chat()` with `std::future`, streaming token callbacks
 - **Tool Calling** -- type-safe registration with automatic JSON schema generation
 - **Agentic Loop** -- tool detection, validation, execution, result injection, retry
+- **MCP Integration** -- connect to Model Context Protocol servers for tool federation
 - **RAG** -- per-request ephemeral context injection via pluggable retrievers
 - **Long-Term Memory** -- SQLite context database with automatic archival and retrieval
 - **Context Management** -- automatic history tracking, FIFO pruning, system prompt preservation
@@ -70,11 +71,12 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 | [Architecture](docs/architecture.md) | Three-layer design, threading model, design principles |
 | [Configuration](docs/configuration.md) | Config fields, sampling params, templates, ChatOptions |
 | [Examples](docs/examples.md) | Streaming, tools, RAG, context DB, error handling, cancellation |
+| [MCP](docs/mcp.md) | Model Context Protocol client, tool federation, transport |
 | [Building](docs/building.md) | CMake options, platform setup, sanitizers, coverage |
 
 ## Testing
 
-236 unit tests using GoogleTest:
+301 unit tests using GoogleTest:
 
 ```bash
 ctest --test-dir build --output-on-failure

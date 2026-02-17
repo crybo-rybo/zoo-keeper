@@ -17,6 +17,7 @@ else()
     option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" OFF)
 endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
+option(ZOO_ENABLE_MCP "Enable MCP (Model Context Protocol) client support" OFF)
 
 # Include dependencies
 include(cmake/FetchDependencies.cmake)
@@ -30,6 +31,15 @@ target_include_directories(zoo INTERFACE
 )
 target_compile_features(zoo INTERFACE cxx_std_17)
 target_link_libraries(zoo INTERFACE nlohmann_json::nlohmann_json tl::expected SQLite::SQLite3)
+
+# MCP support compile definition
+if(ZOO_ENABLE_MCP)
+    target_compile_definitions(zoo INTERFACE ZOO_ENABLE_MCP)
+    # Add subprocess.h include path from llama.cpp vendor
+    target_include_directories(zoo INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern/llama.cpp/vendor/sheredom>
+    )
+endif()
 
 # Llama Backend (requires linking)
 add_library(zoo_backend STATIC src/backend/llama_backend.cpp)

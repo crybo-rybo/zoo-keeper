@@ -17,6 +17,16 @@ add_executable(zoo_tests
     mocks/mock_backend.cpp
 )
 
+# Add MCP test sources if MCP is enabled
+if(ZOO_ENABLE_MCP)
+    target_sources(zoo_tests PRIVATE
+        unit/test_mcp_json_rpc.cpp
+        unit/test_mcp_message_router.cpp
+        unit/test_mcp_session.cpp
+        unit/test_mcp_client.cpp
+    )
+endif()
+
 target_link_libraries(zoo_tests
     PRIVATE
         zoo

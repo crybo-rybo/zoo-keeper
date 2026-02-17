@@ -20,6 +20,10 @@ Consumer Code
 |   ToolCallParser            |   Tool call detection in model output
 |   ErrorRecovery             |   Argument validation + retry tracking
 |   AgenticLoop               |   Inference -> tool -> inject -> loop orchestration
+|   McpClient                 |   MCP server connection, tool discovery & federation
+|   Session / MessageRouter   |   JSON-RPC lifecycle and response routing
+|   JsonRpc                   |   JSON-RPC 2.0 serialization
+|   ITransport / StdioTransport|  Abstract transport; production stdio pipe impl
 +----------------------------+
      |
      v
@@ -72,6 +76,7 @@ Zoo-Keeper uses a two-thread architecture:
 |--------|-----------------|
 | **Calling Thread** | Submits `chat()` requests, receives `std::future<Response>`, registers tools, sets system prompt |
 | **Inference Thread** | Processes request queue, runs inference, executes tools, manages history, fires callbacks |
+| **MCP Transport Thread** (per server) | Reads stdout from MCP server process, routes responses via MessageRouter |
 
 ### Synchronization
 

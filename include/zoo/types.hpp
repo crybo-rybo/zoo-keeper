@@ -125,6 +125,15 @@ enum class ErrorCode {
     ToolRetriesExhausted = 503,
     ToolLoopLimitReached = 504,
 
+    // MCP errors (600-699)
+    McpTransportFailed = 600,
+    McpProtocolError = 601,
+    McpServerError = 602,
+    McpSessionFailed = 603,
+    McpToolNotAvailable = 604,
+    McpTimeout = 605,
+    McpDisconnected = 606,
+
     // Unknown
     Unknown = 999
 };

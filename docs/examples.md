@@ -182,9 +182,51 @@ if (response) {
 }
 ```
 
+## MCP Server Integration
+
+Connect to an MCP-compatible tool server and use its tools transparently:
+
+```cpp
+// Configure an MCP server connection
+zoo::mcp::McpClient::Config mcp_config;
+mcp_config.server_id = "filesystem";
+mcp_config.command = "npx";
+mcp_config.args = {"-y", "@modelcontextprotocol/server-filesystem", "/tmp"};
+mcp_config.prefix_tools = true;       // tools named mcp_filesystem:<tool_name>
+mcp_config.tool_timeout = std::chrono::seconds(30);
+
+// Connect -- discovers tools and registers them into the ToolRegistry
+auto result = agent->add_mcp_server(mcp_config);
+if (!result) {
+    std::cerr << "MCP error: " << result.error().to_string() << std::endl;
+}
+
+// Now the model can call MCP tools just like local tools
+auto response = agent->chat(
+    zoo::Message::user("List files in /tmp")
+).get();
+
+if (response) {
+    std::cout << response->text << std::endl;
+}
+```
+
+Multiple MCP servers can be connected simultaneously:
+
+```cpp
+zoo::mcp::McpClient::Config git_config;
+git_config.server_id = "git";
+git_config.command = "npx";
+git_config.args = {"-y", "@modelcontextprotocol/server-git"};
+agent->add_mcp_server(git_config);
+
+std::cout << "Connected servers: " << agent->mcp_server_count() << std::endl;
+```
+
 ## See Also
 
 - [Getting Started](getting-started.md) -- setup walkthrough
 - [Tools](tools.md) -- tool system deep-dive
+- [MCP](mcp.md) -- MCP client details
 - [RAG Retrieval](rag.md) -- retrieval pipeline details
 - [Configuration](configuration.md) -- all config options

@@ -6,6 +6,9 @@
 #include "engine/request_queue.hpp"
 #include "engine/tool_registry.hpp"
 #include "engine/agentic_loop.hpp"
+#ifdef ZOO_ENABLE_MCP
+#include "mcp/mcp_client.hpp"
+#endif
 #include <thread>
 #include <future>
 #include <memory>
@@ -104,6 +107,13 @@ public:
      * - Joining inference thread (blocks until thread completes)
      */
     ~Agent() {
+#ifdef ZOO_ENABLE_MCP
+        // Disconnect MCP clients before stopping inference thread
+        for (auto& client : mcp_clients_) {
+            client->disconnect();
+        }
+        mcp_clients_.clear();
+#endif
         stop();
     }
 
@@ -319,6 +329,49 @@ public:
         return {};
     }
 
+#ifdef ZOO_ENABLE_MCP
+    /**
+     * @brief Connect to an MCP server and register its tools.
+     *
+     * Creates an McpClient, connects to the server, discovers tools,
+     * and registers them into the existing ToolRegistry. MCP tools are
+     * prefixed with "mcp_<server_id>:" to avoid name collisions with
+     * locally registered tools.
+     *
+     * @param config MCP client configuration (server ID, transport, session settings)
+     * @return Expected<void> Success or error
+     */
+    Expected<void> add_mcp_server(const mcp::McpClient::Config& config) {
+        auto client_result = mcp::McpClient::create(config);
+        if (!client_result) {
+            return tl::unexpected(client_result.error());
+        }
+
+        auto client = std::move(*client_result);
+
+        auto connect_result = client->connect();
+        if (!connect_result) {
+            return tl::unexpected(connect_result.error());
+        }
+
+        auto register_result = client->register_tools_with(*tool_registry_);
+        if (!register_result) {
+            client->disconnect();
+            return tl::unexpected(register_result.error());
+        }
+
+        mcp_clients_.push_back(std::move(client));
+        return {};
+    }
+
+    /**
+     * @brief Get the number of connected MCP servers.
+     */
+    size_t mcp_server_count() const {
+        return mcp_clients_.size();
+    }
+#endif
+
 private:
     /**
      * @brief Private constructor - use create() factory method
@@ -418,6 +471,11 @@ private:
     std::mutex promises_mutex_;
     mutable std::mutex history_mutex_;  // Protects history_ from concurrent access
     std::queue<std::shared_ptr<std::promise<Expected<Response>>>> pending_promises_;
+
+#ifdef ZOO_ENABLE_MCP
+    // MCP clients (one per connected server)
+    std::vector<std::shared_ptr<mcp::McpClient>> mcp_clients_;
+#endif
 };
 
 } // namespace zoo
