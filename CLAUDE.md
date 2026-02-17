@@ -169,7 +169,13 @@ New error codes for the tool system:
 - `ErrorCode::ToolRetriesExhausted` (503) - Maximum retry attempts exceeded for tool
 - `ErrorCode::ToolLoopLimitReached` (504) - Maximum tool loop iterations exceeded
 
-## Reference Documents
+## Documentation
 
-- `zoo-keeper-prd.md` - Product requirements, goals, success metrics
-- `zoo-keeper-trd.md` - Technical architecture, state machines, test plan
+- `docs/getting-started.md` - Prerequisites, build, hello-world agent, core API
+- `docs/tools.md` - Tool registration, supported types, error recovery
+- `docs/context-database.md` - SQLite long-term memory, pruning, FTS5 retrieval
+- `docs/rag.md` - IRetriever interface, InMemoryRagStore, ephemeral injection
+- `docs/architecture.md` - Three-layer design, threading model, design principles
+- `docs/configuration.md` - Config fields, sampling params, templates, ChatOptions
+- `docs/examples.md` - Streaming, tools, RAG, context DB, error handling, cancellation
+- `docs/building.md` - CMake options, platform setup, sanitizers, coverage
