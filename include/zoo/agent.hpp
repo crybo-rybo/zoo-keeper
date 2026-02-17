@@ -383,7 +383,7 @@ private:
         : config_(config)
         , backend_(std::shared_ptr<backend::IBackend>(std::move(backend)))
         , history_(std::make_shared<engine::HistoryManager>(config.context_size))
-        , request_queue_(std::make_shared<engine::RequestQueue>())
+        , request_queue_(std::make_shared<engine::RequestQueue>(config.request_queue_capacity))
         , tool_registry_(std::make_shared<engine::ToolRegistry>())
         , agentic_loop_(std::make_shared<engine::AgenticLoop>(
             backend_,
