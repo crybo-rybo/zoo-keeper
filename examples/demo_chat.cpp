@@ -273,20 +273,20 @@ int main(int argc, char** argv) {
         g_interrupted = false;
 
         // Submit chat request with optional streaming callback
-        std::future<zoo::Expected<zoo::Response>> future;
+        zoo::RequestHandle handle;
         if (args.no_stream) {
             // No streaming
-            future = agent->chat(zoo::Message::user(line));
+            handle = agent->chat(zoo::Message::user(line));
         } else {
             // With streaming
             auto callback = [](std::string_view token) {
                 std::cout << token << std::flush;
             };
-            future = agent->chat(zoo::Message::user(line), callback);
+            handle = agent->chat(zoo::Message::user(line), callback);
         }
 
         // Poll for interrupt during generation
-        while (future.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout) {
+        while (handle.future.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout) {
             if (g_interrupted) {
                 agent->stop();
                 std::cout << "\n[Generation stopped]\n";
@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
 
         // Get result if not interrupted
         if (!g_interrupted) {
-            auto result = future.get();
+            auto result = handle.future.get();
 
             if (!result.has_value()) {
                 std::cerr << "\nError: " << result.error().to_string() << "\n";
