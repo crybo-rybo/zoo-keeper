@@ -5,6 +5,7 @@
 #include "zoo/types.hpp"
 #include "zoo/agent.hpp"
 #include "zoo/engine/history_manager.hpp"
+#include "zoo/engine/rag_store.hpp"
 #include "fixtures/tool_definitions.hpp"
 
 using namespace zoo;
@@ -542,6 +543,43 @@ TEST_F(AgentTest, CreateWithSystemPromptInConfig) {
     ASSERT_FALSE(history.empty());
     EXPECT_EQ(history[0].role, Role::System);
     EXPECT_EQ(history[0].content, "You are a pirate.");
+}
+
+TEST_F(AgentTest, AgentRagChatOptionsWithRetriever) {
+    auto backend_raw = new MockBackend();
+    auto backend = std::unique_ptr<MockBackend>(backend_raw);
+    backend->default_response = "Paris is in France.";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto retriever = std::make_shared<engine::InMemoryRagStore>();
+    ASSERT_TRUE(retriever->add_document(
+        "geo:paris",
+        "Paris is the capital and most populous city of France."
+    ).has_value());
+    agent->set_retriever(retriever);
+
+    ChatOptions options;
+    options.rag.enabled = true;
+    options.rag.top_k = 2;
+
+    auto future = agent->chat(Message::user("Where is Paris located?"), options);
+    auto response = future.get();
+
+    ASSERT_TRUE(response.has_value());
+    EXPECT_FALSE(response->rag_chunks.empty());
+    EXPECT_NE(backend_raw->last_formatted_prompt.find("Retrieved Context"), std::string::npos);
+
+    // RAG context is ephemeral and must not be persisted in history.
+    auto history = agent->get_history();
+    ASSERT_EQ(history.size(), 2U);
+    EXPECT_EQ(history[0].role, Role::User);
+    EXPECT_EQ(history[1].role, Role::Assistant);
 }
 
 TEST_F(AgentTest, GetHistoryThreadSafe) {

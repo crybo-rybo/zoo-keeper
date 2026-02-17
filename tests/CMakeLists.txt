@@ -12,6 +12,7 @@ add_executable(zoo_tests
     unit/test_error_recovery.cpp
     unit/test_agentic_loop.cpp
     unit/test_agent.cpp
+    unit/test_rag_store.cpp
     mocks/mock_backend.cpp
 )
 

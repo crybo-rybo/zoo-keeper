@@ -7,7 +7,9 @@
 #include "tool_registry.hpp"
 #include "tool_call_parser.hpp"
 #include "error_recovery.hpp"
+#include "rag_store.hpp"
 #include <atomic>
+#include <algorithm>
 #include <memory>
 #include <chrono>
 #include <mutex>
@@ -52,6 +54,13 @@ public:
     }
 
     /**
+     * @brief Set the retriever used for RAG queries.
+     */
+    void set_retriever(std::shared_ptr<IRetriever> retriever) {
+        retriever_ = std::move(retriever);
+    }
+
+    /**
      * @brief Set max tool loop iterations (default: 5)
      */
     void set_max_tool_iterations(int max) {
@@ -62,32 +71,70 @@ public:
      * @brief Process a single request (with optional tool loop)
      */
     Expected<Response> process_request(const Request& request) {
+        bool using_ephemeral_rag = false;
+        auto finish = [this, &using_ephemeral_rag](Expected<Response> result) -> Expected<Response> {
+            if (using_ephemeral_rag) {
+                // Ephemeral prompt injection changes template/KV state relative to persisted history.
+                // Reset backend state to keep subsequent turns consistent.
+                backend_->clear_kv_cache();
+            }
+            return result;
+        };
+
         // Check cancellation
         if (cancelled_.load(std::memory_order_acquire)) {
-            return tl::unexpected(Error{
+            return finish(tl::unexpected(Error{
                 ErrorCode::RequestCancelled,
                 "Request cancelled"
-            });
+            }));
         }
 
         auto start_time = std::chrono::steady_clock::now();
+        size_t user_message_index = 0;
 
         // Add user message to history (with lock)
         {
             auto lock = lock_history();
             if (auto result = history_->add_message(request.message); !result) {
-                return tl::unexpected(result.error());
+                return finish(tl::unexpected(result.error()));
             }
+            user_message_index = history_->get_messages().size() - 1;
 
             if (history_->is_context_exceeded()) {
                 history_->remove_last_message();
-                return tl::unexpected(Error{
+                return finish(tl::unexpected(Error{
                     ErrorCode::ContextWindowExceeded,
                     "Context window exceeded",
                     "Estimated tokens: " + std::to_string(history_->get_estimated_tokens()) +
                     " / " + std::to_string(history_->get_context_size())
-                });
+                }));
             }
+        }
+
+        std::vector<RagChunk> rag_chunks;
+        std::string rag_context;
+        if (request.options.rag.enabled) {
+            if (request.options.rag.context_override.has_value()) {
+                rag_context = *request.options.rag.context_override;
+            } else if (retriever_) {
+                auto rag_result = retriever_->retrieve(RagQuery{
+                    request.message.content,
+                    request.options.rag.top_k
+                });
+                if (!rag_result) {
+                    rollback_last_message();
+                    return finish(tl::unexpected(rag_result.error()));
+                }
+                rag_chunks = std::move(*rag_result);
+                rag_context = format_rag_context(rag_chunks);
+            }
+        }
+
+        using_ephemeral_rag = !rag_context.empty();
+        if (using_ephemeral_rag) {
+            // Force a clean backend state before this turn because the prompt contains
+            // ephemeral context that is intentionally not stored in HistoryManager.
+            backend_->clear_kv_cache();
         }
 
         // Metrics tracking across tool loop iterations
@@ -106,20 +153,25 @@ public:
 
             // Check cancellation
             if (cancelled_.load(std::memory_order_acquire)) {
-                return tl::unexpected(Error{
+                return finish(tl::unexpected(Error{
                     ErrorCode::RequestCancelled,
                     "Request cancelled during tool loop"
-                });
+                }));
             }
 
             // Format prompt
             std::string prompt;
             {
                 auto lock = lock_history();
-                auto prompt_result = backend_->format_prompt(history_->get_messages());
+                auto prompt_messages = build_prompt_messages(
+                    history_->get_messages(),
+                    user_message_index,
+                    rag_context
+                );
+                auto prompt_result = backend_->format_prompt(prompt_messages);
                 if (!prompt_result) {
                     rollback_last_message();
-                    return tl::unexpected(prompt_result.error());
+                    return finish(tl::unexpected(prompt_result.error()));
                 }
                 prompt = std::move(*prompt_result);
             }
@@ -128,7 +180,7 @@ public:
             auto tokens_result = backend_->tokenize(prompt);
             if (!tokens_result) {
                 rollback_last_message();
-                return tl::unexpected(tokens_result.error());
+                return finish(tl::unexpected(tokens_result.error()));
             }
             const auto& prompt_tokens = *tokens_result;
             total_prompt_tokens += static_cast<int>(prompt_tokens.size());
@@ -147,7 +199,7 @@ public:
 
             if (!generate_result) {
                 rollback_last_message();
-                return tl::unexpected(generate_result.error());
+                return finish(tl::unexpected(generate_result.error()));
             }
 
             total_completion_tokens += completion_tokens;
@@ -163,7 +215,7 @@ public:
 
                     // Add assistant message with tool call to history
                     if (auto err = commit_assistant_response(generated_text); !err) {
-                        return tl::unexpected(err.error());
+                        return finish(tl::unexpected(err.error()));
                     }
 
                     // Validate arguments
@@ -171,10 +223,10 @@ public:
                     if (!validation_error.empty()) {
                         // Validation failed
                         if (!error_recovery.can_retry(tc.name)) {
-                            return tl::unexpected(Error{
+                            return finish(tl::unexpected(Error{
                                 ErrorCode::ToolRetriesExhausted,
                                 "Tool retries exhausted for '" + tc.name + "': " + validation_error
-                            });
+                            }));
                         }
 
                         error_recovery.record_retry(tc.name);
@@ -206,7 +258,7 @@ public:
                         auto lock = lock_history();
                         auto add_result = history_->add_message(tool_msg);
                         if (!add_result) {
-                            return tl::unexpected(add_result.error());
+                            return finish(tl::unexpected(add_result.error()));
                         }
                     }
                     tool_call_history.push_back(std::move(tool_msg));
@@ -220,13 +272,14 @@ public:
 
             // Add assistant response to history
             if (auto err = commit_assistant_response(generated_text); !err) {
-                return tl::unexpected(err.error());
+                return finish(tl::unexpected(err.error()));
             }
 
             // Build response
             Response response;
             response.text = std::move(generated_text);
             response.tool_calls = std::move(tool_call_history);
+            response.rag_chunks = std::move(rag_chunks);
 
             response.usage.prompt_tokens = total_prompt_tokens;
             response.usage.completion_tokens = total_completion_tokens;
@@ -249,15 +302,15 @@ public:
                 }
             }
 
-            return response;
+            return finish(response);
         }
 
         // If we get here, we've exceeded the tool loop limit
-        return tl::unexpected(Error{
+        return finish(tl::unexpected(Error{
             ErrorCode::ToolLoopLimitReached,
             "Tool loop iteration limit reached (" +
                 std::to_string(max_tool_iterations_) + ")"
-        });
+        }));
     }
 
     /**
@@ -343,7 +396,61 @@ private:
     std::mutex* history_mutex_;
     std::atomic<bool> cancelled_;
     std::shared_ptr<ToolRegistry> tool_registry_;
+    std::shared_ptr<IRetriever> retriever_;
     int max_tool_iterations_ = 5;
+
+    std::vector<Message> build_prompt_messages(
+        const std::vector<Message>& history_messages,
+        size_t user_message_index,
+        const std::string& rag_context
+    ) const {
+        if (rag_context.empty()) {
+            return history_messages;
+        }
+
+        std::vector<Message> prompt_messages;
+        prompt_messages.reserve(history_messages.size() + 1);
+
+        const size_t insert_at = std::min(user_message_index, history_messages.size());
+        prompt_messages.insert(
+            prompt_messages.end(),
+            history_messages.begin(),
+            history_messages.begin() + static_cast<std::vector<Message>::difference_type>(insert_at));
+
+        // Ephemeral system message so the model treats retrieved text as grounding context.
+        prompt_messages.push_back(Message::system(rag_context));
+
+        prompt_messages.insert(
+            prompt_messages.end(),
+            history_messages.begin() + static_cast<std::vector<Message>::difference_type>(insert_at),
+            history_messages.end());
+
+        return prompt_messages;
+    }
+
+    static std::string format_rag_context(const std::vector<RagChunk>& chunks) {
+        if (chunks.empty()) {
+            return {};
+        }
+
+        std::string out;
+        out.reserve(512);
+        out += "Use the following retrieved context when relevant.\n";
+        out += "If the context is insufficient, say what is missing.\n";
+        out += "\nRetrieved Context:\n";
+
+        for (size_t i = 0; i < chunks.size(); ++i) {
+            out += "[" + std::to_string(i + 1) + "] ";
+            if (chunks[i].source.has_value()) {
+                out += "source=" + *chunks[i].source + " ";
+            }
+            out += "chunk_id=" + chunks[i].id + "\n";
+            out += chunks[i].content;
+            out += "\n\n";
+        }
+
+        return out;
+    }
 };
 
 } // namespace engine
