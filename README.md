@@ -1,6 +1,6 @@
 # Zoo-Keeper Agent Engine
 
-[![Tests](https://img.shields.io/badge/tests-152%2F152%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-230%2F230%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 A modern C++17 header-only Agent Engine for local LLM inference, built on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper provides a complete agentic AI framework with automated conversation history management, type-safe tool calling, error recovery, and asynchronous inference with streaming support.
 
@@ -299,14 +299,6 @@ Test coverage includes:
 - RAG context injection for ephemeral knowledge
 - Advanced sampling strategies
 - Performance optimizations
-
-## License
-
-[Your License Here - e.g., MIT]
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Acknowledgments
 
