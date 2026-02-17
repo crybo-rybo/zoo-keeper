@@ -84,6 +84,9 @@ The single entry point for all library functionality. Created via the `Agent::cr
 | `set_retriever(retriever)` | Install a RAG retriever |
 | `enable_context_database(path)` | Enable SQLite long-term memory |
 | `add_mcp_server(config)` | Connect to an MCP server and federate its tools |
+| `remove_mcp_server(server_id)` | Disconnect and remove one MCP server |
+| `list_mcp_servers()` | List MCP server summaries (id, connected, tool count) |
+| `get_mcp_server(server_id)` | Retrieve one MCP server summary by ID |
 | `mcp_server_count()` | Number of connected MCP servers |
 | `stop()` | Gracefully shut down the agent |
 | `clear_history()` | Clear conversation history |

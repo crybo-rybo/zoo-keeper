@@ -802,8 +802,6 @@ TEST_F(AgentTest, RequestHandleHasUniqueIds) {
 }
 
 TEST_F(AgentTest, CancelQueuedRequest) {
-    // Create a backend that blocks on the first request so we can
-    // queue a second one and cancel it before it processes.
     auto backend = std::make_unique<MockBackend>();
     backend->default_response = "OK";
 
@@ -814,25 +812,14 @@ TEST_F(AgentTest, CancelQueuedRequest) {
     ASSERT_TRUE(agent_result.has_value());
     auto& agent = *agent_result;
 
-    // Submit first request (will be processed immediately)
     auto handle1 = agent->chat(Message::user("First"));
-    // Wait for first to complete to ensure agent is idle
     auto response1 = handle1.future.get();
     ASSERT_TRUE(response1.has_value());
 
-    // Now stop the agent, submit a request, cancel it, then check
-    // Actually, a simpler approach: cancel before the inference thread picks it up
-    // We can't easily block the inference thread with MockBackend, so let's
-    // test the cancel-after-stop path and the cancel token mechanism directly.
-
-    // Submit and immediately cancel
     auto handle2 = agent->chat(Message::user("Should be cancelled"));
     agent->cancel(handle2.id);
 
     auto response2 = handle2.future.get();
-    // The request may or may not have been processed before cancel was checked.
-    // If it was cancelled, we get RequestCancelled; if processed, we get OK.
-    // This is a race, so we just verify it resolves without hanging.
     EXPECT_TRUE(response2.has_value() || response2.error().code == ErrorCode::RequestCancelled);
 }
 
@@ -847,21 +834,16 @@ TEST_F(AgentTest, CancelDoesNotAffectOtherRequests) {
     ASSERT_TRUE(agent_result.has_value());
     auto& agent = *agent_result;
 
-    // Submit two requests
     auto handle1 = agent->chat(Message::user("First"));
     auto handle2 = agent->chat(Message::user("Second"));
 
-    // Cancel only the first one
     agent->cancel(handle1.id);
 
-    // The second should still complete successfully
     auto response2 = handle2.future.get();
-    // Response2 should succeed (cancel of handle1 should not affect it)
     if (response2.has_value()) {
         EXPECT_EQ(response2->text, "Response OK");
     }
 
-    // First may or may not have been cancelled (race condition)
     auto response1 = handle1.future.get();
     EXPECT_TRUE(response1.has_value() || response1.error().code == ErrorCode::RequestCancelled);
 }
@@ -880,7 +862,6 @@ TEST_F(AgentTest, CancelAfterCompletionIsNoop) {
     auto handle = agent->chat(Message::user("Hello"));
     auto response = handle.future.get();
 
-    // Request is complete. Canceling should be a no-op (no crash, no error).
     agent->cancel(handle.id);
 
     ASSERT_TRUE(response.has_value());
@@ -898,14 +879,10 @@ TEST_F(AgentTest, CancelUnknownIdIsNoop) {
     ASSERT_TRUE(agent_result.has_value());
     auto& agent = *agent_result;
 
-    // Cancel a request ID that was never issued -- should not crash
     agent->cancel(99999);
 }
 
 TEST_F(AgentTest, CancelRequestViaCancellationToken) {
-    // Test the cancellation token mechanism directly through the agentic loop.
-    // Create a request with a cancellation token, set it, and verify the
-    // agentic loop respects it.
     auto backend_ptr = std::make_shared<MockBackend>();
     Config config;
     config.model_path = "/path/to/model.gguf";
@@ -919,7 +896,6 @@ TEST_F(AgentTest, CancelRequestViaCancellationToken) {
     engine::AgenticLoop loop(backend_ptr, history, config);
 
     Request request(Message::user("Hello"));
-    // Pre-cancel the request
     request.cancelled->store(true, std::memory_order_release);
 
     auto result = loop.process_request(request, request.cancelled);
@@ -927,3 +903,46 @@ TEST_F(AgentTest, CancelRequestViaCancellationToken) {
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 }
+
+#ifdef ZOO_ENABLE_MCP
+TEST_F(AgentTest, McpListServersEmptyInitially) {
+    auto backend = std::make_unique<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    EXPECT_EQ(agent->mcp_server_count(), 0U);
+    EXPECT_TRUE(agent->list_mcp_servers().empty());
+}
+
+TEST_F(AgentTest, McpGetServerMissingReturnsError) {
+    auto backend = std::make_unique<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto result = agent->get_mcp_server("missing");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::McpToolNotAvailable);
+}
+
+TEST_F(AgentTest, McpRemoveServerMissingReturnsError) {
+    auto backend = std::make_unique<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto result = agent->remove_mcp_server("missing");
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::McpToolNotAvailable);
+}
+#endif

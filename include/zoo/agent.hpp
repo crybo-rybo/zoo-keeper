@@ -14,6 +14,8 @@
 #include <memory>
 #include <atomic>
 #include <unordered_map>
+#include <queue>
+#include <algorithm>
 
 namespace zoo {
 
@@ -109,6 +111,7 @@ public:
     ~Agent() {
 #ifdef ZOO_ENABLE_MCP
         // Disconnect MCP clients before stopping inference thread
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
         for (auto& client : mcp_clients_) {
             client->disconnect();
         }
@@ -359,6 +362,12 @@ public:
     }
 
 #ifdef ZOO_ENABLE_MCP
+    struct McpServerSummary {
+        std::string server_id;
+        bool connected = false;
+        size_t discovered_tool_count = 0;
+    };
+
     /**
      * @brief Connect to an MCP server and register its tools.
      *
@@ -371,6 +380,19 @@ public:
      * @return Expected<void> Success or error
      */
     Expected<void> add_mcp_server(const mcp::McpClient::Config& config) {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
+        auto duplicate = std::find_if(
+            mcp_clients_.begin(), mcp_clients_.end(),
+            [&config](const auto& client) {
+                return client && client->get_server_id() == config.server_id;
+            });
+        if (duplicate != mcp_clients_.end()) {
+            return tl::unexpected(Error{
+                ErrorCode::McpSessionFailed,
+                "MCP server_id already connected: " + config.server_id
+            });
+        }
+
         auto client_result = mcp::McpClient::create(config);
         if (!client_result) {
             return tl::unexpected(client_result.error());
@@ -397,7 +419,74 @@ public:
      * @brief Get the number of connected MCP servers.
      */
     size_t mcp_server_count() const {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
         return mcp_clients_.size();
+    }
+
+    /**
+     * @brief Remove a connected MCP server by ID.
+     */
+    Expected<void> remove_mcp_server(const std::string& server_id) {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
+        auto it = std::find_if(
+            mcp_clients_.begin(), mcp_clients_.end(),
+            [&server_id](const auto& client) {
+                return client && client->get_server_id() == server_id;
+            });
+        if (it == mcp_clients_.end()) {
+            return tl::unexpected(Error{
+                ErrorCode::McpToolNotAvailable,
+                "MCP server not found: " + server_id
+            });
+        }
+
+        (*it)->disconnect();
+        mcp_clients_.erase(it);
+        return {};
+    }
+
+    /**
+     * @brief List connected MCP server summaries.
+     */
+    std::vector<McpServerSummary> list_mcp_servers() const {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
+        std::vector<McpServerSummary> servers;
+        servers.reserve(mcp_clients_.size());
+        for (const auto& client : mcp_clients_) {
+            if (!client) {
+                continue;
+            }
+            servers.push_back(McpServerSummary{
+                client->get_server_id(),
+                client->is_connected(),
+                client->get_discovered_tools().size()
+            });
+        }
+        return servers;
+    }
+
+    /**
+     * @brief Get one MCP server summary by ID.
+     */
+    Expected<McpServerSummary> get_mcp_server(const std::string& server_id) const {
+        std::lock_guard<std::mutex> lock(mcp_mutex_);
+        auto it = std::find_if(
+            mcp_clients_.begin(), mcp_clients_.end(),
+            [&server_id](const auto& client) {
+                return client && client->get_server_id() == server_id;
+            });
+        if (it == mcp_clients_.end()) {
+            return tl::unexpected(Error{
+                ErrorCode::McpToolNotAvailable,
+                "MCP server not found: " + server_id
+            });
+        }
+
+        return McpServerSummary{
+            (*it)->get_server_id(),
+            (*it)->is_connected(),
+            (*it)->get_discovered_tools().size()
+        };
     }
 #endif
 
@@ -521,6 +610,7 @@ private:
 
 #ifdef ZOO_ENABLE_MCP
     // MCP clients (one per connected server)
+    mutable std::mutex mcp_mutex_;
     std::vector<std::shared_ptr<mcp::McpClient>> mcp_clients_;
 #endif
 };
