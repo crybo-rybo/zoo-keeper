@@ -132,6 +132,22 @@ public:
         Message message,
         std::optional<std::function<void(std::string_view)>> callback = std::nullopt
     ) {
+        return chat(std::move(message), ChatOptions{}, std::move(callback));
+    }
+
+    /**
+     * @brief Submit a chat message with per-request options (e.g., RAG)
+     *
+     * @param message User message to send
+     * @param options Per-request behavior options
+     * @param callback Optional streaming token callback (runs on inference thread)
+     * @return std::future<Expected<Response>> Future response
+     */
+    std::future<Expected<Response>> chat(
+        Message message,
+        ChatOptions options,
+        std::optional<std::function<void(std::string_view)>> callback = std::nullopt
+    ) {
         // Create promise for result
         auto promise = std::make_shared<std::promise<Expected<Response>>>();
         std::future<Expected<Response>> future = promise->get_future();
@@ -146,7 +162,7 @@ public:
         }
 
         // Create request
-        Request request(std::move(message), std::move(callback));
+        Request request(std::move(message), std::move(options), std::move(callback));
 
         // Push to request queue first (before adding promise)
         // This prevents race where inference thread could pop promise before request is queued
@@ -272,6 +288,13 @@ public:
      */
     size_t tool_count() const {
         return tool_registry_->size();
+    }
+
+    /**
+     * @brief Configure the retriever used for RAG requests.
+     */
+    void set_retriever(std::shared_ptr<engine::IRetriever> retriever) {
+        agentic_loop_->set_retriever(std::move(retriever));
     }
 
 private:

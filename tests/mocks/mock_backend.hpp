@@ -33,6 +33,8 @@ public:
     int kv_cache_tokens = 0;
     int context_size = 8192;
     int vocab_size = 32000;
+    int clear_kv_cache_calls = 0;
+    std::string last_formatted_prompt;
 
     // Response control
     enum class ResponseMode {
@@ -150,6 +152,7 @@ public:
 
     void clear_kv_cache() override {
         kv_cache_tokens = 0;
+        ++clear_kv_cache_calls;
     }
 
     Expected<std::string> format_prompt(const std::vector<Message>& messages) override {
@@ -158,7 +161,8 @@ public:
         for (const auto& msg : messages) {
             out << role_to_string(msg.role) << ": " << msg.content << "\n";
         }
-        return out.str();
+        last_formatted_prompt = out.str();
+        return last_formatted_prompt;
     }
 
     void finalize_response(const std::vector<Message>&) override {
@@ -184,6 +188,8 @@ public:
         token_callback_count = 0;
         streamed_tokens.clear();
         last_prompt_tokens.clear();
+        clear_kv_cache_calls = 0;
+        last_formatted_prompt.clear();
         while (!response_queue.empty()) response_queue.pop();
     }
 };

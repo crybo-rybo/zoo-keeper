@@ -12,6 +12,7 @@ A modern C++17 header-only Agent Engine for local LLM inference, built on top of
 - **Tool Calling System**: Type-safe tool registration with automatic JSON schema generation
 - **Agentic Loop**: Automatic tool call detection, execution, and result injection
 - **Error Recovery**: Argument validation with configurable retry logic for failed tool calls
+- **RAG (Ephemeral)**: Per-request retrieval context injection without history pollution
 - **Conversation Management**: Automatic history tracking with tool call history
 - **Multiple Prompt Templates**: Built-in support for Llama3, ChatML, and custom formats
 - **Streaming Support**: Token-by-token callbacks for real-time output
@@ -290,13 +291,13 @@ Test coverage includes:
 - **Token Counting**: Character-based estimation (4 chars ≈ 1 token)
 - **Context Pruning**: Not implemented (will overflow on very long conversations)
 - **KV Cache Reuse**: Cold start each turn (performance optimization pending)
-- **RAG Context**: Not implemented (Phase 3)
+- **RAG Retrieval Quality**: Baseline lexical retriever; vector ANN backend not yet integrated
 
 ### Phase 3 (Planned)
 - Actual backend tokenization with caching
 - Context pruning with FIFO strategy
 - KV cache optimization for multi-turn efficiency
-- RAG context injection for ephemeral knowledge
+- Vector-backed RAG retrieval (SQLite + ANN)
 - Advanced sampling strategies
 - Performance optimizations
 

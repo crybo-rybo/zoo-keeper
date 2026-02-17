@@ -287,6 +287,73 @@ struct Config {
 };
 
 // ============================================================================
+// RAG Types
+// ============================================================================
+
+/**
+ * @brief Retrieved context chunk used for RAG-grounded generation.
+ *
+ * Contains the chunk text, retrieval score, and optional source identifier.
+ */
+struct RagChunk {
+    std::string id;                           ///< Stable chunk identifier
+    std::string content;                      ///< Retrieved chunk text
+    double score = 0.0;                       ///< Retrieval relevance score (higher is better)
+    std::optional<std::string> source;        ///< Optional source identifier (doc ID, file path, URI)
+
+    bool operator==(const RagChunk& other) const {
+        return id == other.id &&
+               content == other.content &&
+               score == other.score &&
+               source == other.source;
+    }
+
+    bool operator!=(const RagChunk& other) const {
+        return !(*this == other);
+    }
+};
+
+/**
+ * @brief RAG behavior options for a single chat request.
+ *
+ * If enabled, the engine can either:
+ * - Use `context_override` directly as ephemeral context, or
+ * - Query a configured retriever and inject top-k chunks.
+ *
+ * Injected context is ephemeral and is not stored in long-term history.
+ */
+struct RagOptions {
+    bool enabled = false;                             ///< Enable RAG for this request
+    int top_k = 4;                                    ///< Number of chunks to retrieve when querying retriever
+    std::optional<std::string> context_override;      ///< Optional precomputed context block to inject
+
+    bool operator==(const RagOptions& other) const {
+        return enabled == other.enabled &&
+               top_k == other.top_k &&
+               context_override == other.context_override;
+    }
+
+    bool operator!=(const RagOptions& other) const {
+        return !(*this == other);
+    }
+};
+
+/**
+ * @brief Per-request chat options.
+ */
+struct ChatOptions {
+    RagOptions rag;                                   ///< Retrieval-augmented generation settings
+
+    bool operator==(const ChatOptions& other) const {
+        return rag == other.rag;
+    }
+
+    bool operator!=(const ChatOptions& other) const {
+        return !(*this == other);
+    }
+};
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -347,12 +414,14 @@ struct Response {
     TokenUsage usage;                 ///< Token consumption statistics
     Metrics metrics;                  ///< Performance timing data
     std::vector<Message> tool_calls;  ///< Tool call and result history from agentic loop
+    std::vector<RagChunk> rag_chunks; ///< Retrieved RAG chunks used for this turn (ephemeral context provenance)
 
     bool operator==(const Response& other) const {
         return text == other.text &&
                usage == other.usage &&
                metrics == other.metrics &&
-               tool_calls == other.tool_calls;
+               tool_calls == other.tool_calls &&
+               rag_chunks == other.rag_chunks;
     }
 
     bool operator!=(const Response& other) const {
@@ -374,13 +443,26 @@ struct Response {
  */
 struct Request {
     Message message;                                                  ///< User message to process
+    ChatOptions options;                                              ///< Per-request options (RAG, etc.)
     std::optional<std::function<void(std::string_view)>> streaming_callback; ///< Per-token callback override
     std::chrono::steady_clock::time_point submitted_at;               ///< Timestamp for latency tracking
 
-    Request(Message msg, std::optional<std::function<void(std::string_view)>> callback = std::nullopt)
+    Request(
+        Message msg,
+        ChatOptions opts = {},
+        std::optional<std::function<void(std::string_view)>> callback = std::nullopt
+    )
         : message(std::move(msg))
+        , options(std::move(opts))
         , streaming_callback(std::move(callback))
         , submitted_at(std::chrono::steady_clock::now())
+    {}
+
+    Request(
+        Message msg,
+        std::optional<std::function<void(std::string_view)>> callback
+    )
+        : Request(std::move(msg), ChatOptions{}, std::move(callback))
     {}
 };
 
