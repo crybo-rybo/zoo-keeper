@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Zoo-Keeper is a header-only C++17 library built on top of llama.cpp that functions as a complete Agent Engine for local LLM inference. It abstracts agentic AI systems by providing automated conversation history management, type-safe tool registration, asynchronous inference with cancellation support, and intelligent context window management.
 
-**Status:** Phase 2 (Tool System) Complete
+**Status:** Phase 3 (MCP Client) Complete
 
 ## Git Workflow
 
@@ -63,6 +63,9 @@ cmake -B build -DZOO_ENABLE_SANITIZERS=ON && cmake --build build && ctest --test
 
 # Run with coverage
 cmake -B build -DZOO_ENABLE_COVERAGE=ON && cmake --build build && ctest --test-dir build
+
+# Build with MCP client support
+cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_ENABLE_MCP=ON && cmake --build build
 ```
 
 ### CMake Configuration Options
@@ -74,6 +77,7 @@ cmake -B build -DZOO_ENABLE_COVERAGE=ON && cmake --build build && ctest --test-d
 | `ZOO_BUILD_TESTS` | Build test suite | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build examples | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
+| `ZOO_ENABLE_MCP` | MCP client support | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
 
 ## Architecture
@@ -146,6 +150,10 @@ Uses GoogleTest/GoogleMock. Follow TDD: Red (failing test) → Green (minimal co
 - `zoo::engine::ToolRegistry` - Thread-safe registry for tool definitions and invocation
 - `zoo::engine::ToolCallParser` - Detects and extracts tool calls from model output
 - `zoo::engine::ErrorRecovery` - Validates tool arguments and tracks retry attempts
+- `zoo::mcp::McpClient` - Connects to an MCP server, discovers tools, wraps them into ToolRegistry
+- `zoo::mcp::protocol::Session` - Manages JSON-RPC session lifecycle with an MCP server
+- `zoo::mcp::protocol::MessageRouter` - Routes JSON-RPC responses/notifications to pending requests
+- `zoo::mcp::protocol::JsonRpc` - JSON-RPC 2.0 message serialization and deserialization
 
 ## Tool Registration
 
@@ -169,6 +177,17 @@ New error codes for the tool system:
 - `ErrorCode::ToolRetriesExhausted` (503) - Maximum retry attempts exceeded for tool
 - `ErrorCode::ToolLoopLimitReached` (504) - Maximum tool loop iterations exceeded
 
+## Error Codes (Phase 3 Additions)
+
+New error codes for the MCP client:
+- `ErrorCode::McpTransportFailed` (600) - Transport layer failed (process spawn, pipe I/O)
+- `ErrorCode::McpProtocolError` (601) - JSON-RPC protocol violation
+- `ErrorCode::McpServerError` (602) - MCP server returned an error response
+- `ErrorCode::McpSessionFailed` (603) - Session initialization or capability negotiation failed
+- `ErrorCode::McpToolNotAvailable` (604) - Requested tool not available on the MCP server
+- `ErrorCode::McpTimeout` (605) - Request to MCP server timed out
+- `ErrorCode::McpDisconnected` (606) - MCP server disconnected unexpectedly
+
 ## Documentation
 
 - `docs/getting-started.md` - Prerequisites, build, hello-world agent, core API
@@ -178,4 +197,5 @@ New error codes for the tool system:
 - `docs/architecture.md` - Three-layer design, threading model, design principles
 - `docs/configuration.md` - Config fields, sampling params, templates, ChatOptions
 - `docs/examples.md` - Streaming, tools, RAG, context DB, error handling, cancellation
+- `docs/mcp.md` - MCP client, tool federation, transport, error codes
 - `docs/building.md` - CMake options, platform setup, sanitizers, coverage

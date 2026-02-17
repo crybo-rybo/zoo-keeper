@@ -19,6 +19,7 @@ ctest --test-dir build
 | `ZOO_BUILD_TESTS` | Build test suite | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
+| `ZOO_ENABLE_MCP` | MCP client support | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
 
 ## Platform-Specific Setup
@@ -46,6 +47,13 @@ cmake --build build
 ```
 
 Requires CUDA toolkit installed and `nvcc` on PATH.
+
+### MCP Client Support
+
+```bash
+cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON
+cmake --build build
+```
 
 ### CPU Only
 

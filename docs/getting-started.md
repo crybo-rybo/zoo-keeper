@@ -83,6 +83,8 @@ The single entry point for all library functionality. Created via the `Agent::cr
 | `register_tool(name, desc, params, func)` | Register a callable as a tool |
 | `set_retriever(retriever)` | Install a RAG retriever |
 | `enable_context_database(path)` | Enable SQLite long-term memory |
+| `add_mcp_server(config)` | Connect to an MCP server and federate its tools |
+| `mcp_server_count()` | Number of connected MCP servers |
 | `stop()` | Gracefully shut down the agent |
 | `clear_history()` | Clear conversation history |
 | `get_history()` | Get a copy of current conversation messages |

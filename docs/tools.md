@@ -138,8 +138,17 @@ if (response) {
 | 503 | `ToolRetriesExhausted` | Max retries exceeded |
 | 504 | `ToolLoopLimitReached` | Max agentic loop iterations exceeded |
 
+## MCP Tool Federation
+
+Tools discovered from MCP (Model Context Protocol) servers are automatically wrapped and registered into the same `ToolRegistry` used by local tools. This means MCP tools participate in tool call detection, validation, and the agentic loop exactly like native tools.
+
+MCP tool names are prefixed as `mcp_<server_id>:<tool_name>` to avoid collisions with locally registered tools.
+
+See [MCP](mcp.md) for full details on connecting to MCP servers and configuring tool federation.
+
 ## See Also
 
 - [Getting Started](getting-started.md) -- basic Agent setup
 - [Examples](examples.md) -- complete tool usage snippets
+- [MCP](mcp.md) -- MCP client and tool federation
 - [Architecture](architecture.md) -- how the agentic loop works internally
