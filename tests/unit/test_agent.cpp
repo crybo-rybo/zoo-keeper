@@ -601,16 +601,16 @@ TEST_F(AgentTest, QueueFullWithBoundedCapacity) {
     auto& agent = *agent_result;
 
     // First chat occupies the queue slot (or is being processed)
-    auto future1 = agent->chat(Message::user("First"));
+    auto handle1 = agent->chat(Message::user("First"));
 
     // Give the inference thread time to pick up the first request
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     // Submit two more rapidly — one fills the queue, the next should get QueueFull
-    auto future2 = agent->chat(Message::user("Second"));
-    auto future3 = agent->chat(Message::user("Third"));
+    auto handle2 = agent->chat(Message::user("Second"));
+    auto handle3 = agent->chat(Message::user("Third"));
 
-    auto response3 = future3.get();
+    auto response3 = handle3.future.get();
     // At least one of the later requests should fail with QueueFull
     // (timing-dependent, but with capacity=1 and a slow backend, this is reliable)
     if (!response3.has_value()) {
@@ -618,8 +618,8 @@ TEST_F(AgentTest, QueueFullWithBoundedCapacity) {
     }
 
     // Clean up remaining futures
-    (void)future1.get();
-    (void)future2.get();
+    (void)handle1.future.get();
+    (void)handle2.future.get();
 }
 
 TEST_F(AgentTest, UnlimitedQueueByDefault) {
@@ -637,14 +637,14 @@ TEST_F(AgentTest, UnlimitedQueueByDefault) {
     auto& agent = *agent_result;
 
     // Should be able to push many requests without failure
-    std::vector<std::future<Expected<Response>>> futures;
+    std::vector<RequestHandle> handles;
     for (int i = 0; i < 20; ++i) {
-        futures.push_back(agent->chat(Message::user("Message " + std::to_string(i))));
+        handles.push_back(agent->chat(Message::user("Message " + std::to_string(i))));
     }
 
     // All should eventually complete successfully
-    for (auto& f : futures) {
-        auto response = f.get();
+    for (auto& h : handles) {
+        auto response = h.future.get();
         EXPECT_TRUE(response.has_value());
     }
 }
@@ -661,6 +661,87 @@ TEST_F(AgentTest, ConfigQueueCapacityPassedThrough) {
 
     // Verify config is stored correctly
     EXPECT_EQ(agent->get_config().request_queue_capacity, 42u);
+}
+
+// ============================================================================
+// Race Condition Regression Tests (Issue #20)
+// ============================================================================
+
+TEST_F(AgentTest, ConcurrentChatSubmissionsAllResolve) {
+    // Regression test for issue #20: race condition in request/promise pairing.
+    // Stress-tests concurrent chat() submissions to verify no futures are orphaned.
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "OK";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    constexpr int NUM_THREADS = 8;
+    constexpr int REQUESTS_PER_THREAD = 10;
+
+    std::vector<std::thread> threads;
+    std::atomic<int> resolved{0};
+    std::atomic<int> failed{0};
+
+    for (int t = 0; t < NUM_THREADS; ++t) {
+        threads.emplace_back([&]() {
+            for (int i = 0; i < REQUESTS_PER_THREAD; ++i) {
+                auto handle = agent->chat(Message::user("Hello"));
+                auto response = handle.future.get();
+                if (response.has_value()) {
+                    resolved++;
+                } else {
+                    failed++;
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // Every single future must have resolved (no orphaned futures)
+    EXPECT_EQ(resolved.load() + failed.load(), NUM_THREADS * REQUESTS_PER_THREAD);
+    // All should succeed since the agent is running
+    EXPECT_EQ(resolved.load(), NUM_THREADS * REQUESTS_PER_THREAD);
+}
+
+TEST_F(AgentTest, RapidFireSubmissionsAllResolve) {
+    // Regression test for issue #20: rapid sequential submissions from a single
+    // thread should all resolve their futures without blocking indefinitely.
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Response";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    constexpr int NUM_REQUESTS = 50;
+    std::vector<RequestHandle> handles;
+
+    // Submit all requests as fast as possible
+    for (int i = 0; i < NUM_REQUESTS; ++i) {
+        handles.push_back(agent->chat(Message::user("Message " + std::to_string(i))));
+    }
+
+    // All futures must resolve (no indefinite blocking)
+    int resolved = 0;
+    for (auto& h : handles) {
+        auto result = h.future.get();
+        if (result.has_value()) {
+            resolved++;
+        }
+    }
+
+    EXPECT_EQ(resolved, NUM_REQUESTS);
 }
 
 TEST_F(AgentTest, GetHistoryThreadSafe) {

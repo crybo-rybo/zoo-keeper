@@ -485,6 +485,7 @@ struct Request {
     ChatOptions options;                                              ///< Per-request options (RAG, etc.)
     std::optional<std::function<void(std::string_view)>> streaming_callback; ///< Per-token callback override
     std::chrono::steady_clock::time_point submitted_at;               ///< Timestamp for latency tracking
+    std::shared_ptr<std::promise<Expected<Response>>> promise;        ///< Bundled promise for result delivery
     RequestId id = 0;                                                 ///< Unique request identifier
     std::shared_ptr<std::atomic<bool>> cancelled;                     ///< Per-request cancellation flag
 
