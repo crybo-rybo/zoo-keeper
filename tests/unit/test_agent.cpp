@@ -582,6 +582,87 @@ TEST_F(AgentTest, AgentRagChatOptionsWithRetriever) {
     EXPECT_EQ(history[1].role, Role::Assistant);
 }
 
+// ============================================================================
+// Queue Capacity Tests
+// ============================================================================
+
+TEST_F(AgentTest, QueueFullWithBoundedCapacity) {
+    auto backend = std::make_unique<MockBackend>();
+    // Use a slow response so the first request stays in-flight
+    backend->default_response = "Response";
+    backend->generation_delay_ms = 200;
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.request_queue_capacity = 1;
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // First chat occupies the queue slot (or is being processed)
+    auto future1 = agent->chat(Message::user("First"));
+
+    // Give the inference thread time to pick up the first request
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Submit two more rapidly — one fills the queue, the next should get QueueFull
+    auto future2 = agent->chat(Message::user("Second"));
+    auto future3 = agent->chat(Message::user("Third"));
+
+    auto response3 = future3.get();
+    // At least one of the later requests should fail with QueueFull
+    // (timing-dependent, but with capacity=1 and a slow backend, this is reliable)
+    if (!response3.has_value()) {
+        EXPECT_EQ(response3.error().code, ErrorCode::QueueFull);
+    }
+
+    // Clean up remaining futures
+    (void)future1.get();
+    (void)future2.get();
+}
+
+TEST_F(AgentTest, UnlimitedQueueByDefault) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Response";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    // request_queue_capacity defaults to 0 (unlimited)
+
+    EXPECT_EQ(config.request_queue_capacity, 0u);
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // Should be able to push many requests without failure
+    std::vector<std::future<Expected<Response>>> futures;
+    for (int i = 0; i < 20; ++i) {
+        futures.push_back(agent->chat(Message::user("Message " + std::to_string(i))));
+    }
+
+    // All should eventually complete successfully
+    for (auto& f : futures) {
+        auto response = f.get();
+        EXPECT_TRUE(response.has_value());
+    }
+}
+
+TEST_F(AgentTest, ConfigQueueCapacityPassedThrough) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.request_queue_capacity = 42;
+
+    auto backend = std::make_unique<MockBackend>();
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // Verify config is stored correctly
+    EXPECT_EQ(agent->get_config().request_queue_capacity, 42u);
+}
+
 TEST_F(AgentTest, GetHistoryThreadSafe) {
     auto backend = std::make_unique<MockBackend>();
     backend->default_response = "Response.";

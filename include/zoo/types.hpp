@@ -257,6 +257,9 @@ struct Config {
     // System prompt
     std::optional<std::string> system_prompt;                ///< System message prepended to conversations
 
+    // Queue settings
+    size_t request_queue_capacity = 0;                       ///< Maximum request queue size (0 = unlimited)
+
     // Callbacks
     using TokenCallback = std::function<void(std::string_view)>;
     std::optional<TokenCallback> on_token;                   ///< Per-token streaming callback (runs on inference thread)
@@ -290,7 +293,8 @@ struct Config {
                custom_template == other.custom_template &&
                max_tokens == other.max_tokens &&
                stop_sequences == other.stop_sequences &&
-               system_prompt == other.system_prompt;
+               system_prompt == other.system_prompt &&
+               request_queue_capacity == other.request_queue_capacity;
     }
 
     bool operator!=(const Config& other) const {

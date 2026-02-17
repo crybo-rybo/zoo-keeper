@@ -336,6 +336,27 @@ TEST_F(RequestQueueTest, ClearEmptyQueue) {
 // Edge Cases
 // ============================================================================
 
+TEST_F(RequestQueueTest, CapacityAfterPop) {
+    RequestQueue queue(2);  // Max 2 items
+
+    auto msg1 = Message::user("1");
+    auto msg2 = Message::user("2");
+    auto msg3 = Message::user("3");
+
+    EXPECT_TRUE(queue.push(Request(msg1)));
+    EXPECT_TRUE(queue.push(Request(msg2)));
+    EXPECT_FALSE(queue.push(Request(msg3)));  // Full
+
+    // Pop one item — capacity should free up
+    auto popped = queue.pop_for(std::chrono::milliseconds(10));
+    ASSERT_TRUE(popped.has_value());
+    EXPECT_EQ(popped->message.content, "1");
+
+    // Now we can push again
+    EXPECT_TRUE(queue.push(Request(msg3)));
+    EXPECT_EQ(queue.size(), 2);
+}
+
 TEST_F(RequestQueueTest, RapidPushPop) {
     RequestQueue queue;
 
