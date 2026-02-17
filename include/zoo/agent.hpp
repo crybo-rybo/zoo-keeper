@@ -13,6 +13,7 @@
 #include <future>
 #include <memory>
 #include <atomic>
+#include <unordered_map>
 #include <queue>
 #include <algorithm>
 
@@ -126,21 +127,21 @@ public:
     Agent& operator=(Agent&&) = delete;
 
     /**
-     * @brief Submit a chat message and get a future for the response
+     * @brief Submit a chat message and get a handle for the response
      *
      * This is the main public API for inference. It:
      * - Creates a request with the message and optional callback
      * - Pushes to the request queue
-     * - Returns a future that will be fulfilled when inference completes
+     * - Returns a RequestHandle with a unique ID and future
      *
      * The callback (if provided) executes on the inference thread.
      * The caller is responsible for thread-safety if accessing shared state.
      *
      * @param message User message to send
      * @param callback Optional streaming token callback (runs on inference thread)
-     * @return std::future<Expected<Response>> Future response
+     * @return RequestHandle Handle with request ID and future response
      */
-    std::future<Expected<Response>> chat(
+    RequestHandle chat(
         Message message,
         std::optional<std::function<void(std::string_view)>> callback = std::nullopt
     ) {
@@ -153,16 +154,19 @@ public:
      * @param message User message to send
      * @param options Per-request behavior options
      * @param callback Optional streaming token callback (runs on inference thread)
-     * @return std::future<Expected<Response>> Future response
+     * @return RequestHandle Handle with request ID and future response
      */
-    std::future<Expected<Response>> chat(
+    RequestHandle chat(
         Message message,
         ChatOptions options,
         std::optional<std::function<void(std::string_view)>> callback = std::nullopt
     ) {
-        // Create promise for result
+        // Create promise for result and bundle it with the request
         auto promise = std::make_shared<std::promise<Expected<Response>>>();
         std::future<Expected<Response>> future = promise->get_future();
+
+        // Assign unique request ID
+        RequestId request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
 
         // Check if running
         if (!running_.load(std::memory_order_acquire)) {
@@ -170,30 +174,56 @@ public:
                 ErrorCode::AgentNotRunning,
                 "Agent is not running"
             }));
-            return future;
+            return RequestHandle{request_id, std::move(future)};
         }
 
-        // Create request
+        // Create request with bundled promise and cancellation token
+        // Bundled promise eliminates race condition (issue #20)
         Request request(std::move(message), std::move(options), std::move(callback));
+        request.promise = promise;
+        request.id = request_id;
 
-        // Push to request queue first (before adding promise)
-        // This prevents race where inference thread could pop promise before request is queued
+        // Store cancellation token for cancel() API
+        {
+            std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
+            cancel_tokens_[request_id] = request.cancelled;
+        }
+
+        // Push to request queue (promise travels with the request atomically)
         if (!request_queue_->push(std::move(request))) {
             promise->set_value(tl::unexpected(Error{
                 ErrorCode::QueueFull,
                 "Request queue is full or agent is shutting down"
             }));
-            return future;
+            // Clean up cancel token
+            {
+                std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
+                cancel_tokens_.erase(request_id);
+            }
+            return RequestHandle{request_id, std::move(future)};
         }
 
-        // Store promise for retrieval by inference thread
-        // At this point, request is guaranteed to be in queue
-        {
-            std::lock_guard<std::mutex> lock(promises_mutex_);
-            pending_promises_.push(promise);
-        }
+        // Promise travels with the request atomically (no separate promise queue needed)
+        return RequestHandle{request_id, std::move(future)};
+    }
 
-        return future;
+    /**
+     * @brief Cancel a specific chat request by ID
+     *
+     * Sets the per-request cancellation flag. If the request is queued,
+     * it will be skipped when dequeued. If it is in-flight, the agentic
+     * loop will detect the flag and abort at the next iteration boundary.
+     *
+     * Canceling an already-completed or unknown request is a no-op.
+     *
+     * @param id The request ID from the RequestHandle returned by chat()
+     */
+    void cancel(RequestId id) {
+        std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
+        auto it = cancel_tokens_.find(id);
+        if (it != cancel_tokens_.end()) {
+            it->second->store(true, std::memory_order_release);
+        }
     }
 
     /**
@@ -471,7 +501,7 @@ private:
         : config_(config)
         , backend_(std::shared_ptr<backend::IBackend>(std::move(backend)))
         , history_(std::make_shared<engine::HistoryManager>(config.context_size))
-        , request_queue_(std::make_shared<engine::RequestQueue>())
+        , request_queue_(std::make_shared<engine::RequestQueue>(config.request_queue_capacity))
         , tool_registry_(std::make_shared<engine::ToolRegistry>())
         , agentic_loop_(std::make_shared<engine::AgenticLoop>(
             backend_,
@@ -502,7 +532,7 @@ private:
      */
     void inference_loop() {
         while (running_.load(std::memory_order_acquire)) {
-            // Pop request (blocking)
+            // Pop request (blocking) — promise is bundled with the request
             auto request_opt = request_queue_->pop();
 
             // Check shutdown
@@ -510,34 +540,49 @@ private:
                 break;  // Queue shutdown
             }
 
-            // Get corresponding promise
-            std::shared_ptr<std::promise<Expected<Response>>> promise;
-            {
-                std::lock_guard<std::mutex> lock(promises_mutex_);
-                if (!pending_promises_.empty()) {
-                    promise = pending_promises_.front();
-                    pending_promises_.pop();
+            // Extract promise from request (guaranteed to exist for queued requests)
+            auto promise = request_opt->promise;
+
+            // Check per-request cancellation before processing
+            if (request_opt->cancelled &&
+                request_opt->cancelled->load(std::memory_order_acquire)) {
+                if (promise) {
+                    promise->set_value(tl::unexpected(Error{
+                        ErrorCode::RequestCancelled,
+                        "Request cancelled"
+                    }));
                 }
+                // Clean up cancel token
+                {
+                    std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
+                    cancel_tokens_.erase(request_opt->id);
+                }
+                continue;
             }
 
-            // Process request
-            auto result = agentic_loop_->process_request(*request_opt);
+            // Process request (pass cancellation token to agentic loop)
+            auto result = agentic_loop_->process_request(*request_opt, request_opt->cancelled);
 
-            // Fulfill promise
+            // Clean up cancel token
+            {
+                std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
+                cancel_tokens_.erase(request_opt->id);
+            }
+
+            // Fulfill promise — always succeeds since promise travels with request
             if (promise) {
                 promise->set_value(std::move(result));
             }
         }
 
-        // Fulfill remaining promises with shutdown error
-        std::lock_guard<std::mutex> lock(promises_mutex_);
-        while (!pending_promises_.empty()) {
-            auto promise = pending_promises_.front();
-            pending_promises_.pop();
-            promise->set_value(tl::unexpected(Error{
-                ErrorCode::AgentNotRunning,
-                "Agent stopped before request could be processed"
-            }));
+        // Drain any remaining queued requests and fulfill their promises
+        while (auto remaining = request_queue_->pop()) {
+            if (remaining->promise) {
+                remaining->promise->set_value(tl::unexpected(Error{
+                    ErrorCode::AgentNotRunning,
+                    "Agent stopped before request could be processed"
+                }));
+            }
         }
     }
 
@@ -554,11 +599,14 @@ private:
     // Threading
     std::thread inference_thread_;
     std::atomic<bool> running_;
+    std::atomic<uint64_t> next_request_id_{1};  // Monotonically increasing request IDs
 
     // Synchronization
-    std::mutex promises_mutex_;
     mutable std::mutex history_mutex_;  // Protects history_ from concurrent access
-    std::queue<std::shared_ptr<std::promise<Expected<Response>>>> pending_promises_;
+
+    // Per-request cancellation
+    std::mutex cancel_tokens_mutex_;
+    std::unordered_map<RequestId, std::shared_ptr<std::atomic<bool>>> cancel_tokens_;
 
 #ifdef ZOO_ENABLE_MCP
     // MCP clients (one per connected server)

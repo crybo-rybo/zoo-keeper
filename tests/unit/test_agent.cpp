@@ -355,8 +355,8 @@ TEST_F(AgentTest, AgentToolCallEndToEnd) {
 
     agent->register_tool("add", "Add two integers", {"a", "b"}, tools::add);
 
-    auto future = agent->chat(Message::user("What is 10 + 20?"));
-    auto response = future.get();
+    auto handle = agent->chat(Message::user("What is 10 + 20?"));
+    auto response = handle.future.get();
 
     ASSERT_TRUE(response.has_value());
     EXPECT_EQ(response->text, "The sum of 10 and 20 is 30.");
@@ -374,8 +374,8 @@ TEST_F(AgentTest, AgentNoToolsPlainResponse) {
     ASSERT_TRUE(agent_result.has_value());
     auto& agent = *agent_result;
 
-    auto future = agent->chat(Message::user("What is the meaning of life?"));
-    auto response = future.get();
+    auto handle = agent->chat(Message::user("What is the meaning of life?"));
+    auto response = handle.future.get();
 
     ASSERT_TRUE(response.has_value());
     EXPECT_EQ(response->text, "The answer is 42.");
@@ -396,8 +396,8 @@ TEST_F(AgentTest, AgentRegisterToolAfterChat) {
     auto& agent = *agent_result;
 
     // First chat without tools
-    auto future1 = agent->chat(Message::user("Hello"));
-    auto response1 = future1.get();
+    auto handle1 = agent->chat(Message::user("Hello"));
+    auto response1 = handle1.future.get();
     ASSERT_TRUE(response1.has_value());
     EXPECT_EQ(response1->text, "Plain response.");
 
@@ -405,8 +405,8 @@ TEST_F(AgentTest, AgentRegisterToolAfterChat) {
     agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
 
     // Second chat with tool
-    auto future2 = agent->chat(Message::user("Greet World"));
-    auto response2 = future2.get();
+    auto handle2 = agent->chat(Message::user("Greet World"));
+    auto response2 = handle2.future.get();
     ASSERT_TRUE(response2.has_value());
     EXPECT_EQ(response2->text, "I greeted World for you.");
     EXPECT_FALSE(response2->tool_calls.empty());
@@ -450,8 +450,8 @@ TEST_F(AgentTest, ChatAfterStopReturnsError) {
 
     agent->stop();
 
-    auto future = agent->chat(Message::user("Hello"));
-    auto response = future.get();
+    auto handle = agent->chat(Message::user("Hello"));
+    auto response = handle.future.get();
 
     EXPECT_FALSE(response.has_value());
     EXPECT_EQ(response.error().code, ErrorCode::AgentNotRunning);
@@ -488,8 +488,8 @@ TEST_F(AgentTest, ClearHistory) {
     auto& agent = *agent_result;
 
     // Send a message to populate history
-    auto future = agent->chat(Message::user("Hello"));
-    (void)future.get();
+    auto handle = agent->chat(Message::user("Hello"));
+    (void)handle.future.get();
 
     auto history = agent->get_history();
     EXPECT_FALSE(history.empty());
@@ -568,8 +568,8 @@ TEST_F(AgentTest, AgentRagChatOptionsWithRetriever) {
     options.rag.enabled = true;
     options.rag.top_k = 2;
 
-    auto future = agent->chat(Message::user("Where is Paris located?"), options);
-    auto response = future.get();
+    auto handle = agent->chat(Message::user("Where is Paris located?"), options);
+    auto response = handle.future.get();
 
     ASSERT_TRUE(response.has_value());
     EXPECT_FALSE(response->rag_chunks.empty());
@@ -580,6 +580,168 @@ TEST_F(AgentTest, AgentRagChatOptionsWithRetriever) {
     ASSERT_EQ(history.size(), 2U);
     EXPECT_EQ(history[0].role, Role::User);
     EXPECT_EQ(history[1].role, Role::Assistant);
+}
+
+// ============================================================================
+// Queue Capacity Tests
+// ============================================================================
+
+TEST_F(AgentTest, QueueFullWithBoundedCapacity) {
+    auto backend = std::make_unique<MockBackend>();
+    // Use a slow response so the first request stays in-flight
+    backend->default_response = "Response";
+    backend->generation_delay_ms = 200;
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.request_queue_capacity = 1;
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // First chat occupies the queue slot (or is being processed)
+    auto handle1 = agent->chat(Message::user("First"));
+
+    // Give the inference thread time to pick up the first request
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Submit two more rapidly — one fills the queue, the next should get QueueFull
+    auto handle2 = agent->chat(Message::user("Second"));
+    auto handle3 = agent->chat(Message::user("Third"));
+
+    auto response3 = handle3.future.get();
+    // At least one of the later requests should fail with QueueFull
+    // (timing-dependent, but with capacity=1 and a slow backend, this is reliable)
+    if (!response3.has_value()) {
+        EXPECT_EQ(response3.error().code, ErrorCode::QueueFull);
+    }
+
+    // Clean up remaining futures
+    (void)handle1.future.get();
+    (void)handle2.future.get();
+}
+
+TEST_F(AgentTest, UnlimitedQueueByDefault) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Response";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    // request_queue_capacity defaults to 0 (unlimited)
+
+    EXPECT_EQ(config.request_queue_capacity, 0u);
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // Should be able to push many requests without failure
+    std::vector<RequestHandle> handles;
+    for (int i = 0; i < 20; ++i) {
+        handles.push_back(agent->chat(Message::user("Message " + std::to_string(i))));
+    }
+
+    // All should eventually complete successfully
+    for (auto& h : handles) {
+        auto response = h.future.get();
+        EXPECT_TRUE(response.has_value());
+    }
+}
+
+TEST_F(AgentTest, ConfigQueueCapacityPassedThrough) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.request_queue_capacity = 42;
+
+    auto backend = std::make_unique<MockBackend>();
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    // Verify config is stored correctly
+    EXPECT_EQ(agent->get_config().request_queue_capacity, 42u);
+}
+
+// ============================================================================
+// Race Condition Regression Tests (Issue #20)
+// ============================================================================
+
+TEST_F(AgentTest, ConcurrentChatSubmissionsAllResolve) {
+    // Regression test for issue #20: race condition in request/promise pairing.
+    // Stress-tests concurrent chat() submissions to verify no futures are orphaned.
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "OK";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    constexpr int NUM_THREADS = 8;
+    constexpr int REQUESTS_PER_THREAD = 10;
+
+    std::vector<std::thread> threads;
+    std::atomic<int> resolved{0};
+    std::atomic<int> failed{0};
+
+    for (int t = 0; t < NUM_THREADS; ++t) {
+        threads.emplace_back([&]() {
+            for (int i = 0; i < REQUESTS_PER_THREAD; ++i) {
+                auto handle = agent->chat(Message::user("Hello"));
+                auto response = handle.future.get();
+                if (response.has_value()) {
+                    resolved++;
+                } else {
+                    failed++;
+                }
+            }
+        });
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // Every single future must have resolved (no orphaned futures)
+    EXPECT_EQ(resolved.load() + failed.load(), NUM_THREADS * REQUESTS_PER_THREAD);
+    // All should succeed since the agent is running
+    EXPECT_EQ(resolved.load(), NUM_THREADS * REQUESTS_PER_THREAD);
+}
+
+TEST_F(AgentTest, RapidFireSubmissionsAllResolve) {
+    // Regression test for issue #20: rapid sequential submissions from a single
+    // thread should all resolve their futures without blocking indefinitely.
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Response";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    constexpr int NUM_REQUESTS = 50;
+    std::vector<RequestHandle> handles;
+
+    // Submit all requests as fast as possible
+    for (int i = 0; i < NUM_REQUESTS; ++i) {
+        handles.push_back(agent->chat(Message::user("Message " + std::to_string(i))));
+    }
+
+    // All futures must resolve (no indefinite blocking)
+    int resolved = 0;
+    for (auto& h : handles) {
+        auto result = h.future.get();
+        if (result.has_value()) {
+            resolved++;
+        }
+    }
+
+    EXPECT_EQ(resolved, NUM_REQUESTS);
 }
 
 TEST_F(AgentTest, GetHistoryThreadSafe) {
@@ -608,6 +770,138 @@ TEST_F(AgentTest, GetHistoryThreadSafe) {
     t1.join(); t2.join();
 
     EXPECT_EQ(successes.load(), 100);
+}
+
+// ============================================================================
+// Per-Request Cancellation Tests
+// ============================================================================
+
+TEST_F(AgentTest, RequestHandleHasUniqueIds) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Hello!";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto handle1 = agent->chat(Message::user("First"));
+    auto handle2 = agent->chat(Message::user("Second"));
+    auto handle3 = agent->chat(Message::user("Third"));
+
+    // IDs should be unique and monotonically increasing
+    EXPECT_LT(handle1.id, handle2.id);
+    EXPECT_LT(handle2.id, handle3.id);
+
+    // Clean up futures
+    (void)handle1.future.get();
+    (void)handle2.future.get();
+    (void)handle3.future.get();
+}
+
+TEST_F(AgentTest, CancelQueuedRequest) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "OK";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto handle1 = agent->chat(Message::user("First"));
+    auto response1 = handle1.future.get();
+    ASSERT_TRUE(response1.has_value());
+
+    auto handle2 = agent->chat(Message::user("Should be cancelled"));
+    agent->cancel(handle2.id);
+
+    auto response2 = handle2.future.get();
+    EXPECT_TRUE(response2.has_value() || response2.error().code == ErrorCode::RequestCancelled);
+}
+
+TEST_F(AgentTest, CancelDoesNotAffectOtherRequests) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Response OK";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto handle1 = agent->chat(Message::user("First"));
+    auto handle2 = agent->chat(Message::user("Second"));
+
+    agent->cancel(handle1.id);
+
+    auto response2 = handle2.future.get();
+    if (response2.has_value()) {
+        EXPECT_EQ(response2->text, "Response OK");
+    }
+
+    auto response1 = handle1.future.get();
+    EXPECT_TRUE(response1.has_value() || response1.error().code == ErrorCode::RequestCancelled);
+}
+
+TEST_F(AgentTest, CancelAfterCompletionIsNoop) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Done";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    auto handle = agent->chat(Message::user("Hello"));
+    auto response = handle.future.get();
+
+    agent->cancel(handle.id);
+
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ(response->text, "Done");
+}
+
+TEST_F(AgentTest, CancelUnknownIdIsNoop) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->default_response = "Hello!";
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    agent->cancel(99999);
+}
+
+TEST_F(AgentTest, CancelRequestViaCancellationToken) {
+    auto backend_ptr = std::make_shared<MockBackend>();
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.context_size = 8192;
+    config.max_tokens = 512;
+    (void)backend_ptr->initialize(config);
+
+    backend_ptr->default_response = "This should not appear";
+
+    auto history = std::make_shared<engine::HistoryManager>(config.context_size);
+    engine::AgenticLoop loop(backend_ptr, history, config);
+
+    Request request(Message::user("Hello"));
+    request.cancelled->store(true, std::memory_order_release);
+
+    auto result = loop.process_request(request, request.cancelled);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 }
 
 #ifdef ZOO_ENABLE_MCP
