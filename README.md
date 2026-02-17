@@ -13,6 +13,7 @@ A modern C++17 header-only Agent Engine for local LLM inference, built on top of
 - **Agentic Loop**: Automatic tool call detection, execution, and result injection
 - **Error Recovery**: Argument validation with configurable retry logic for failed tool calls
 - **RAG (Ephemeral)**: Per-request retrieval context injection without history pollution
+- **Long-Context Memory (SQLite)**: Automatic archival + retrieval for conversations that exceed model context
 - **Conversation Management**: Automatic history tracking with tool call history
 - **Multiple Prompt Templates**: Built-in support for Llama3, ChatML, and custom formats
 - **Streaming Support**: Token-by-token callbacks for real-time output
@@ -132,6 +133,20 @@ std::cout << std::endl;
 agent->chat(zoo::Message::user("My name is Alice")).get();
 agent->chat(zoo::Message::user("What's my name?")).get();  // Will remember "Alice"
 ```
+
+### Durable Context Database (MVP)
+
+```cpp
+auto init_memory = agent->enable_context_database("memory.sqlite");
+if (!init_memory) {
+    std::cerr << init_memory.error().to_string() << std::endl;
+}
+```
+
+With a context database enabled:
+- Older turns are pruned from active prompt history when the context window is pressured.
+- Pruned turns are archived in SQLite.
+- Relevant archived memory is retrieved and injected ephemerally on future turns.
 
 ### Tool Registration and Calling
 

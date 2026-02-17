@@ -13,6 +13,7 @@ add_executable(zoo_tests
     unit/test_agentic_loop.cpp
     unit/test_agent.cpp
     unit/test_rag_store.cpp
+    unit/test_context_database.cpp
     mocks/mock_backend.cpp
 )
 

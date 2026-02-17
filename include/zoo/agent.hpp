@@ -297,6 +297,28 @@ public:
         agentic_loop_->set_retriever(std::move(retriever));
     }
 
+    /**
+     * @brief Configure a durable SQLite context database for long conversations.
+     *
+     * When configured, old history is archived automatically and retrieved context
+     * is injected ephemerally on future turns.
+     */
+    void set_context_database(std::shared_ptr<engine::ContextDatabase> context_database) {
+        agentic_loop_->set_context_database(std::move(context_database));
+    }
+
+    /**
+     * @brief Open and install a durable SQLite context database.
+     */
+    Expected<void> enable_context_database(const std::string& path) {
+        auto db_result = engine::ContextDatabase::open(path);
+        if (!db_result) {
+            return tl::unexpected(db_result.error());
+        }
+        set_context_database(std::move(*db_result));
+        return {};
+    }
+
 private:
     /**
      * @brief Private constructor - use create() factory method
