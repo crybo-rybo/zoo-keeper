@@ -8,6 +8,7 @@
 #include "tool_call_parser.hpp"
 #include "error_recovery.hpp"
 #include "rag_store.hpp"
+#include "context_database.hpp"
 #include <atomic>
 #include <algorithm>
 #include <memory>
@@ -61,6 +62,16 @@ public:
     }
 
     /**
+     * @brief Enable durable context database memory for automatic long-context retrieval.
+     */
+    void set_context_database(std::shared_ptr<ContextDatabase> context_database) {
+        context_database_ = std::move(context_database);
+        if (context_database_) {
+            retriever_ = context_database_;
+        }
+    }
+
+    /**
      * @brief Set max tool loop iterations (default: 5)
      */
     void set_max_tool_iterations(int max) {
@@ -93,6 +104,7 @@ public:
         size_t user_message_index = 0;
 
         // Add user message to history (with lock)
+        std::vector<Message> pruned_messages;
         {
             auto lock = lock_history();
             if (auto result = history_->add_message(request.message); !result) {
@@ -101,25 +113,51 @@ public:
             user_message_index = history_->get_messages().size() - 1;
 
             if (history_->is_context_exceeded()) {
+                if (context_database_) {
+                    const int target_tokens = std::max(
+                        1,
+                        static_cast<int>(
+                            static_cast<double>(history_->get_context_size()) * memory_prune_target_ratio_));
+                    pruned_messages = history_->prune_oldest_messages_until(
+                        target_tokens,
+                        memory_min_messages_to_keep_);
+                    user_message_index = history_->get_messages().size() - 1;
+                }
+
+                if (history_->is_context_exceeded()) {
+                    history_->remove_last_message();
+                    return finish(tl::unexpected(Error{
+                        ErrorCode::ContextWindowExceeded,
+                        "Context window exceeded",
+                        "Estimated tokens: " + std::to_string(history_->get_estimated_tokens()) +
+                        " / " + std::to_string(history_->get_context_size())
+                    }));
+                }
+            }
+        }
+
+        if (!pruned_messages.empty() && context_database_) {
+            auto archive_result = context_database_->add_messages(pruned_messages, "history_archive");
+            if (!archive_result) {
+                auto lock = lock_history();
+                history_->prepend_messages(pruned_messages);
                 history_->remove_last_message();
-                return finish(tl::unexpected(Error{
-                    ErrorCode::ContextWindowExceeded,
-                    "Context window exceeded",
-                    "Estimated tokens: " + std::to_string(history_->get_estimated_tokens()) +
-                    " / " + std::to_string(history_->get_context_size())
-                }));
+                return finish(tl::unexpected(archive_result.error()));
             }
         }
 
         std::vector<RagChunk> rag_chunks;
         std::string rag_context;
-        if (request.options.rag.enabled) {
+        const bool use_retrieval = request.options.rag.enabled || static_cast<bool>(context_database_);
+        if (use_retrieval) {
             if (request.options.rag.context_override.has_value()) {
                 rag_context = *request.options.rag.context_override;
             } else if (retriever_) {
+                const int retrieval_top_k =
+                    request.options.rag.enabled ? request.options.rag.top_k : memory_retrieval_top_k_;
                 auto rag_result = retriever_->retrieve(RagQuery{
                     request.message.content,
-                    request.options.rag.top_k
+                    retrieval_top_k
                 });
                 if (!rag_result) {
                     rollback_last_message();
@@ -397,7 +435,11 @@ private:
     std::atomic<bool> cancelled_;
     std::shared_ptr<ToolRegistry> tool_registry_;
     std::shared_ptr<IRetriever> retriever_;
+    std::shared_ptr<ContextDatabase> context_database_;
     int max_tool_iterations_ = 5;
+    int memory_retrieval_top_k_ = 4;
+    int memory_min_messages_to_keep_ = 6;
+    double memory_prune_target_ratio_ = 0.75;
 
     std::vector<Message> build_prompt_messages(
         const std::vector<Message>& history_messages,

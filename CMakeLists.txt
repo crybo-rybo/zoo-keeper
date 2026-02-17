@@ -20,6 +20,7 @@ option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
 
 # Include dependencies
 include(cmake/FetchDependencies.cmake)
+find_package(SQLite3 REQUIRED)
 
 # Header-only library target
 add_library(zoo INTERFACE)
@@ -28,7 +29,7 @@ target_include_directories(zoo INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(zoo INTERFACE cxx_std_17)
-target_link_libraries(zoo INTERFACE nlohmann_json::nlohmann_json tl::expected)
+target_link_libraries(zoo INTERFACE nlohmann_json::nlohmann_json tl::expected SQLite::SQLite3)
 
 # Llama Backend (requires linking)
 add_library(zoo_backend STATIC src/backend/llama_backend.cpp)

@@ -153,6 +153,61 @@ public:
     }
 
     /**
+     * @brief Remove oldest non-system messages until token budget is met.
+     *
+     * This is used by long-context memory integration to keep recent turns in
+     * active history while archiving older turns externally.
+     *
+     * @param target_tokens Desired post-prune token budget
+     * @param min_messages_to_keep Minimum number of newest messages to keep
+     * @return std::vector<Message> Removed messages in original order
+     */
+    std::vector<Message> prune_oldest_messages_until(
+        int target_tokens,
+        size_t min_messages_to_keep = 4
+    ) {
+        std::vector<Message> removed;
+        if (messages_.empty()) {
+            return removed;
+        }
+
+        const bool has_system = messages_[0].role == Role::System;
+        const size_t first_removable_index = has_system ? 1U : 0U;
+
+        while (estimated_tokens_ > target_tokens) {
+            if (messages_.size() <= first_removable_index + min_messages_to_keep) {
+                break;
+            }
+
+            Message removed_msg = std::move(messages_[first_removable_index]);
+            estimated_tokens_ -= estimate_tokens(removed_msg.content);
+            messages_.erase(messages_.begin() + static_cast<std::ptrdiff_t>(first_removable_index));
+            removed.push_back(std::move(removed_msg));
+        }
+
+        return removed;
+    }
+
+    /**
+     * @brief Restore previously pruned messages near the front of history.
+     *
+     * Messages are inserted after the system prompt when present.
+     */
+    void prepend_messages(const std::vector<Message>& messages) {
+        if (messages.empty()) {
+            return;
+        }
+
+        const bool has_system = !messages_.empty() && messages_[0].role == Role::System;
+        const auto insert_pos = messages_.begin() + static_cast<std::ptrdiff_t>(has_system ? 1U : 0U);
+        messages_.insert(insert_pos, messages.begin(), messages.end());
+
+        for (const auto& msg : messages) {
+            estimated_tokens_ += estimate_tokens(msg.content);
+        }
+    }
+
+    /**
      * @brief Clear all messages
      */
     void clear() {

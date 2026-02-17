@@ -77,6 +77,7 @@
 #include "engine/error_recovery.hpp"
 #include "engine/agentic_loop.hpp"
 #include "engine/rag_store.hpp"
+#include "engine/context_database.hpp"
 
 /**
  * @namespace zoo
