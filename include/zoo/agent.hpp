@@ -13,6 +13,7 @@
 #include <future>
 #include <memory>
 #include <atomic>
+#include <mutex>
 #include <unordered_map>
 #include <queue>
 #include <algorithm>
@@ -231,11 +232,11 @@ public:
      *
      * Updates the system message in conversation history.
      * Thread-safe: Can be called from any thread at any time.
+     * HistoryManager provides internal locking.
      *
      * @param prompt System prompt text
      */
     void set_system_prompt(const std::string& prompt) {
-        std::lock_guard<std::mutex> lock(history_mutex_);
         history_->set_system_prompt(prompt);
     }
 
@@ -287,11 +288,11 @@ public:
      *
      * Thread-safe: Returns a copy of the current conversation history.
      * Can be called from any thread at any time.
+     * HistoryManager provides internal locking.
      *
      * @return std::vector<Message> Copy of message history
      */
     std::vector<Message> get_history() const {
-        std::lock_guard<std::mutex> lock(history_mutex_);
         return history_->get_messages();
     }
 
@@ -299,9 +300,9 @@ public:
      * @brief Clear conversation history
      *
      * Thread-safe: Can be called from any thread at any time.
+     * HistoryManager provides internal locking.
      */
     void clear_history() {
-        std::lock_guard<std::mutex> lock(history_mutex_);
         history_->clear();
     }
 
@@ -500,14 +501,22 @@ private:
     Agent(const Config& config, std::unique_ptr<backend::IBackend> backend)
         : config_(config)
         , backend_(std::shared_ptr<backend::IBackend>(std::move(backend)))
-        , history_(std::make_shared<engine::HistoryManager>(config.context_size))
+        , history_(std::make_shared<engine::HistoryManager>(
+            config.context_size,
+            [b = backend_.get()](const std::string& text) -> int {
+                auto result = b->tokenize(text);
+                if (result && !result->empty()) {
+                    return static_cast<int>(result->size());
+                }
+                return std::max(1, static_cast<int>(text.length() / 4));
+            }
+        ))
         , request_queue_(std::make_shared<engine::RequestQueue>(config.request_queue_capacity))
         , tool_registry_(std::make_shared<engine::ToolRegistry>())
         , agentic_loop_(std::make_shared<engine::AgenticLoop>(
             backend_,
             history_,
-            config,
-            &history_mutex_
+            config
         ))
         , running_(true)
     {
@@ -600,9 +609,6 @@ private:
     std::thread inference_thread_;
     std::atomic<bool> running_;
     std::atomic<uint64_t> next_request_id_{1};  // Monotonically increasing request IDs
-
-    // Synchronization
-    mutable std::mutex history_mutex_;  // Protects history_ from concurrent access
 
     // Per-request cancellation
     std::mutex cancel_tokens_mutex_;

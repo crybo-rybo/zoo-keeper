@@ -24,6 +24,24 @@ namespace engine {
 class ContextDatabase : public IRetriever {
 public:
     ~ContextDatabase() {
+        // Finalize all cached prepared statements before closing the database.
+        if (stmt_insert_ != nullptr) {
+            sqlite3_finalize(stmt_insert_);
+            stmt_insert_ = nullptr;
+        }
+        if (stmt_fts_insert_ != nullptr) {
+            sqlite3_finalize(stmt_fts_insert_);
+            stmt_fts_insert_ = nullptr;
+        }
+        if (stmt_fts_select_ != nullptr) {
+            sqlite3_finalize(stmt_fts_select_);
+            stmt_fts_select_ = nullptr;
+        }
+        if (stmt_size_ != nullptr) {
+            sqlite3_finalize(stmt_size_);
+            stmt_size_ = nullptr;
+        }
+
         if (db_ != nullptr) {
             sqlite3_close(db_);
             db_ = nullptr;
@@ -69,52 +87,41 @@ public:
 
         std::lock_guard<std::mutex> lock(mutex_);
 
-        sqlite3_stmt* insert_stmt = nullptr;
-        constexpr const char* insert_sql =
-            "INSERT INTO memory_messages(role, content, source, created_at) VALUES (?1, ?2, ?3, ?4)";
-
-        if (sqlite3_prepare_v2(db_, insert_sql, -1, &insert_stmt, nullptr) != SQLITE_OK) {
-            return tl::unexpected(make_sql_error("Failed to prepare message insert"));
-        }
-
         const auto created_at = static_cast<sqlite3_int64>(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
         const char* role = role_to_string(message.role);
-        sqlite3_bind_text(insert_stmt, 1, role, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(insert_stmt, 2, message.content.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt_insert_, 1, role, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt_insert_, 2, message.content.c_str(), -1, SQLITE_TRANSIENT);
 
         if (source.has_value()) {
-            sqlite3_bind_text(insert_stmt, 3, source->c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt_insert_, 3, source->c_str(), -1, SQLITE_TRANSIENT);
         } else {
-            sqlite3_bind_null(insert_stmt, 3);
+            sqlite3_bind_null(stmt_insert_, 3);
         }
-        sqlite3_bind_int64(insert_stmt, 4, created_at);
+        sqlite3_bind_int64(stmt_insert_, 4, created_at);
 
-        if (sqlite3_step(insert_stmt) != SQLITE_DONE) {
-            sqlite3_finalize(insert_stmt);
+        if (sqlite3_step(stmt_insert_) != SQLITE_DONE) {
+            sqlite3_reset(stmt_insert_);
+            sqlite3_clear_bindings(stmt_insert_);
             return tl::unexpected(make_sql_error("Failed to insert message into context database"));
         }
-        sqlite3_finalize(insert_stmt);
+        sqlite3_reset(stmt_insert_);
+        sqlite3_clear_bindings(stmt_insert_);
 
         const sqlite3_int64 row_id = sqlite3_last_insert_rowid(db_);
 
-        if (fts_enabled_) {
-            sqlite3_stmt* fts_stmt = nullptr;
-            constexpr const char* fts_insert_sql =
-                "INSERT INTO memory_fts(message_id, content) VALUES (?1, ?2)";
-            if (sqlite3_prepare_v2(db_, fts_insert_sql, -1, &fts_stmt, nullptr) == SQLITE_OK) {
-                sqlite3_bind_int64(fts_stmt, 1, row_id);
-                sqlite3_bind_text(fts_stmt, 2, message.content.c_str(), -1, SQLITE_TRANSIENT);
-                if (sqlite3_step(fts_stmt) != SQLITE_DONE) {
-                    sqlite3_finalize(fts_stmt);
-                    return tl::unexpected(make_sql_error("Failed to update context FTS index"));
-                }
-                sqlite3_finalize(fts_stmt);
-            } else {
-                return tl::unexpected(make_sql_error("Failed to prepare context FTS insert"));
+        if (fts_enabled_ && stmt_fts_insert_ != nullptr) {
+            sqlite3_bind_int64(stmt_fts_insert_, 1, row_id);
+            sqlite3_bind_text(stmt_fts_insert_, 2, message.content.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt_fts_insert_) != SQLITE_DONE) {
+                sqlite3_reset(stmt_fts_insert_);
+                sqlite3_clear_bindings(stmt_fts_insert_);
+                return tl::unexpected(make_sql_error("Failed to update context FTS index"));
             }
+            sqlite3_reset(stmt_fts_insert_);
+            sqlite3_clear_bindings(stmt_fts_insert_);
         }
 
         return {};
@@ -155,21 +162,11 @@ public:
     Expected<size_t> size() const {
         std::lock_guard<std::mutex> lock(mutex_);
 
-        sqlite3_stmt* stmt = nullptr;
-        constexpr const char* sql = "SELECT COUNT(*) FROM memory_messages";
-        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-            return tl::unexpected(Error{
-                ErrorCode::Unknown,
-                "Failed to count context database rows",
-                db_path_
-            });
-        }
-
         size_t count = 0;
-        if (sqlite3_step(stmt) == SQLITE_ROW) {
-            count = static_cast<size_t>(sqlite3_column_int64(stmt, 0));
+        if (sqlite3_step(stmt_size_) == SQLITE_ROW) {
+            count = static_cast<size_t>(sqlite3_column_int64(stmt_size_, 0));
         }
-        sqlite3_finalize(stmt);
+        sqlite3_reset(stmt_size_);
         return count;
     }
 
@@ -217,6 +214,38 @@ private:
             fts_enabled_ = false;
         }
 
+        // Prepare cached statements that are always needed.
+        constexpr const char* insert_sql =
+            "INSERT INTO memory_messages(role, content, source, created_at) VALUES (?1, ?2, ?3, ?4)";
+        if (sqlite3_prepare_v2(db_, insert_sql, -1, &stmt_insert_, nullptr) != SQLITE_OK) {
+            return tl::unexpected(make_sql_error("Failed to prepare cached insert statement"));
+        }
+
+        constexpr const char* size_sql = "SELECT COUNT(*) FROM memory_messages";
+        if (sqlite3_prepare_v2(db_, size_sql, -1, &stmt_size_, nullptr) != SQLITE_OK) {
+            return tl::unexpected(make_sql_error("Failed to prepare cached size statement"));
+        }
+
+        // Prepare FTS-specific cached statements only when FTS is enabled.
+        if (fts_enabled_) {
+            constexpr const char* fts_insert_sql =
+                "INSERT INTO memory_fts(message_id, content) VALUES (?1, ?2)";
+            if (sqlite3_prepare_v2(db_, fts_insert_sql, -1, &stmt_fts_insert_, nullptr) != SQLITE_OK) {
+                return tl::unexpected(make_sql_error("Failed to prepare cached FTS insert statement"));
+            }
+
+            constexpr const char* fts_select_sql =
+                "SELECT m.id, m.content, m.source, -bm25(memory_fts) AS score "
+                "FROM memory_fts "
+                "JOIN memory_messages m ON m.id = memory_fts.message_id "
+                "WHERE memory_fts MATCH ?1 "
+                "ORDER BY bm25(memory_fts), m.id DESC "
+                "LIMIT ?2";
+            if (sqlite3_prepare_v2(db_, fts_select_sql, -1, &stmt_fts_select_, nullptr) != SQLITE_OK) {
+                return tl::unexpected(make_sql_error("Failed to prepare cached FTS select statement"));
+            }
+        }
+
         return {};
     }
 
@@ -256,24 +285,12 @@ private:
             fts_query += terms[i];
         }
 
-        sqlite3_stmt* stmt = nullptr;
-        constexpr const char* sql =
-            "SELECT m.id, m.content, m.source, -bm25(memory_fts) AS score "
-            "FROM memory_fts "
-            "JOIN memory_messages m ON m.id = memory_fts.message_id "
-            "WHERE memory_fts MATCH ?1 "
-            "ORDER BY bm25(memory_fts), m.id DESC "
-            "LIMIT ?2";
+        sqlite3_bind_text(stmt_fts_select_, 1, fts_query.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt_fts_select_, 2, top_k);
 
-        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-            return tl::unexpected(make_sql_error("Failed to prepare FTS query"));
-        }
-
-        sqlite3_bind_text(stmt, 1, fts_query.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 2, top_k);
-
-        auto rows = read_rows_as_chunks(stmt);
-        sqlite3_finalize(stmt);
+        auto rows = read_rows_as_chunks(stmt_fts_select_);
+        sqlite3_reset(stmt_fts_select_);
+        sqlite3_clear_bindings(stmt_fts_select_);
         return rows;
     }
 
@@ -281,23 +298,27 @@ private:
         const std::vector<std::string>& terms,
         int top_k
     ) const {
-        sqlite3_stmt* stmt = nullptr;
-        constexpr const char* sql =
-            "SELECT id, content, source FROM memory_messages "
-            "WHERE content LIKE ?1 "
-            "ORDER BY id DESC "
-            "LIMIT ?2";
+        // Build a dynamic SQL query with one LIKE clause per term joined with OR.
+        std::string sql = "SELECT id, content, source FROM memory_messages WHERE ";
+        for (size_t i = 0; i < terms.size(); ++i) {
+            if (i > 0) {
+                sql += " OR ";
+            }
+            sql += "content LIKE ?" + std::to_string(i + 1);
+        }
+        sql += " ORDER BY id DESC LIMIT ?" + std::to_string(terms.size() + 1);
 
-        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
             return tl::unexpected(make_sql_error("Failed to prepare fallback memory query"));
         }
 
-        std::string pattern = "%";
-        pattern += terms.front();
-        pattern += "%";
-
-        sqlite3_bind_text(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 2, top_k);
+        // Bind each term as a LIKE pattern.
+        for (size_t i = 0; i < terms.size(); ++i) {
+            std::string pattern = "%" + terms[i] + "%";
+            sqlite3_bind_text(stmt, static_cast<int>(i + 1), pattern.c_str(), -1, SQLITE_TRANSIENT);
+        }
+        sqlite3_bind_int(stmt, static_cast<int>(terms.size() + 1), top_k);
 
         std::vector<RagChunk> chunks;
         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -379,6 +400,12 @@ private:
     std::string db_path_;
     bool fts_enabled_ = false;
     mutable std::mutex mutex_;
+
+    // Cached prepared statements (prepared once in initialize_schema, finalized in destructor).
+    sqlite3_stmt* stmt_insert_     = nullptr;
+    sqlite3_stmt* stmt_fts_insert_ = nullptr;
+    mutable sqlite3_stmt* stmt_fts_select_ = nullptr;
+    mutable sqlite3_stmt* stmt_size_       = nullptr;
 };
 
 } // namespace engine

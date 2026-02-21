@@ -1,8 +1,26 @@
 #include "zoo/backend/llama_backend.hpp"
 #include <llama.h>
+#include <atomic>
+#include <mutex>
 
 namespace zoo {
 namespace backend {
+
+// File-scope statics for idempotent global initialization
+static std::once_flag g_init_flag;
+static std::atomic<bool> g_initialized{false};
+
+void LlamaBackend::initialize_global() {
+    std::call_once(g_init_flag, []() {
+        llama_backend_init();
+        ggml_backend_load_all();
+        g_initialized.store(true, std::memory_order_release);
+    });
+}
+
+void LlamaBackend::shutdown_global() {
+    llama_backend_free();
+}
 
 LlamaBackend::LlamaBackend() {
     // Suppress llama.cpp/ggml internal logging to prevent output noise
@@ -13,10 +31,9 @@ LlamaBackend::LlamaBackend() {
         }
     }, nullptr);
 
-    // Initialize llama.cpp backend (call once at program start)
-    // This is idempotent and safe to call multiple times
-    llama_backend_init();
-    ggml_backend_load_all();
+    // Note: Global backend initialization (llama_backend_init / ggml_backend_load_all)
+    // is no longer performed here. Call LlamaBackend::initialize_global() once at
+    // program start, or rely on the lazy initialization in LlamaBackend::initialize().
 }
 
 LlamaBackend::~LlamaBackend() {
@@ -35,10 +52,13 @@ LlamaBackend::~LlamaBackend() {
     }
 
     // Note: We don't call llama_backend_free() here as it should only be called
-    // once at program exit, not for each LlamaBackend instance
+    // once at program exit via LlamaBackend::shutdown_global(), not per instance.
 }
 
 Expected<void> LlamaBackend::initialize(const Config& config) {
+    // Ensure global backend is initialized (idempotent lazy-init for backward compatibility)
+    initialize_global();
+
     // Validate config first
     auto validation = config.validate();
     if (!validation) {
