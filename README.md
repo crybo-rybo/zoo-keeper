@@ -1,6 +1,6 @@
 # Zoo-Keeper
 
-[![Tests](https://img.shields.io/badge/tests-301%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-316%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 A header-only C++17 Agent Engine for local LLM inference, built on [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper handles the hard parts of building agentic AI -- conversation management, tool calling, context window pressure, and retrieval-augmented generation -- so you can focus on your application.
 
@@ -76,7 +76,7 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Testing
 
-301 unit tests using GoogleTest:
+316 unit tests using GoogleTest:
 
 ```bash
 ctest --test-dir build --output-on-failure
