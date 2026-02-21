@@ -37,13 +37,11 @@ public:
     AgenticLoop(
         std::shared_ptr<backend::IBackend> backend,
         std::shared_ptr<HistoryManager> history,
-        const Config& config,
-        std::mutex* history_mutex = nullptr
+        const Config& config
     )
         : backend_(std::move(backend))
         , history_(std::move(history))
         , config_(config)
-        , history_mutex_(history_mutex)
         , cancelled_(false)
     {}
 
@@ -118,10 +116,9 @@ public:
         auto start_time = std::chrono::steady_clock::now();
         size_t user_message_index = 0;
 
-        // Add user message to history (with lock)
+        // Add user message to history
         std::vector<Message> pruned_messages;
         {
-            auto lock = lock_history();
             if (auto result = history_->add_message(request.message); !result) {
                 return finish(tl::unexpected(result.error()));
             }
@@ -154,7 +151,6 @@ public:
         if (!pruned_messages.empty() && context_database_) {
             auto archive_result = context_database_->add_messages(pruned_messages, "history_archive");
             if (!archive_result) {
-                auto lock = lock_history();
                 history_->prepend_messages(pruned_messages);
                 history_->remove_last_message();
                 return finish(tl::unexpected(archive_result.error()));
@@ -212,16 +208,20 @@ public:
                 }));
             }
 
-            // Format prompt
+            // Format prompt — avoid copying history when there is no RAG context
             std::string prompt;
             {
-                auto lock = lock_history();
-                auto prompt_messages = build_prompt_messages(
-                    history_->get_messages(),
-                    user_message_index,
-                    rag_context
-                );
-                auto prompt_result = backend_->format_prompt(prompt_messages);
+                Expected<std::string> prompt_result;
+                if (rag_context.empty()) {
+                    prompt_result = backend_->format_prompt(history_->get_messages());
+                } else {
+                    auto prompt_messages = build_prompt_messages(
+                        history_->get_messages(),
+                        user_message_index,
+                        rag_context
+                    );
+                    prompt_result = backend_->format_prompt(prompt_messages);
+                }
                 if (!prompt_result) {
                     rollback_last_message();
                     return finish(tl::unexpected(prompt_result.error()));
@@ -286,11 +286,8 @@ public:
 
                         // Build error content once, reuse for history and tracking
                         std::string error_content = "Error: " + validation_error;
-                        {
-                            auto lock = lock_history();
-                            (void)history_->add_message(Message::tool(
-                                error_content + "\nPlease correct the arguments.", tc.id));
-                        }
+                        (void)history_->add_message(Message::tool(
+                            error_content + "\nPlease correct the arguments.", tc.id));
                         tool_call_history.push_back(
                             Message::tool(std::move(error_content), tc.id));
                         continue;  // Loop back for retry
@@ -307,12 +304,9 @@ public:
 
                     // Build tool result message once; copy to history, move to tracking
                     Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
-                    {
-                        auto lock = lock_history();
-                        auto add_result = history_->add_message(tool_msg);
-                        if (!add_result) {
-                            return finish(tl::unexpected(add_result.error()));
-                        }
+                    auto add_result = history_->add_message(tool_msg);
+                    if (!add_result) {
+                        return finish(tl::unexpected(add_result.error()));
                     }
                     tool_call_history.push_back(std::move(tool_msg));
 
@@ -391,23 +385,13 @@ public:
     }
 
 private:
-    /** @brief Acquire history lock if mutex is provided. */
-    std::unique_lock<std::mutex> lock_history() {
-        if (history_mutex_) {
-            return std::unique_lock<std::mutex>(*history_mutex_);
-        }
-        return {};
-    }
-
     /** @brief Remove the last message from history (error recovery). */
     void rollback_last_message() {
-        auto lock = lock_history();
         history_->remove_last_message();
     }
 
     /** @brief Add assistant message to history and finalize backend state. */
     Expected<void> commit_assistant_response(const std::string& text) {
-        auto lock = lock_history();
         auto add_result = history_->add_message(Message::assistant(text));
         if (!add_result) {
             return tl::unexpected(add_result.error());
@@ -446,7 +430,6 @@ private:
     std::shared_ptr<backend::IBackend> backend_;
     std::shared_ptr<HistoryManager> history_;
     Config config_;
-    std::mutex* history_mutex_;
     std::atomic<bool> cancelled_;
     std::shared_ptr<ToolRegistry> tool_registry_;
     std::shared_ptr<IRetriever> retriever_;

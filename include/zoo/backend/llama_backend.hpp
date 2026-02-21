@@ -35,6 +35,19 @@ public:
     LlamaBackend(LlamaBackend&&) = delete;
     LlamaBackend& operator=(LlamaBackend&&) = delete;
 
+    /**
+     * @brief Initialize the global llama.cpp process-level backend.
+     * Call once at program start, before creating any LlamaBackend instance.
+     * This is idempotent — subsequent calls are no-ops.
+     */
+    static void initialize_global();
+
+    /**
+     * @brief Free the global llama.cpp process-level backend.
+     * Call once at program exit, after all LlamaBackend instances are destroyed.
+     */
+    static void shutdown_global();
+
     // IBackend interface implementation
     Expected<void> initialize(const Config& config) override;
     Expected<std::vector<int>> tokenize(const std::string& text) override;

@@ -4,6 +4,8 @@
 #include <vector>
 #include <algorithm>
 #include <string_view>
+#include <functional>
+#include <mutex>
 
 namespace zoo {
 namespace engine {
@@ -14,27 +16,33 @@ namespace engine {
  * MVP Responsibilities:
  * - Store conversation messages in order
  * - Basic role sequence validation
- * - Token count estimation (4 chars ≈ 1 token)
+ * - Token count estimation (4 chars ≈ 1 token, or pluggable tokenizer)
  * - Provide full history for rendering
  *
  * MVP Shortcuts (Production in Phase 2-3):
- * - No context pruning (will overflow eventually)
  * - No KV cache reuse optimization
- * - Simple token estimation instead of real tokenization
  * - Basic role validation instead of full state machine
  *
- * Thread Safety: Single-threaded (inference thread only)
+ * Thread Safety: Internally synchronized via mutex
  */
 class HistoryManager {
 public:
     /**
-     * @brief Construct with context size limit
+     * @brief Construct with context size limit and optional tokenizer
      *
      * @param context_size Maximum context window size in tokens
+     * @param tokenizer Optional callable for accurate token counting.
+     *        Receives text and returns token count (> 0). When null or
+     *        when the callable returns <= 0, falls back to the 4-chars-per-token
+     *        heuristic.
      */
-    explicit HistoryManager(int context_size)
+    explicit HistoryManager(
+        int context_size,
+        std::function<int(const std::string&)> tokenizer = nullptr
+    )
         : context_size_(context_size)
         , estimated_tokens_(0)
+        , tokenizer_(std::move(tokenizer))
     {}
 
     /**
@@ -46,6 +54,8 @@ public:
      * @return Expected<void> Success or validation error
      */
     Expected<void> add_message(const Message& message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         // Basic role validation
         if (auto err = validate_role_sequence(message.role); !err) {
             return tl::unexpected(err.error());
@@ -69,6 +79,8 @@ public:
      * @return Expected<void> Success or validation error
      */
     Expected<void> add_message(Message&& message) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         // Basic role validation
         if (auto err = validate_role_sequence(message.role); !err) {
             return tl::unexpected(err.error());
@@ -91,6 +103,8 @@ public:
      * @param prompt System prompt content
      */
     void set_system_prompt(const std::string& prompt) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         Message sys_msg = Message::system(prompt);
 
         // Replace existing system prompt or insert at beginning
@@ -107,31 +121,32 @@ public:
     /**
      * @brief Get all messages
      *
-     * @return const std::vector<Message>& Message history
+     * @return std::vector<Message> Copy of message history
      */
     const std::vector<Message>& get_messages() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         return messages_;
     }
 
     /**
      * @brief Get estimated token count
      *
-     * Uses 4 chars ≈ 1 token heuristic.
+     * Uses pluggable tokenizer when available, otherwise 4 chars per token.
      *
      * @return int Estimated token count
      */
     int get_estimated_tokens() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         return estimated_tokens_;
     }
 
     /**
      * @brief Check if context window is exceeded
      *
-     * MVP: No pruning, just warning.
-     *
      * @return bool True if estimated tokens exceed context size
      */
     bool is_context_exceeded() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         return estimated_tokens_ > context_size_;
     }
 
@@ -144,6 +159,8 @@ public:
      * @return bool True if a message was removed, false if history was empty
      */
     bool remove_last_message() {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         if (messages_.empty()) {
             return false;
         }
@@ -166,6 +183,8 @@ public:
         int target_tokens,
         size_t min_messages_to_keep = 4
     ) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         std::vector<Message> removed;
         if (messages_.empty()) {
             return removed;
@@ -194,6 +213,8 @@ public:
      * Messages are inserted after the system prompt when present.
      */
     void prepend_messages(const std::vector<Message>& messages) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         if (messages.empty()) {
             return;
         }
@@ -211,6 +232,7 @@ public:
      * @brief Clear all messages
      */
     void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
         messages_.clear();
         estimated_tokens_ = 0;
     }
@@ -219,24 +241,31 @@ public:
      * @brief Get context size
      */
     int get_context_size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
         return context_size_;
     }
 
 private:
+    mutable std::mutex mutex_;
     std::vector<Message> messages_;
     int context_size_;
     int estimated_tokens_;
+    std::function<int(const std::string&)> tokenizer_;
 
     /**
      * @brief Estimate token count from text
      *
-     * Simple heuristic: ~4 characters per token
-     * Production: Use actual backend tokenization with caching
+     * Uses the pluggable tokenizer when available and returns a valid count.
+     * Falls back to the 4-chars-per-token heuristic.
      *
      * @param text Input text
-     * @return int Estimated token count
+     * @return int Estimated token count (>= 1)
      */
-    static int estimate_tokens(std::string_view text) {
+    int estimate_tokens(const std::string& text) const {
+        if (tokenizer_) {
+            int count = tokenizer_(text);
+            if (count > 0) return count;
+        }
         return std::max(1, static_cast<int>(text.length() / 4));
     }
 
@@ -252,6 +281,8 @@ private:
      *
      * @param role Role to add
      * @return Expected<void> Success or error
+     *
+     * NOTE: Must be called with mutex_ already held.
      */
     Expected<void> validate_role_sequence(Role role) const {
         // Empty history: allow any role except Tool
