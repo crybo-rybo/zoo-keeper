@@ -346,6 +346,13 @@ Expected<std::string> LlamaBackend::format_prompt(const std::vector<Message>& me
         });
     }
 
+    // If history shrank (e.g. from clear_history() or an ephemeral context removal
+    // that wasn't already caught), we must reset the prompt cache and KV cache
+    // since the new prompt is shorter than what we previously processed.
+    if (new_len < prev_len_) {
+        clear_kv_cache();
+    }
+
     // Return only the incremental portion (new text since last call)
     std::string prompt(formatted_.begin() + prev_len_, formatted_.begin() + new_len);
     return prompt;
