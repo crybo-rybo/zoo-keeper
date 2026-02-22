@@ -16,6 +16,7 @@
 #endif
 
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -73,8 +74,8 @@ public:
         }
         cmd_parts.push_back(nullptr);
 
-        int options = subprocess_option_enable_async |
-                      subprocess_option_inherit_environment;
+        int options = subprocess_option_inherit_environment |
+                      subprocess_option_search_user_path;
 
         int result = subprocess_create(
             cmd_parts.data(),
@@ -171,14 +172,13 @@ private:
         char chunk[4096];
 
         while (connected_.load()) {
-            size_t bytes_read = fread(chunk, 1, sizeof(chunk), stdout_fp);
-
-            if (bytes_read == 0) {
+            if (!fgets(chunk, sizeof(chunk), stdout_fp)) {
                 if (feof(stdout_fp) || ferror(stdout_fp)) {
                     break; // EOF or error
                 }
                 continue;
             }
+            size_t bytes_read = strlen(chunk);
 
             buffer.append(chunk, bytes_read);
 
