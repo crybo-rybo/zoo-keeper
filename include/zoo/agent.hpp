@@ -522,7 +522,10 @@ private:
                     return static_cast<int>(result->size());
                 }
                 return std::max(1, static_cast<int>(text.length() / 4));
-            }
+            },
+            8  // template_overhead_per_message: accounts for role markers, BOS/EOS,
+               // turn separators added by chat template (~6-10 tokens per turn for
+               // Gemma, Llama, Phi models)
         ))
         , request_queue_(std::make_shared<engine::RequestQueue>(config.request_queue_capacity))
         , tool_registry_(std::make_shared<engine::ToolRegistry>())

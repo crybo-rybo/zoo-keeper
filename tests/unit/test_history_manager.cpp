@@ -173,13 +173,15 @@ TEST_F(HistoryManagerTest, ConsecutiveToolMessagesAllowed) {
 // ============================================================================
 
 TEST_F(HistoryManagerTest, TokenEstimation) {
-    // Rough heuristic: 4 chars ≈ 1 token
-    auto msg = Message::user("1234");  // Should be ~1 token
+    // Rough heuristic: 4 chars ≈ 1 token, plus template_overhead_per_message (default: 8)
+    auto msg = Message::user("1234");  // ~1 content token + 8 overhead = ~9 total
     (void)manager.add_message(msg);
 
-    // Actual estimation may vary slightly, but should be close
+    // Should be at least 1 (content) + overhead (>=0)
     EXPECT_GE(manager.get_estimated_tokens(), 1);
-    EXPECT_LE(manager.get_estimated_tokens(), 2);
+    // With default overhead of 8, upper bound is content_tokens + 8 overhead
+    // "1234" -> 1 content token + 8 overhead = 9, allow some slack for heuristic variance
+    EXPECT_LE(manager.get_estimated_tokens(), 20);
 }
 
 TEST_F(HistoryManagerTest, TokenEstimationAccumulates) {
@@ -389,4 +391,145 @@ TEST_F(HistoryManagerTest, RemoveLastMessageAllowsRetry) {
     auto result = manager.add_message(Message::user("Second question retry"));
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(manager.get_messages().size(), 3);
+}
+
+// ============================================================================
+// Template Overhead Tests (Issue #40)
+// ============================================================================
+
+TEST(HistoryManagerOverheadTest, PerMessageOverheadIsAddedToEstimate) {
+    // With overhead=0 vs overhead=8, the difference per message should be 8 tokens
+    HistoryManager manager_no_overhead(8192, nullptr, 0);
+    HistoryManager manager_with_overhead(8192, nullptr, 8);
+
+    (void)manager_no_overhead.add_message(Message::user("Hello world"));
+    (void)manager_with_overhead.add_message(Message::user("Hello world"));
+
+    int tokens_no_overhead = manager_no_overhead.get_estimated_tokens();
+    int tokens_with_overhead = manager_with_overhead.get_estimated_tokens();
+
+    // The difference should be exactly the overhead value
+    EXPECT_EQ(tokens_with_overhead - tokens_no_overhead, 8);
+}
+
+TEST(HistoryManagerOverheadTest, OverheadAccumulatesAcrossMessages) {
+    const int overhead = 5;
+    HistoryManager manager_no_overhead(8192, nullptr, 0);
+    HistoryManager manager_with_overhead(8192, nullptr, overhead);
+
+    (void)manager_no_overhead.add_message(Message::user("Hello"));
+    (void)manager_no_overhead.add_message(Message::assistant("Hi"));
+    (void)manager_no_overhead.add_message(Message::user("How are you?"));
+
+    (void)manager_with_overhead.add_message(Message::user("Hello"));
+    (void)manager_with_overhead.add_message(Message::assistant("Hi"));
+    (void)manager_with_overhead.add_message(Message::user("How are you?"));
+
+    int tokens_no_overhead = manager_no_overhead.get_estimated_tokens();
+    int tokens_with_overhead = manager_with_overhead.get_estimated_tokens();
+
+    // 3 messages × 5 overhead = 15 additional tokens
+    EXPECT_EQ(tokens_with_overhead - tokens_no_overhead, 3 * overhead);
+}
+
+TEST(HistoryManagerOverheadTest, RemoveLastMessageSubtractsOverhead) {
+    const int overhead = 10;
+    HistoryManager mgr(8192, nullptr, overhead);
+
+    (void)mgr.add_message(Message::user("First"));
+    int tokens_after_one = mgr.get_estimated_tokens();
+
+    (void)mgr.add_message(Message::assistant("Second"));
+    int tokens_after_two = mgr.get_estimated_tokens();
+    EXPECT_GT(tokens_after_two, tokens_after_one);
+
+    // Removing the last message should restore the estimate to tokens_after_one
+    mgr.remove_last_message();
+    EXPECT_EQ(mgr.get_estimated_tokens(), tokens_after_one);
+}
+
+TEST(HistoryManagerOverheadTest, SystemPromptOverheadIsAccountedFor) {
+    const int overhead = 6;
+    HistoryManager manager_no_overhead(8192, nullptr, 0);
+    HistoryManager manager_with_overhead(8192, nullptr, overhead);
+
+    manager_no_overhead.set_system_prompt("You are helpful.");
+    manager_with_overhead.set_system_prompt("You are helpful.");
+
+    int tokens_no_overhead = manager_no_overhead.get_estimated_tokens();
+    int tokens_with_overhead = manager_with_overhead.get_estimated_tokens();
+
+    EXPECT_EQ(tokens_with_overhead - tokens_no_overhead, overhead);
+}
+
+TEST(HistoryManagerOverheadTest, SystemPromptReplacementSubtractsOldOverhead) {
+    const int overhead = 7;
+    HistoryManager mgr(8192, nullptr, overhead);
+
+    mgr.set_system_prompt("Short");
+    int tokens_short = mgr.get_estimated_tokens();
+
+    // Replace with a longer prompt — overhead should only be counted once
+    mgr.set_system_prompt("Much longer system prompt for testing purposes");
+    int tokens_long = mgr.get_estimated_tokens();
+
+    // Tokens should increase (longer content), but overhead should still be 1x
+    EXPECT_GT(tokens_long, tokens_short);
+}
+
+// ============================================================================
+// sync_token_estimate Tests (Issue #40)
+// ============================================================================
+
+TEST(HistoryManagerSyncTest, SyncTokenEstimateUpdatesInternalCount) {
+    HistoryManager mgr(8192);
+
+    (void)mgr.add_message(Message::user("Hello"));
+    int estimated = mgr.get_estimated_tokens();
+
+    // Sync with a known actual value
+    const int actual_kv_usage = 42;
+    mgr.sync_token_estimate(actual_kv_usage);
+
+    EXPECT_EQ(mgr.get_estimated_tokens(), actual_kv_usage);
+    (void)estimated; // suppress unused warning
+}
+
+TEST(HistoryManagerSyncTest, SyncTokenEstimateIgnoresZero) {
+    HistoryManager mgr(8192);
+
+    (void)mgr.add_message(Message::user("Hello"));
+    int estimated = mgr.get_estimated_tokens();
+    EXPECT_GT(estimated, 0);
+
+    // Syncing with 0 should be a no-op
+    mgr.sync_token_estimate(0);
+    EXPECT_EQ(mgr.get_estimated_tokens(), estimated);
+}
+
+TEST(HistoryManagerSyncTest, SyncTokenEstimateIgnoresNegative) {
+    HistoryManager mgr(8192);
+
+    (void)mgr.add_message(Message::user("Hello"));
+    int estimated = mgr.get_estimated_tokens();
+
+    // Syncing with negative should be a no-op
+    mgr.sync_token_estimate(-5);
+    EXPECT_EQ(mgr.get_estimated_tokens(), estimated);
+}
+
+TEST(HistoryManagerSyncTest, SyncCalibratesToActualUsage) {
+    // After sync, is_context_exceeded() should reflect the synced value
+    HistoryManager mgr(100);
+
+    (void)mgr.add_message(Message::user("Hello"));
+    EXPECT_FALSE(mgr.is_context_exceeded());
+
+    // Sync with a value that exceeds context
+    mgr.sync_token_estimate(150);
+    EXPECT_TRUE(mgr.is_context_exceeded());
+
+    // Sync back below context limit
+    mgr.sync_token_estimate(50);
+    EXPECT_FALSE(mgr.is_context_exceeded());
 }

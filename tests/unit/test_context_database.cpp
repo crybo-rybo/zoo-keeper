@@ -67,7 +67,9 @@ TEST(ContextDatabaseIntegrationTest, PrunesAndRetrievesArchivedContext) {
     auto backend = std::make_shared<MockBackend>();
     Config config;
     config.model_path = "/path/to/model.gguf";
-    config.context_size = 64;
+    // Use a larger context size to accommodate per-message template overhead (8 tokens/msg)
+    // while still being small enough to trigger pruning after several turns.
+    config.context_size = 256;
     config.max_tokens = 64;
     ASSERT_TRUE(backend->initialize(config).has_value());
 
