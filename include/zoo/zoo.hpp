@@ -66,6 +66,9 @@
 // Public API
 #include "agent.hpp"
 
+// GGUF metadata reader (pre-load model inspection without tensor allocation)
+#include "gguf_utils.hpp"
+
 // Backend interface (for custom implementations and testing)
 #include "backend/IBackend.hpp"
 
