@@ -2,6 +2,14 @@
 #include <llama.h>
 #include <atomic>
 #include <mutex>
+#include <filesystem>
+#include <csignal>
+#include <csetjmp>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#elif defined(__linux__)
+#include <fstream>
+#endif
 
 namespace zoo {
 namespace backend {
@@ -9,6 +17,41 @@ namespace backend {
 // File-scope statics for idempotent global initialization
 static std::once_flag g_init_flag;
 static std::atomic<bool> g_initialized{false};
+
+// Thread-local recovery point for SIGABRT handler (GPU OOM on Metal/CUDA).
+// Only valid during generate() calls. This is a best-effort mechanism;
+// the process may be in an inconsistent state after recovery.
+static thread_local sigjmp_buf s_gpu_oom_recovery_point;
+static thread_local bool s_gpu_oom_handler_active = false;
+
+size_t LlamaBackend::get_available_memory_bytes() {
+#if defined(__APPLE__)
+    // Get total physical memory via sysctl.
+    // On Apple Silicon, GPU and CPU share unified memory.
+    // Use 85% of physical memory as a conservative available estimate.
+    int64_t physical_mem = 0;
+    size_t len = sizeof(physical_mem);
+    if (sysctlbyname("hw.memsize", &physical_mem, &len, nullptr, 0) == 0 && physical_mem > 0) {
+        return static_cast<size_t>(physical_mem * 85 / 100);
+    }
+    return 0;
+#elif defined(__linux__)
+    // Read MemAvailable from /proc/meminfo
+    std::ifstream meminfo("/proc/meminfo");
+    std::string line;
+    while (std::getline(meminfo, line)) {
+        if (line.rfind("MemAvailable:", 0) == 0) {
+            long long kb = 0;
+            if (sscanf(line.c_str(), "MemAvailable: %lld kB", &kb) == 1) {
+                return static_cast<size_t>(kb * 1024);
+            }
+        }
+    }
+    return 0;
+#else
+    return 0;
+#endif
+}
 
 void LlamaBackend::initialize_global() {
     std::call_once(g_init_flag, []() {
@@ -63,6 +106,26 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
     auto validation = config.validate();
     if (!validation) {
         return tl::unexpected(validation.error());
+    }
+
+    // Pre-load sanity check: verify model file might fit in available memory.
+    // Uses file size as a proxy — actual usage will be higher (KV cache, activations),
+    // but this catches the most egregious OOM cases before attempting a slow load.
+    {
+        std::error_code ec;
+        auto file_size = std::filesystem::file_size(config.model_path, ec);
+        if (!ec) {
+            size_t available = get_available_memory_bytes();
+            if (available > 0 && static_cast<size_t>(file_size) > available) {
+                return tl::unexpected(Error{
+                    ErrorCode::BackendInitFailed,
+                    "Model file (" + std::to_string(file_size / (1024*1024)) + " MB) "
+                    "may exceed available memory (" + std::to_string(available / (1024*1024)) + " MB). "
+                    "Consider using a smaller quantization, reducing context_size, "
+                    "or setting kv_cache_type_k/v to 8 (Q8_0) to reduce KV cache memory."
+                });
+            }
+        }
     }
 
     // Set up model parameters
@@ -198,6 +261,56 @@ Expected<std::string> LlamaBackend::generate(
         return tl::unexpected(Error{
             ErrorCode::BackendInitFailed,
             "Backend not initialized"
+        });
+    }
+
+    // Install best-effort SIGABRT handler for GPU OOM recovery.
+    // If ggml_metal_synchronize (or similar) calls ggml_abort() due to OOM,
+    // we recover here instead of crashing the process.
+    // WARNING: This recovery is not fully safe — C++ destructors may not run
+    // for objects on the longjmp path. The inference context should be considered
+    // corrupt after recovery; reinitialize before next use.
+    struct SigabrtGuard {
+        struct sigaction old_action;
+        bool installed = false;
+        SigabrtGuard() {
+            if (!s_gpu_oom_handler_active) {
+                struct sigaction sa{};
+                // sa_handler must be a plain function pointer, not a capturing lambda.
+                // Thread-local s_gpu_oom_recovery_point is accessible from file scope.
+                sa.sa_handler = [](int) {
+                    if (s_gpu_oom_handler_active) {
+                        siglongjmp(s_gpu_oom_recovery_point, 1);
+                    }
+                };
+                sigemptyset(&sa.sa_mask);
+                sa.sa_flags = 0;
+                if (sigaction(SIGABRT, &sa, &old_action) == 0) {
+                    installed = true;
+                }
+            }
+        }
+        ~SigabrtGuard() {
+            if (installed) {
+                sigaction(SIGABRT, &old_action, nullptr);
+            }
+            s_gpu_oom_handler_active = false;
+        }
+    } sigabrt_guard;
+
+    s_gpu_oom_handler_active = sigabrt_guard.installed;
+    if (sigsetjmp(s_gpu_oom_recovery_point, 1) != 0) {
+        // Recovered from SIGABRT — GPU ran out of memory.
+        // Reset KV cache state since context is corrupt after longjmp.
+        s_gpu_oom_handler_active = false;
+        kv_cache_token_count_ = 0;
+        prev_len_ = 0;
+        return tl::unexpected(Error{
+            ErrorCode::GpuOutOfMemory,
+            "GPU out of memory during inference (SIGABRT intercepted). "
+            "The inference context has been reset. "
+            "Mitigations: reduce context_size, use kv_cache_type_k/v=8 (Q8_0), "
+            "or reduce n_gpu_layers."
         });
     }
 

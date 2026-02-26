@@ -152,6 +152,64 @@ cmake --build build
 
 The demo supports options like `--temperature`, `--max-tokens`, `--template`, and `--system`. Run with `--help` for details.
 
+## GPU Out-of-Memory Handling
+
+### Problem
+
+On Apple Silicon (and CUDA), when a model's KV cache or activation memory exceeds available
+GPU/unified memory during inference, llama.cpp's Metal (or CUDA) backend calls `ggml_abort()`,
+which terminates the host process with SIGABRT. Zoo-keeper provides two layers of defense.
+
+### Prevention (Recommended)
+
+Zoo-keeper performs a pre-load file-size check during `Agent::create()`. If the model file
+appears to exceed available system memory, initialization returns `ErrorCode::BackendInitFailed`
+with an actionable message before attempting the slow model load.
+
+For tighter memory budgets, reduce KV cache memory pressure by using quantized KV cache types:
+
+```cpp
+zoo::Config config;
+config.model_path = "model.gguf";
+config.context_size = 8192;
+// KV cache quantization — reduces memory at a small quality cost
+// config.kv_cache_type_k = 8;  // Q8_0: roughly half the default memory
+// config.kv_cache_type_v = 8;
+auto agent = zoo::Agent::create(config);
+```
+
+Additional mitigations:
+
+- Use a smaller quantization (Q4_K_M, Q5_K_M) instead of F16/BF16 weights.
+- Reduce `context_size` — KV cache scales linearly with context.
+- Reduce `n_gpu_layers` to offload fewer layers to GPU.
+
+### Recovery (Best-Effort)
+
+Zoo-keeper installs a `SIGABRT` handler on the inference thread using `sigsetjmp`/`siglongjmp`.
+If `ggml_abort()` fires during inference, the handler intercepts the abort signal and returns
+`ErrorCode::GpuOutOfMemory` instead of crashing the process.
+
+**Important caveats:**
+
+- This recovery is **not fully safe**. C++ destructors may not run for objects on the `longjmp`
+  path, and the llama.cpp context is in an indeterminate state.
+- After receiving `GpuOutOfMemory`, stop the agent and create a new one rather than continuing
+  to use the same instance.
+- Signal handler interaction: if your application installs its own `SIGABRT` handler, it will
+  be temporarily replaced during `generate()` calls and restored afterward.
+
+```cpp
+auto handle = agent->chat(Message::user("..."));
+auto response = handle.future.get();
+if (!response && response.error().code == zoo::ErrorCode::GpuOutOfMemory) {
+    // GPU OOM — context is corrupt. Stop this agent and create a new one.
+    agent->stop();
+    agent.reset();
+    // Recreate with smaller context_size or fewer gpu_layers
+}
+```
+
 ## See Also
 
 - [Getting Started](getting-started.md) -- first agent walkthrough

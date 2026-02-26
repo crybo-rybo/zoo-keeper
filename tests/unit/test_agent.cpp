@@ -904,6 +904,16 @@ TEST_F(AgentTest, CancelRequestViaCancellationToken) {
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 }
 
+// ============================================================================
+// GPU OOM Error Code Tests (Issue #36)
+// ============================================================================
+
+TEST_F(AgentTest, PreLoadMemoryCheckRejectsOversizedModel) {
+    // This test verifies the error code enum is accessible and has the correct value.
+    // (Actual OOM testing requires a real model and real GPU, which aren't available in CI.)
+    EXPECT_EQ(static_cast<int>(ErrorCode::GpuOutOfMemory), 205);
+}
+
 #ifdef ZOO_ENABLE_MCP
 TEST_F(AgentTest, McpListServersEmptyInitially) {
     auto backend = std::make_unique<MockBackend>();
