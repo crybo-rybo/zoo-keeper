@@ -88,6 +88,8 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
     ctx_params.n_threads = -1; // Auto-detect thread count
     ctx_params.n_threads_batch = -1; // Auto-detect
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    ctx_params.type_k = static_cast<ggml_type>(config.kv_cache_type_k);
+    ctx_params.type_v = static_cast<ggml_type>(config.kv_cache_type_v);
 
     // Create context
     ctx_ = llama_init_from_model(model_, ctx_params);

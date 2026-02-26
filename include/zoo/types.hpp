@@ -260,6 +260,14 @@ struct Config {
     // Queue settings
     size_t request_queue_capacity = 0;                       ///< Maximum request queue size (0 = unlimited)
 
+    // KV cache quantization type (ggml_type enum values as int, to avoid ggml dependency in public header).
+    // Default: 1 = GGML_TYPE_F16 (matches current behavior, full precision)
+    // Recommended for memory savings: 8 = GGML_TYPE_Q8_0 (half memory, near-lossless quality)
+    // Aggressive: 2 = GGML_TYPE_Q4_0 (quarter memory, some quality loss)
+    // Note: quantized V cache requires flash attention, which zoo-keeper already enables.
+    int kv_cache_type_k = 1;  ///< KV cache K type (GGML_TYPE_F16 by default)
+    int kv_cache_type_v = 1;  ///< KV cache V type (GGML_TYPE_F16 by default)
+
     // Callbacks
     using TokenCallback = std::function<void(std::string_view)>;
     std::optional<TokenCallback> on_token;                   ///< Per-token streaming callback (runs on inference thread)
@@ -278,6 +286,9 @@ struct Config {
         if (prompt_template == PromptTemplate::Custom && !custom_template.has_value()) {
             return tl::unexpected(Error{ErrorCode::InvalidTemplate, "Custom template string required for PromptTemplate::Custom"});
         }
+        if (kv_cache_type_k < 0 || kv_cache_type_v < 0) {
+            return tl::unexpected(Error{ErrorCode::InvalidConfig, "kv_cache_type_k and kv_cache_type_v must be >= 0"});
+        }
         return {};
     }
 
@@ -294,7 +305,9 @@ struct Config {
                max_tokens == other.max_tokens &&
                stop_sequences == other.stop_sequences &&
                system_prompt == other.system_prompt &&
-               request_queue_capacity == other.request_queue_capacity;
+               request_queue_capacity == other.request_queue_capacity &&
+               kv_cache_type_k == other.kv_cache_type_k &&
+               kv_cache_type_v == other.kv_cache_type_v;
     }
 
     bool operator!=(const Config& other) const {
