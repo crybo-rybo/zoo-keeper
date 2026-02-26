@@ -238,6 +238,25 @@ public:
             const auto& prompt_tokens = *tokens_result;
             total_prompt_tokens += static_cast<int>(prompt_tokens.size());
 
+            // Pre-generate safety check: if the formatted prompt alone exceeds the
+            // context size, generation will certainly fail. Catch it here with a
+            // descriptive error instead of letting it fail inside generate().
+            {
+                int prompt_size = static_cast<int>(prompt_tokens.size());
+                int ctx_size = backend_->get_context_size();
+
+                if (prompt_size > ctx_size) {
+                    rollback_last_message();
+                    return finish(tl::unexpected(Error{
+                        ErrorCode::ContextWindowExceeded,
+                        "Context window exceeded: formatted prompt requires " +
+                        std::to_string(prompt_size) +
+                        " tokens but context size is " + std::to_string(ctx_size) +
+                        " (chat template overhead not captured by token estimator)"
+                    }));
+                }
+            }
+
             // Generate with streaming callback
             int completion_tokens = 0;
             auto wrapped_callback = make_streaming_callback(

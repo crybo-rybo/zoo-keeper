@@ -35,14 +35,20 @@ public:
      *        Receives text and returns token count (> 0). When null or
      *        when the callable returns <= 0, falls back to the 4-chars-per-token
      *        heuristic.
+     * @param template_overhead_per_message Additional tokens added per message
+     *        by the chat template (role markers, BOS/EOS, turn separators).
+     *        Default of 8 covers most models (Gemma, Llama, Phi add ~6-10
+     *        special tokens per turn).
      */
     explicit HistoryManager(
         int context_size,
-        std::function<int(const std::string&)> tokenizer = nullptr
+        std::function<int(const std::string&)> tokenizer = nullptr,
+        int template_overhead_per_message = 8
     )
         : context_size_(context_size)
         , estimated_tokens_(0)
         , tokenizer_(std::move(tokenizer))
+        , template_overhead_per_message_(template_overhead_per_message)
     {}
 
     /**
@@ -64,8 +70,8 @@ public:
         // Add to history
         messages_.push_back(message);
 
-        // Update token estimate
-        estimated_tokens_ += estimate_tokens(message.content);
+        // Update token estimate (content tokens + chat template overhead per message)
+        estimated_tokens_ += estimate_tokens(message.content) + template_overhead_per_message_;
 
         return {};
     }
@@ -86,8 +92,8 @@ public:
             return tl::unexpected(err.error());
         }
 
-        // Update token estimate before moving
-        estimated_tokens_ += estimate_tokens(message.content);
+        // Update token estimate before moving (content tokens + chat template overhead per message)
+        estimated_tokens_ += estimate_tokens(message.content) + template_overhead_per_message_;
 
         // Move into history
         messages_.push_back(std::move(message));
@@ -109,13 +115,15 @@ public:
 
         // Replace existing system prompt or insert at beginning
         if (!messages_.empty() && messages_[0].role == Role::System) {
-            estimated_tokens_ -= estimate_tokens(messages_[0].content);
+            // Subtract old content tokens + overhead
+            estimated_tokens_ -= estimate_tokens(messages_[0].content) + template_overhead_per_message_;
             messages_[0] = sys_msg;
         } else {
             messages_.insert(messages_.begin(), sys_msg);
         }
 
-        estimated_tokens_ += estimate_tokens(prompt);
+        // Add new content tokens + overhead
+        estimated_tokens_ += estimate_tokens(prompt) + template_overhead_per_message_;
     }
 
     /**
@@ -164,7 +172,7 @@ public:
         if (messages_.empty()) {
             return false;
         }
-        estimated_tokens_ -= estimate_tokens(messages_.back().content);
+        estimated_tokens_ -= estimate_tokens(messages_.back().content) + template_overhead_per_message_;
         messages_.pop_back();
         return true;
     }
@@ -199,7 +207,7 @@ public:
             }
 
             Message removed_msg = std::move(messages_[first_removable_index]);
-            estimated_tokens_ -= estimate_tokens(removed_msg.content);
+            estimated_tokens_ -= estimate_tokens(removed_msg.content) + template_overhead_per_message_;
             messages_.erase(messages_.begin() + static_cast<std::ptrdiff_t>(first_removable_index));
             removed.push_back(std::move(removed_msg));
         }
@@ -224,7 +232,7 @@ public:
         messages_.insert(insert_pos, messages.begin(), messages.end());
 
         for (const auto& msg : messages) {
-            estimated_tokens_ += estimate_tokens(msg.content);
+            estimated_tokens_ += estimate_tokens(msg.content) + template_overhead_per_message_;
         }
     }
 
@@ -245,12 +253,29 @@ public:
         return context_size_;
     }
 
+    /**
+     * @brief Synchronize the internal token estimate with actual KV cache usage.
+     *
+     * Call this after tokenization to keep estimates calibrated against real
+     * token counts rather than relying solely on the heuristic estimate.
+     * Only updates if actual_total is positive (ignores zero/negative values).
+     *
+     * @param actual_total Actual total tokens used (e.g., kv_cache_used + prompt_delta_tokens)
+     */
+    void sync_token_estimate(int actual_total) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (actual_total > 0) {
+            estimated_tokens_ = actual_total;
+        }
+    }
+
 private:
     mutable std::mutex mutex_;
     std::vector<Message> messages_;
     int context_size_;
     int estimated_tokens_;
     std::function<int(const std::string&)> tokenizer_;
+    int template_overhead_per_message_;
 
     /**
      * @brief Estimate token count from text
