@@ -69,6 +69,9 @@
 // GGUF metadata reader (pre-load model inspection without tensor allocation)
 #include "gguf_utils.hpp"
 
+// Memory estimation (pre-load OOM prevention)
+#include "memory_estimate.hpp"
+
 // Backend interface (for custom implementations and testing)
 #include "backend/IBackend.hpp"
 
