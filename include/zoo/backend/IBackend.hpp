@@ -110,6 +110,17 @@ public:
     virtual int get_context_size() const = 0;
 
     /**
+     * @brief Get model training context size from GGUF metadata
+     *
+     * Returns the context size the model was trained with, as recorded in its
+     * GGUF metadata. This may differ from the runtime context size configured
+     * in Config::context_size.
+     *
+     * @return int Training context size in tokens, or 0 if unavailable
+     */
+    virtual int get_training_context_size() const = 0;
+
+    /**
      * @brief Get model vocabulary size
      *
      * @return int Number of tokens in vocabulary

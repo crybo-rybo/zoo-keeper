@@ -518,6 +518,20 @@ TEST_F(AgentTest, GetConfig) {
     EXPECT_EQ(retrieved.max_tokens, 256);
 }
 
+TEST_F(AgentTest, GetTrainingContextSize) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->training_context_size = 131072;
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    EXPECT_EQ(agent->get_training_context_size(), 131072);
+}
+
 TEST_F(AgentTest, CreateWithInvalidConfigFails) {
     Config config;
     config.model_path = "";  // Invalid

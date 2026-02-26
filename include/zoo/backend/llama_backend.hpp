@@ -62,6 +62,7 @@ public:
     Expected<std::string> format_prompt(const std::vector<Message>& messages) override;
     void finalize_response(const std::vector<Message>& messages) override;
     int get_context_size() const override;
+    int get_training_context_size() const override;
     int get_vocab_size() const override;
 
 private:
