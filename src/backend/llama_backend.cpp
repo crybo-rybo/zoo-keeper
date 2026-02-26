@@ -381,6 +381,11 @@ int LlamaBackend::get_context_size() const {
     return context_size_;
 }
 
+int LlamaBackend::get_training_context_size() const {
+    if (model_ == nullptr) return 0;
+    return llama_model_n_ctx_train(model_);
+}
+
 int LlamaBackend::get_vocab_size() const {
     return vocab_size_;
 }

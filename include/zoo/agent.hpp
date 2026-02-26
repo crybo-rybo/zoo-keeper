@@ -284,6 +284,19 @@ public:
     }
 
     /**
+     * @brief Get model training context size from GGUF metadata
+     *
+     * Returns the context size the model was trained with, as recorded in its
+     * GGUF metadata. Useful for capping Config::context_size to prevent
+     * requesting more context than the model was trained on.
+     *
+     * @return int Training context size in tokens, or 0 if unavailable
+     */
+    int get_training_context_size() const {
+        return backend_->get_training_context_size();
+    }
+
+    /**
      * @brief Get conversation history
      *
      * Thread-safe: Returns a copy of the current conversation history.
