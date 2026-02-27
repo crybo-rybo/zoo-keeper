@@ -108,6 +108,7 @@ enum class ErrorCode {
     ContextCreationFailed = 202,
     InferenceFailed = 203,
     TokenizationFailed = 204,
+    GpuOutOfMemory = 205,   ///< GPU ran out of memory during inference (process may be unstable)
 
     // Engine errors (300-399)
     ContextWindowExceeded = 300,

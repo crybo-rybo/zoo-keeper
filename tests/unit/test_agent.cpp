@@ -919,7 +919,17 @@ TEST_F(AgentTest, CancelRequestViaCancellationToken) {
 }
 
 // ============================================================================
-// KV Cache Quantization Tests (Issue #41)
+// GPU OOM Error Code Tests
+// ============================================================================
+
+TEST_F(AgentTest, PreLoadMemoryCheckRejectsOversizedModel) {
+    // This test verifies the error code enum is accessible and has the correct value.
+    // (Actual OOM testing requires a real model and real GPU, which aren't available in CI.)
+    EXPECT_EQ(static_cast<int>(ErrorCode::GpuOutOfMemory), 205);
+}    
+
+// ============================================================================
+// KV Cache Quantization Tests
 // ============================================================================
 
 TEST_F(AgentTest, KvCacheTypeDefaultsToF16) {

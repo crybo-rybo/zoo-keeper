@@ -76,6 +76,17 @@ private:
                               const std::vector<std::string>& stop_sequences) const;
 
     /**
+     * @brief Returns available system memory in bytes (best effort, 0 if unknown).
+     *
+     * On macOS uses sysctl(hw.memsize) and reports 85% of total physical memory
+     * as an estimate for unified memory available to the GPU.
+     * On Linux reads MemAvailable from /proc/meminfo.
+     *
+     * @return size_t Available memory in bytes, or 0 if detection failed
+     */
+    static size_t get_available_memory_bytes();
+
+    /**
      * @brief Create and configure the sampler chain from config
      * @param config The configuration containing sampling parameters
      * @return llama_sampler* Configured sampler chain (ownership transferred to caller)
