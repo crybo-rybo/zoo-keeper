@@ -147,7 +147,7 @@ TEST(ConfigTest, Defaults) {
     EXPECT_TRUE(config.use_mmap);
     EXPECT_FALSE(config.use_mlock);
     EXPECT_EQ(config.prompt_template, PromptTemplate::Llama3);
-    EXPECT_EQ(config.max_tokens, 512);
+    EXPECT_EQ(config.max_tokens, -1);
     EXPECT_FALSE(config.system_prompt.has_value());
     EXPECT_FALSE(config.custom_template.has_value());
 }

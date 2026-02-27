@@ -67,9 +67,10 @@ TEST(ContextDatabaseIntegrationTest, PrunesAndRetrievesArchivedContext) {
     auto backend = std::make_shared<MockBackend>();
     Config config;
     config.model_path = "/path/to/model.gguf";
-    // Use a larger context size to accommodate per-message template overhead (8 tokens/msg)
-    // while still being small enough to trigger pruning after several turns.
-    config.context_size = 256;
+    // Use a context size large enough to accommodate per-message template overhead AND
+    // the 256-token min_response_reserve headroom check, while still being small enough
+    // to trigger pruning after 15 filler turns (estimate ~544 > 512 on turn 14).
+    config.context_size = 512;
     config.max_tokens = 64;
     ASSERT_TRUE(backend->initialize(config).has_value());
 
@@ -86,7 +87,7 @@ TEST(ContextDatabaseIntegrationTest, PrunesAndRetrievesArchivedContext) {
     auto first = loop->process_request(Request(Message::user("Remember this exactly: launch-code zebra42.")));
     ASSERT_TRUE(first.has_value());
 
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 15; ++i) {
         backend->enqueue_response("Filler response " + std::to_string(i));
         auto result = loop->process_request(Request(Message::user(
             "Filler turn " + std::to_string(i) + " with enough text to pressure the context window.")));

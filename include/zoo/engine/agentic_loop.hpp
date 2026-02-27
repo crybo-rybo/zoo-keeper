@@ -77,6 +77,16 @@ public:
     }
 
     /**
+     * @brief Set minimum token headroom reserved for the response (default: 256)
+     *
+     * If remaining context after the prompt is less than this value, the
+     * request fails with ContextWindowExceeded before generation begins.
+     */
+    void set_min_response_reserve(int reserve) {
+        min_response_reserve_ = reserve;
+    }
+
+    /**
      * @brief Process a single request (with optional tool loop)
      *
      * @param request The request to process
@@ -253,6 +263,23 @@ public:
                         std::to_string(prompt_size) +
                         " tokens but context size is " + std::to_string(ctx_size) +
                         " (chat template overhead not captured by token estimator)"
+                    }));
+                }
+
+                // Headroom check: ensure there is enough room in the context for a
+                // meaningful response. cap min_response_reserve_ at remaining ctx space
+                // when max_tokens is set (avoids requiring more than the user asked for).
+                const int remaining_ctx = ctx_size - prompt_size;
+                const int effective_reserve = (config_.max_tokens > 0)
+                    ? std::min(min_response_reserve_, config_.max_tokens)
+                    : min_response_reserve_;
+                if (remaining_ctx < effective_reserve) {
+                    rollback_last_message();
+                    return finish(tl::unexpected(Error{
+                        ErrorCode::ContextWindowExceeded,
+                        "Insufficient context headroom for response: " +
+                        std::to_string(remaining_ctx) + " tokens remaining, " +
+                        std::to_string(effective_reserve) + " required"
                     }));
                 }
             }
@@ -454,6 +481,7 @@ private:
     std::shared_ptr<IRetriever> retriever_;
     std::shared_ptr<ContextDatabase> context_database_;
     int max_tool_iterations_ = 5;
+    int min_response_reserve_ = 256;
     int memory_retrieval_top_k_ = 4;
     int memory_min_messages_to_keep_ = 6;
     double memory_prune_target_ratio_ = 0.75;

@@ -327,6 +327,12 @@ Expected<std::string> LlamaBackend::generate(
         // Ensure we have enough context to evaluate the batch
         int n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) + 1;
         if (n_ctx_used + batch.n_tokens > context_size_) {
+            fprintf(stderr, "zoo: context window full (%d/%d tokens used), stopping generation\n",
+                    n_ctx_used, context_size_);
+            // If tokens were already generated, return them rather than error
+            if (token_count > 0) {
+                break;
+            }
             return tl::unexpected(Error{
                 ErrorCode::ContextWindowExceeded,
                 "Batch tokens exceed context size",
@@ -383,6 +389,7 @@ Expected<std::string> LlamaBackend::generate(
             if (on_token.has_value()) {
                 (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
             }
+            fprintf(stderr, "zoo: generation stopped at max_tokens limit (%d tokens)\n", max_tokens);
             break;
         }
 
