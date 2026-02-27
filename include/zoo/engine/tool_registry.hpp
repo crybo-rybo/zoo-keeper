@@ -291,20 +291,21 @@ public:
     }
 
     /**
-     * @brief Direct access to the parameters schema without the wrapper envelope.
+     * @brief Get a copy of the parameters schema for a tool.
      *
-     * Avoids constructing the full {"type":"function","function":{...}} wrapper
-     * when only the parameters are needed (e.g., argument validation).
+     * Returns the parameters schema by value so validation can proceed
+     * without holding the registry lock, eliminating a potential use-after-free
+     * if a concurrent register_tool() call reallocates the internal map.
      *
-     * @return Pointer to the parameters_schema, or nullptr if tool not found.
+     * @return Schema copy, or std::nullopt if tool not found.
      */
-    const nlohmann::json* get_parameters_schema(const std::string& name) const {
+    std::optional<nlohmann::json> get_parameters_schema(const std::string& name) const {
         std::shared_lock lock(mutex_);
         auto it = tools_.find(name);
         if (it == tools_.end()) {
-            return nullptr;
+            return std::nullopt;
         }
-        return &it->second.parameters_schema;
+        return it->second.parameters_schema;
     }
 
     /** @brief Get an array of JSON function-calling schemas for all registered tools. */

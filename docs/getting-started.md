@@ -53,9 +53,9 @@ int main() {
     // 3. Set a system prompt
     agent->set_system_prompt("You are a helpful AI assistant.");
 
-    // 4. Chat
-    auto future = agent->chat(zoo::Message::user("Hello!"));
-    auto response = future.get();
+    // 4. Chat — chat() returns a RequestHandle; call .future.get() to block
+    auto handle = agent->chat(zoo::Message::user("Hello!"));
+    auto response = handle.future.get();
 
     if (response) {
         std::cout << response->text << std::endl;
@@ -76,7 +76,7 @@ The single entry point for all library functionality. Created via the `Agent::cr
 | Method | Description |
 |--------|-------------|
 | `create(config)` | Factory: validate config, load model, start inference thread |
-| `chat(message)` | Submit a message, returns `std::future<Expected<Response>>` |
+| `chat(message)` | Submit a message, returns `RequestHandle` (holds `.id` and `.future`) |
 | `chat(message, callback)` | Chat with per-token streaming callback |
 | `chat(message, options, callback)` | Chat with per-request options (RAG, etc.) |
 | `set_system_prompt(text)` | Set or update the system prompt |
@@ -118,7 +118,7 @@ Returned from `chat()` via `std::future`. Contains:
 All fallible operations return `Expected<T>` (an alias for `tl::expected<T, Error>`). Errors carry a categorized `ErrorCode` and human-readable message:
 
 ```cpp
-auto response = agent->chat(zoo::Message::user("Hello")).get();
+auto response = agent->chat(zoo::Message::user("Hello")).future.get();
 if (!response) {
     std::cerr << response.error().to_string() << std::endl;
 }

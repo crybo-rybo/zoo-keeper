@@ -4,7 +4,6 @@
 #include <mutex>
 #include <filesystem>
 #include <csignal>
-#include <csetjmp>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #elif defined(__linux__)
@@ -18,11 +17,23 @@ namespace backend {
 static std::once_flag g_init_flag;
 static std::atomic<bool> g_initialized{false};
 
-// Thread-local recovery point for SIGABRT handler (GPU OOM on Metal/CUDA).
-// Only valid during generate() calls. This is a best-effort mechanism;
-// the process may be in an inconsistent state after recovery.
-static thread_local sigjmp_buf s_gpu_oom_recovery_point;
+// Thread-local flag set by the SIGABRT handler when GPU OOM is detected.
+// Using sig_atomic_t avoids the undefined behaviour of siglongjmp, which
+// skips C++ destructors and leaves mutexes permanently held.  If the OOM
+// causes abort() to be called inside llama_decode() the process will
+// terminate after the handler returns — that is intentional and safer than
+// jumping out of a corrupted C++ stack frame.
+static thread_local volatile std::sig_atomic_t s_gpu_oom_triggered = 0;
 static thread_local bool s_gpu_oom_handler_active = false;
+
+// Plain function pointer required by sigaction — non-capturing lambda decays
+// to a function pointer in C++11, but an explicit function is clearer and
+// cannot accidentally gain a capture later.
+static void gpu_oom_signal_handler(int) {
+    if (s_gpu_oom_handler_active) {
+        s_gpu_oom_triggered = 1;
+    }
+}
 
 size_t LlamaBackend::get_available_memory_bytes() {
 #if defined(__APPLE__)
@@ -266,28 +277,24 @@ Expected<std::string> LlamaBackend::generate(
         });
     }
 
-    // Install best-effort SIGABRT handler for GPU OOM recovery.
-    // If ggml_metal_synchronize (or similar) calls ggml_abort() due to OOM,
-    // we recover here instead of crashing the process.
-    // WARNING: This recovery is not fully safe — C++ destructors may not run
-    // for objects on the longjmp path. The inference context should be considered
-    // corrupt after recovery; reinitialize before next use.
+    // Install a SIGABRT handler to detect GPU OOM (e.g. ggml_metal_synchronize
+    // calling ggml_abort() on Apple Silicon).  The handler sets a thread-local
+    // flag and returns; if the abort() call causes the process to terminate
+    // after the handler returns that is acceptable — it is safer than using
+    // siglongjmp, which skips C++ destructors and can leave internal llama.cpp
+    // mutexes permanently held.
     struct SigabrtGuard {
-        struct sigaction old_action;
+        struct sigaction old_action {};
         bool installed = false;
         SigabrtGuard() {
             if (!s_gpu_oom_handler_active) {
-                struct sigaction sa{};
-                // sa_handler must be a plain function pointer, not a capturing lambda.
-                // Thread-local s_gpu_oom_recovery_point is accessible from file scope.
-                sa.sa_handler = [](int) {
-                    if (s_gpu_oom_handler_active) {
-                        siglongjmp(s_gpu_oom_recovery_point, 1);
-                    }
-                };
+                struct sigaction sa {};
+                sa.sa_handler = gpu_oom_signal_handler;
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 if (sigaction(SIGABRT, &sa, &old_action) == 0) {
+                    s_gpu_oom_triggered = 0;
+                    s_gpu_oom_handler_active = true;
                     installed = true;
                 }
             }
@@ -299,22 +306,6 @@ Expected<std::string> LlamaBackend::generate(
             s_gpu_oom_handler_active = false;
         }
     } sigabrt_guard;
-
-    s_gpu_oom_handler_active = sigabrt_guard.installed;
-    if (sigsetjmp(s_gpu_oom_recovery_point, 1) != 0) {
-        // Recovered from SIGABRT — GPU ran out of memory.
-        // Reset KV cache state since context is corrupt after longjmp.
-        s_gpu_oom_handler_active = false;
-        kv_cache_token_count_ = 0;
-        prev_len_ = 0;
-        return tl::unexpected(Error{
-            ErrorCode::GpuOutOfMemory,
-            "GPU out of memory during inference (SIGABRT intercepted). "
-            "The inference context has been reset. "
-            "Mitigations: reduce context_size, use kv_cache_type_k/v=8 (Q8_0), "
-            "or reduce n_gpu_layers."
-        });
-    }
 
     std::string generated_text;
     // Reserve capacity to reduce reallocations during generation.
@@ -346,6 +337,17 @@ Expected<std::string> LlamaBackend::generate(
 
         // Process prompt (prefill phase)
         if (llama_decode(ctx_, batch) != 0) {
+            // Check whether SIGABRT fired during decode (GPU OOM on Metal/CUDA).
+            if (s_gpu_oom_triggered) {
+                kv_cache_token_count_ = 0;
+                prev_len_ = 0;
+                return tl::unexpected(Error{
+                    ErrorCode::GpuOutOfMemory,
+                    "GPU out of memory during inference. "
+                    "Mitigations: reduce context_size, use kv_cache_type_k/v=8 (Q8_0), "
+                    "or reduce n_gpu_layers."
+                });
+            }
             return tl::unexpected(Error{
                 ErrorCode::InferenceFailed,
                 "Failed to decode prompt batch"

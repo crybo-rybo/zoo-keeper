@@ -7,14 +7,14 @@ Complete, copy-paste code snippets for common Zoo-Keeper patterns.
 Print tokens as they arrive:
 
 ```cpp
-auto future = agent->chat(
+auto handle = agent->chat(
     zoo::Message::user("Write a haiku about AI"),
     [](std::string_view token) {
         std::cout << token << std::flush;
     }
 );
 
-auto response = future.get();
+auto response = handle.future.get();
 std::cout << std::endl;
 ```
 
@@ -23,8 +23,8 @@ std::cout << std::endl;
 History is managed automatically:
 
 ```cpp
-agent->chat(zoo::Message::user("My name is Alice")).get();
-auto response = agent->chat(zoo::Message::user("What's my name?")).get();
+agent->chat(zoo::Message::user("My name is Alice")).future.get();
+auto response = agent->chat(zoo::Message::user("What's my name?")).future.get();
 // response->text will reference "Alice"
 ```
 
@@ -45,7 +45,7 @@ agent->register_tool("add", "Add two integers", {"a", "b"}, add);
 agent->register_tool("get_time", "Get current date and time", {}, get_time);
 
 // The model can now call these tools
-auto response = agent->chat(zoo::Message::user("What is 42 + 58?")).get();
+auto response = agent->chat(zoo::Message::user("What is 42 + 58?")).future.get();
 if (response) {
     std::cout << response->text << std::endl;
 
@@ -82,7 +82,7 @@ opts.rag.top_k = 2;
 
 auto response = agent->chat(
     zoo::Message::user("What is Zoo-Keeper?"), opts
-).get();
+).future.get();
 
 if (response) {
     std::cout << response->text << std::endl;
@@ -106,7 +106,7 @@ opts.rag.context_override = "The capital of France is Paris. Population: 2.1 mil
 
 auto response = agent->chat(
     zoo::Message::user("What's the population of the French capital?"), opts
-).get();
+).future.get();
 ```
 
 ## Context Database (Long-Term Memory)
@@ -123,14 +123,14 @@ if (!init) {
 for (int i = 0; i < 100; ++i) {
     auto response = agent->chat(
         zoo::Message::user("Tell me fact #" + std::to_string(i))
-    ).get();
+    ).future.get();
 }
 ```
 
 ## Error Handling
 
 ```cpp
-auto result = agent->chat(zoo::Message::user("Hello")).get();
+auto result = agent->chat(zoo::Message::user("Hello")).future.get();
 
 if (!result) {
     zoo::Error error = result.error();
@@ -156,13 +156,13 @@ if (!result) {
 ## Cancellation
 
 ```cpp
-auto future = agent->chat(zoo::Message::user("Write a long essay"));
+auto handle = agent->chat(zoo::Message::user("Write a long essay"));
 
 // Cancel after 5 seconds
 std::this_thread::sleep_for(std::chrono::seconds(5));
 agent->stop();
 
-auto result = future.get();
+auto result = handle.future.get();
 if (!result) {
     // result.error().code == ErrorCode::RequestCancelled
     std::cout << "Generation cancelled" << std::endl;
@@ -172,7 +172,7 @@ if (!result) {
 ## Metrics
 
 ```cpp
-auto response = agent->chat(zoo::Message::user("Hello")).get();
+auto response = agent->chat(zoo::Message::user("Hello")).future.get();
 if (response) {
     std::cout << "Latency: " << response->metrics.latency_ms.count() << " ms" << std::endl;
     std::cout << "TTFT: " << response->metrics.time_to_first_token_ms.count() << " ms" << std::endl;
@@ -204,7 +204,7 @@ if (!result) {
 // Now the model can call MCP tools just like local tools
 auto response = agent->chat(
     zoo::Message::user("List files in /tmp")
-).get();
+).future.get();
 
 if (response) {
     std::cout << response->text << std::endl;

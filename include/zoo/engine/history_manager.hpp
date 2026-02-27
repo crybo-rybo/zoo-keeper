@@ -127,11 +127,15 @@ public:
     }
 
     /**
-     * @brief Get all messages
+     * @brief Get a copy of all messages
+     *
+     * Returns by value so the caller holds an independent snapshot.
+     * The mutex is released before the copy is returned, so callers
+     * do not hold the lock while working with the messages.
      *
      * @return std::vector<Message> Copy of message history
      */
-    const std::vector<Message>& get_messages() const {
+    std::vector<Message> get_messages() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return messages_;
     }

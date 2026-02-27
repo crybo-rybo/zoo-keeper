@@ -272,15 +272,16 @@ TEST_F(HistoryManagerTest, VeryLongMessage) {
     EXPECT_GT(manager.get_estimated_tokens(), 2000);  // ~2500 tokens expected
 }
 
-TEST_F(HistoryManagerTest, GetMessagesReturnsConst) {
+TEST_F(HistoryManagerTest, GetMessagesReturnsCopy) {
     (void)manager.add_message(Message::user("Test"));
 
-    const auto& messages = manager.get_messages();
+    auto messages = manager.get_messages();
     EXPECT_EQ(messages.size(), 1);
 
-    // Verify it's actually const
-    static_assert(std::is_const_v<std::remove_reference_t<decltype(messages)>>,
-                  "get_messages() should return const reference");
+    // Verify the returned value is an independent copy: mutating it does not
+    // affect the manager's internal history.
+    messages.clear();
+    EXPECT_EQ(manager.get_messages().size(), 1);
 }
 
 // ============================================================================
