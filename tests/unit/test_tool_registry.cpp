@@ -348,18 +348,18 @@ TEST_F(ToolRegistryTest, FloatTypeSchema) {
     EXPECT_EQ(schema["function"]["parameters"]["properties"]["x"]["type"], "number");
 }
 
-TEST_F(ToolRegistryTest, GetParametersSchemaReturnsPointer) {
+TEST_F(ToolRegistryTest, GetParametersSchemaReturnsCopy) {
     registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
-    auto* params = registry.get_parameters_schema("add");
-    ASSERT_NE(params, nullptr);
+    auto params = registry.get_parameters_schema("add");
+    ASSERT_TRUE(params.has_value());
     EXPECT_EQ((*params)["type"], "object");
     EXPECT_TRUE(params->contains("properties"));
     EXPECT_TRUE(params->contains("required"));
 }
 
-TEST_F(ToolRegistryTest, GetParametersSchemaNullptrForMissing) {
-    EXPECT_EQ(registry.get_parameters_schema("nonexistent"), nullptr);
+TEST_F(ToolRegistryTest, GetParametersSchemaEmptyForMissing) {
+    EXPECT_FALSE(registry.get_parameters_schema("nonexistent").has_value());
 }
 
 TEST_F(ToolRegistryTest, ConstLambdaWithCapture) {

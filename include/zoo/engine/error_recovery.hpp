@@ -44,16 +44,18 @@ public:
      * @return Empty string if valid, error message describing the validation failure otherwise
      */
     std::string validate_args(const ToolCall& tool_call, const ToolRegistry& registry) const {
-        // Single lookup: get_parameters_schema() does one lock + one find(),
-        // instead of has_tool() + get_tool_schema() (two locks + two finds + wrapper JSON).
-        const auto* params = registry.get_parameters_schema(tool_call.name);
-        if (!params) {
+        // get_parameters_schema() returns a copy so validation proceeds without
+        // holding the registry lock, avoiding a use-after-free if a concurrent
+        // register_tool() reallocates the internal map.
+        auto params_opt = registry.get_parameters_schema(tool_call.name);
+        if (!params_opt) {
             return "Tool not found: " + tool_call.name;
         }
+        const nlohmann::json& params = *params_opt;
 
         // Check required fields
-        if (params->contains("required")) {
-            for (const auto& req : (*params)["required"]) {
+        if (params.contains("required")) {
+            for (const auto& req : params["required"]) {
                 // Use get_ref to avoid allocating a new std::string per field
                 const auto& field = req.get_ref<const std::string&>();
                 if (!tool_call.arguments.contains(field)) {
@@ -63,8 +65,8 @@ public:
         }
 
         // Check types of provided arguments
-        auto props_it = params->find("properties");
-        if (props_it != params->end()) {
+        auto props_it = params.find("properties");
+        if (props_it != params.end()) {
             for (const auto& [key, prop] : props_it->items()) {
                 // Single lookup via find() instead of contains() + operator[]
                 auto arg_it = tool_call.arguments.find(key);

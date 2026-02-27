@@ -65,9 +65,13 @@ public:
             return tl::unexpected(Error{ErrorCode::McpTransportFailed, "Already connected"});
         }
 
-        // Build command line array for subprocess
-        // subprocess_create expects a null-terminated array of C strings
+        // Build command line array for subprocess.
+        // subprocess_create expects a null-terminated array of C strings.
+        // Reserve upfront so that no reallocation occurs after the first
+        // push_back — all c_str() pointers remain valid for the lifetime
+        // of config_ (which is stored by value and never mutated here).
         std::vector<const char*> cmd_parts;
+        cmd_parts.reserve(config_.args.size() + 2);  // command + args + nullptr
         cmd_parts.push_back(config_.command.c_str());
         for (const auto& arg : config_.args) {
             cmd_parts.push_back(arg.c_str());
