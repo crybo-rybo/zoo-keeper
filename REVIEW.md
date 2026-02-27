@@ -7,96 +7,108 @@
 
 ## 1. SHOULD DEFINITELY CHANGE (Critical / Blocking)
 
-### 1.1 Use-After-Free: `ErrorRecovery::validate_args()` dereferences pointer after lock release
+### ~~1.1 Use-After-Free: `ErrorRecovery::validate_args()` dereferences pointer after lock release~~ ✅ Fixed
 
-**Files:** `include/zoo/engine/error_recovery.hpp:49-86`, `include/zoo/engine/tool_registry.hpp:271-281`
+~~**Files:** `include/zoo/engine/error_recovery.hpp:49-86`, `include/zoo/engine/tool_registry.hpp:271-281`~~
 
-`get_parameters_schema()` returns a raw pointer to data inside `ToolRegistry::tools_` while a `shared_lock` is held. The lock is released when `get_parameters_schema()` returns. `validate_args()` then dereferences this pointer across ~30 lines without any lock. A concurrent `register_tool()` (which takes a `unique_lock`) could reallocate the internal map, leaving a dangling pointer.
+~~`get_parameters_schema()` returns a raw pointer to data inside `ToolRegistry::tools_` while a `shared_lock` is held. The lock is released when `get_parameters_schema()` returns. `validate_args()` then dereferences this pointer across ~30 lines without any lock. A concurrent `register_tool()` (which takes a `unique_lock`) could reallocate the internal map, leaving a dangling pointer.~~
 
-**Fix:** Return `std::optional<nlohmann::json>` by value from `get_parameters_schema()`, or keep the lock held for the duration of validation.
+~~**Fix:** Return `std::optional<nlohmann::json>` by value from `get_parameters_schema()`, or keep the lock held for the duration of validation.~~
 
----
-
-### 1.2 `HistoryManager::get_messages()` returns a reference through a mutex
-
-**File:** `include/zoo/engine/history_manager.hpp:134-137`
-
-```cpp
-const std::vector<Message>& get_messages() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return messages_;  // Lock released, reference escapes
-}
-```
-
-The lock is released the instant the function returns, but the caller holds a reference to the internal vector. Any concurrent `add_message()` or `prune_oldest_messages_until()` invalidates the reference. The docstring even says "Copy of message history" but the signature returns `const&`.
-
-This reference is used heavily in `AgenticLoop` (lines 125, 136, 216, 219, 223, 418) — every one of those call sites is a potential data race.
-
-**Fix:** Change return type to `std::vector<Message>` (return by value).
+**Resolution:** `get_parameters_schema()` now returns `std::optional<nlohmann::json>` by value. The lock is fully released before `validate_args()` begins inspection. Tests updated accordingly.
 
 ---
 
-### 1.3 Unsafe `siglongjmp` in C++ — destructors skipped, mutexes orphaned
+### ~~1.2 `HistoryManager::get_messages()` returns a reference through a mutex~~ ✅ Fixed
 
-**File:** `src/backend/llama_backend.cpp:276-317`
+~~**File:** `include/zoo/engine/history_manager.hpp:134-137`~~
 
-The GPU OOM recovery uses `sigsetjmp`/`siglongjmp` from a SIGABRT handler. When `siglongjmp` fires:
-- C++ destructors for stack objects between `sigsetjmp` and the signal are **not** run.
-- If `llama_decode()` held any internal mutex, it is permanently orphaned — the next call deadlocks.
-- The recovery path constructs an `Error` with `std::string` allocation, which is unsafe if the heap is corrupted.
+~~```cpp~~
+~~const std::vector<Message>& get_messages() const {~~
+~~    std::lock_guard<std::mutex> lock(mutex_);~~
+~~    return messages_;  // Lock released, reference escapes~~
+~~}~~
+~~```~~
 
-The code already documents this risk in comments (lines 272-274) but ships it anyway.
+~~The lock is released the instant the function returns, but the caller holds a reference to the internal vector. Any concurrent `add_message()` or `prune_oldest_messages_until()` invalidates the reference. The docstring even says "Copy of message history" but the signature returns `const&`.~~
 
-**Fix:** Replace with a `volatile sig_atomic_t` flag checked after `llama_decode()` returns. If `llama_decode()` itself aborts and never returns, the process is unrecoverable regardless — `siglongjmp` just delays the crash with corrupted state.
+~~This reference is used heavily in `AgenticLoop` (lines 125, 136, 216, 219, 223, 418) — every one of those call sites is a potential data race.~~
 
----
+~~**Fix:** Change return type to `std::vector<Message>` (return by value).~~
 
-### 1.4 Subprocess vector creates dangling `const char*` pointers
-
-**File:** `include/zoo/mcp/transport/stdio_transport.hpp:68-84`
-
-```cpp
-std::vector<const char*> cmd_parts;
-cmd_parts.push_back(config_.command.c_str());
-for (const auto& arg : config_.args) {
-    cmd_parts.push_back(arg.c_str());
-}
-```
-
-The `cmd_parts` vector stores pointers to `config_.args` elements. If `config_` is moved or reassigned between construction and the `subprocess_create()` call, every pointer dangles. More immediately: if any push triggers reallocation of `cmd_parts`, all prior `const char*` values are still valid (they point into `config_`'s strings, not the vector), so this particular scenario is actually safe. However, the code lacks a `reserve()` call, making intent unclear and the pattern fragile.
-
-Additionally, if `subprocess_create()` fails (line 86), `process_` may be partially initialized with no cleanup.
-
-**Fix:** Add `cmd_parts.reserve(config_.args.size() + 2)` and document subprocess cleanup on failure.
+**Resolution:** Return type changed to `std::vector<Message>`. Callers receive an independent snapshot; the mutex is released before the copy is returned. `GetMessagesReturnsConst` test replaced with `GetMessagesReturnsCopy` which verifies independence.
 
 ---
 
-### 1.5 Documentation shows code that won't compile
+### ~~1.3 Unsafe `siglongjmp` in C++ — destructors skipped, mutexes orphaned~~ ✅ Fixed
 
-**Files:** `docs/getting-started.md:57-58`, `docs/examples.md` (26+ occurrences)
+~~**File:** `src/backend/llama_backend.cpp:276-317`~~
 
-All user-facing examples call `.get()` directly on `agent->chat(...)`:
+~~The GPU OOM recovery uses `sigsetjmp`/`siglongjmp` from a SIGABRT handler. When `siglongjmp` fires:~~
+~~- C++ destructors for stack objects between `sigsetjmp` and the signal are **not** run.~~
+~~- If `llama_decode()` held any internal mutex, it is permanently orphaned — the next call deadlocks.~~
+~~- The recovery path constructs an `Error` with `std::string` allocation, which is unsafe if the heap is corrupted.~~
 
-```cpp
-auto response = agent->chat(zoo::Message::user("Hello")).get();  // WRONG
-```
+~~The code already documents this risk in comments (lines 272-274) but ships it anyway.~~
 
-`chat()` returns `RequestHandle`, not `std::future`. The correct usage:
+~~**Fix:** Replace with a `volatile sig_atomic_t` flag checked after `llama_decode()` returns. If `llama_decode()` itself aborts and never returns, the process is unrecoverable regardless — `siglongjmp` just delays the crash with corrupted state.~~
 
-```cpp
-auto handle = agent->chat(zoo::Message::user("Hello"));
-auto response = handle.future.get();
-```
-
-The actual example binary (`examples/demo_chat.cpp:283`) uses the correct pattern, but every documentation page has the wrong one.
+**Resolution:** Replaced `sigsetjmp`/`siglongjmp` with a plain file-scope signal handler (`gpu_oom_signal_handler`) that sets a `thread_local volatile std::sig_atomic_t` flag. The flag is checked after `llama_decode()` returns non-zero. Removed `<csetjmp>` include.
 
 ---
 
-### 1.6 No LICENSE file despite MIT claim
+### ~~1.4 Subprocess vector creates dangling `const char*` pointers~~ ✅ Fixed
 
-**File:** README.md line 92 states `## License: MIT` and displays a license badge. No `LICENSE` file exists in the repository. This creates legal ambiguity for any downstream user.
+~~**File:** `include/zoo/mcp/transport/stdio_transport.hpp:68-84`~~
 
-**Fix:** Add a standard MIT LICENSE file.
+~~```cpp~~
+~~std::vector<const char*> cmd_parts;~~
+~~cmd_parts.push_back(config_.command.c_str());~~
+~~for (const auto& arg : config_.args) {~~
+~~    cmd_parts.push_back(arg.c_str());~~
+~~}~~
+~~```~~
+
+~~The `cmd_parts` vector stores pointers to `config_.args` elements. If `config_` is moved or reassigned between construction and the `subprocess_create()` call, every pointer dangles. More immediately: if any push triggers reallocation of `cmd_parts`, all prior `const char*` values are still valid (they point into `config_`'s strings, not the vector), so this particular scenario is actually safe. However, the code lacks a `reserve()` call, making intent unclear and the pattern fragile.~~
+
+~~Additionally, if `subprocess_create()` fails (line 86), `process_` may be partially initialized with no cleanup.~~
+
+~~**Fix:** Add `cmd_parts.reserve(config_.args.size() + 2)` and document subprocess cleanup on failure.~~
+
+**Resolution:** Added `cmd_parts.reserve(config_.args.size() + 2)` before the push loop with an explanatory comment. No reallocation can occur after the first `push_back`, keeping all `c_str()` pointers valid.
+
+---
+
+### ~~1.5 Documentation shows code that won't compile~~ ✅ Fixed
+
+~~**Files:** `docs/getting-started.md:57-58`, `docs/examples.md` (26+ occurrences)~~
+
+~~All user-facing examples call `.get()` directly on `agent->chat(...)`:~~
+
+~~```cpp~~
+~~auto response = agent->chat(zoo::Message::user("Hello")).get();  // WRONG~~
+~~```~~
+
+~~`chat()` returns `RequestHandle`, not `std::future`. The correct usage:~~
+
+~~```cpp~~
+~~auto handle = agent->chat(zoo::Message::user("Hello"));~~
+~~auto response = handle.future.get();~~
+~~```~~
+
+~~The actual example binary (`examples/demo_chat.cpp:283`) uses the correct pattern, but every documentation page has the wrong one.~~
+
+**Resolution:** All occurrences in `getting-started.md` and `examples.md` corrected to `.future.get()`. API table updated to show `RequestHandle` as the return type.
+
+---
+
+### ~~1.6 No LICENSE file despite MIT claim~~ ✅ Fixed
+
+~~**File:** README.md line 92 states `## License: MIT` and displays a license badge. No `LICENSE` file exists in the repository. This creates legal ambiguity for any downstream user.~~
+
+~~**Fix:** Add a standard MIT LICENSE file.~~
+
+**Resolution:** `LICENSE` file added with standard MIT license text.
 
 ---
 
@@ -379,9 +391,9 @@ Failed JSON parses are silently swallowed. Consider logging or incrementing a di
 
 ## Summary
 
-| Priority | Count | Key Theme |
-|----------|-------|-----------|
-| **Should Definitely Change** | 6 | Memory safety, signal safety, compilation errors in docs, missing LICENSE |
-| **Should Change** | 8 | Thread safety, resource leaks, CI gaps, error handling consistency |
-| **Consider Changing** | 10 | API ergonomics, validation, documentation, test reliability |
-| **Cleanup** | 10 | Conventions, magic numbers, minor inefficiencies |
+| Priority | Count | Resolved | Remaining | Key Theme |
+|----------|-------|----------|-----------|-----------|
+| **Should Definitely Change** | 6 | ✅ 6 | 0 | Memory safety, signal safety, compilation errors in docs, missing LICENSE |
+| **Should Change** | 8 | — | 8 | Thread safety, resource leaks, CI gaps, error handling consistency |
+| **Consider Changing** | 10 | — | 10 | API ergonomics, validation, documentation, test reliability |
+| **Cleanup** | 10 | — | 10 | Conventions, magic numbers, minor inefficiencies |
