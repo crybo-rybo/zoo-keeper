@@ -518,6 +518,20 @@ TEST_F(AgentTest, GetConfig) {
     EXPECT_EQ(retrieved.max_tokens, 256);
 }
 
+TEST_F(AgentTest, GetTrainingContextSize) {
+    auto backend = std::make_unique<MockBackend>();
+    backend->training_context_size = 131072;
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    EXPECT_EQ(agent->get_training_context_size(), 131072);
+}
+
 TEST_F(AgentTest, CreateWithInvalidConfigFails) {
     Config config;
     config.model_path = "";  // Invalid
@@ -902,6 +916,75 @@ TEST_F(AgentTest, CancelRequestViaCancellationToken) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+}
+
+// ============================================================================
+// KV Cache Quantization Tests (Issue #41)
+// ============================================================================
+
+TEST_F(AgentTest, KvCacheTypeDefaultsToF16) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+
+    // Default values should be 1 = GGML_TYPE_F16
+    EXPECT_EQ(config.kv_cache_type_k, 1);
+    EXPECT_EQ(config.kv_cache_type_v, 1);
+}
+
+TEST_F(AgentTest, KvCacheTypeQ8ValidatesSuccessfully) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.kv_cache_type_k = 8;  // GGML_TYPE_Q8_0 — half memory, near-lossless
+    config.kv_cache_type_v = 8;
+
+    auto result = config.validate();
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST_F(AgentTest, KvCacheTypeQ4ValidatesSuccessfully) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.kv_cache_type_k = 2;  // GGML_TYPE_Q4_0 — quarter memory
+    config.kv_cache_type_v = 2;
+
+    auto result = config.validate();
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST_F(AgentTest, KvCacheTypeNegativeKFails) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.kv_cache_type_k = -1;
+
+    auto result = config.validate();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidConfig);
+}
+
+TEST_F(AgentTest, KvCacheTypeNegativeVFails) {
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.kv_cache_type_v = -1;
+
+    auto result = config.validate();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidConfig);
+}
+
+TEST_F(AgentTest, KvCacheTypeStoredInConfig) {
+    auto backend = std::make_unique<MockBackend>();
+
+    Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.kv_cache_type_k = 8;  // GGML_TYPE_Q8_0
+    config.kv_cache_type_v = 8;
+
+    auto agent_result = Agent::create(config, std::move(backend));
+    ASSERT_TRUE(agent_result.has_value());
+    auto& agent = *agent_result;
+
+    EXPECT_EQ(agent->get_config().kv_cache_type_k, 8);
+    EXPECT_EQ(agent->get_config().kv_cache_type_v, 8);
 }
 
 #ifdef ZOO_ENABLE_MCP
