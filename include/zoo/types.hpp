@@ -257,6 +257,11 @@ struct Config {
     // System prompt
     std::optional<std::string> system_prompt;                ///< System message prepended to conversations
 
+    // Memory estimation
+    /// If true, Agent::create() will reduce context_size to fit estimated available memory.
+    /// Requires the model file to be accessible for GGUF metadata reading.
+    bool auto_tune_context = false;
+
     // Queue settings
     size_t request_queue_capacity = 0;                       ///< Maximum request queue size (0 = unlimited)
 
@@ -307,7 +312,8 @@ struct Config {
                system_prompt == other.system_prompt &&
                request_queue_capacity == other.request_queue_capacity &&
                kv_cache_type_k == other.kv_cache_type_k &&
-               kv_cache_type_v == other.kv_cache_type_v;
+               kv_cache_type_v == other.kv_cache_type_v &&
+               auto_tune_context == other.auto_tune_context;
     }
 
     bool operator!=(const Config& other) const {

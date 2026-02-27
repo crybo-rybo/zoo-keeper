@@ -14,6 +14,7 @@ add_executable(zoo_tests
     unit/test_agent.cpp
     unit/test_rag_store.cpp
     unit/test_context_database.cpp
+    unit/test_memory_estimate.cpp
     mocks/mock_backend.cpp
 )
 
@@ -30,6 +31,7 @@ endif()
 target_link_libraries(zoo_tests
     PRIVATE
         zoo
+        zoo_backend
         GTest::gtest
         GTest::gtest_main
         GTest::gmock

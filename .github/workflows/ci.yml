@@ -17,7 +17,7 @@ jobs:
           submodules: recursive
 
       - name: Configure CMake
-        run: cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
+        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
 
       - name: Build
         run: cmake --build build -j$(nproc)
