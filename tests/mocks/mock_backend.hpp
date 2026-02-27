@@ -34,6 +34,7 @@ public:
     std::vector<int> last_prompt_tokens;
     int kv_cache_tokens = 0;
     int context_size = 8192;
+    int training_context_size = 4096;
     int vocab_size = 32000;
     int clear_kv_cache_calls = 0;
     std::string last_formatted_prompt;
@@ -181,6 +182,10 @@ public:
 
     int get_context_size() const override {
         return context_size;
+    }
+
+    int get_training_context_size() const override {
+        return training_context_size;
     }
 
     int get_vocab_size() const override {

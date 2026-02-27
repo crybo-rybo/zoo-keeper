@@ -151,6 +151,8 @@ Expected<void> LlamaBackend::initialize(const Config& config) {
     ctx_params.n_threads = -1; // Auto-detect thread count
     ctx_params.n_threads_batch = -1; // Auto-detect
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    ctx_params.type_k = static_cast<ggml_type>(config.kv_cache_type_k);
+    ctx_params.type_v = static_cast<ggml_type>(config.kv_cache_type_v);
 
     // Create context
     ctx_ = llama_init_from_model(model_, ctx_params);
@@ -492,6 +494,11 @@ void LlamaBackend::finalize_response(const std::vector<Message>& messages)
 
 int LlamaBackend::get_context_size() const {
     return context_size_;
+}
+
+int LlamaBackend::get_training_context_size() const {
+    if (model_ == nullptr) return 0;
+    return llama_model_n_ctx_train(model_);
 }
 
 int LlamaBackend::get_vocab_size() const {
