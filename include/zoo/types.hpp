@@ -257,10 +257,6 @@ struct Config {
     // System prompt
     std::optional<std::string> system_prompt;                ///< System message prepended to conversations
 
-    // KV cache quantization
-    int kv_cache_type_k = 1;  ///< KV cache key type (0=F32, 1=F16, 2=Q4_0, 8=Q8_0)
-    int kv_cache_type_v = 1;  ///< KV cache value type (0=F32, 1=F16, 2=Q4_0, 8=Q8_0)
-
     // Memory estimation
     /// If true, Agent::create() will reduce context_size to fit estimated available memory.
     /// Requires the model file to be accessible for GGUF metadata reading.
