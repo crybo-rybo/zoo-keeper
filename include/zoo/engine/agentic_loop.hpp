@@ -87,6 +87,16 @@ public:
     }
 
     /**
+     * @brief Set the aggressive prune target ratio used during compaction (default: 0.50)
+     *
+     * When the initial headroom check fails, compaction prunes history to this
+     * fraction of the context window before retrying.
+     */
+    void set_aggressive_prune_target_ratio(double ratio) {
+        aggressive_prune_target_ratio_ = ratio;
+    }
+
+    /**
      * @brief Process a single request (with optional tool loop)
      *
      * @param request The request to process
@@ -218,71 +228,52 @@ public:
                 }));
             }
 
-            // Format prompt — avoid copying history when there is no RAG context
-            std::string prompt;
-            {
-                Expected<std::string> prompt_result;
-                if (rag_context.empty()) {
-                    prompt_result = backend_->format_prompt(history_->get_messages());
-                } else {
-                    auto prompt_messages = build_prompt_messages(
-                        history_->get_messages(),
-                        user_message_index,
-                        rag_context
-                    );
-                    prompt_result = backend_->format_prompt(prompt_messages);
-                }
-                if (!prompt_result) {
-                    rollback_last_message();
-                    return finish(tl::unexpected(prompt_result.error()));
-                }
-                prompt = std::move(*prompt_result);
-            }
-
-            // Tokenize
-            auto tokens_result = backend_->tokenize(prompt);
-            if (!tokens_result) {
+            // Format and tokenize the prompt
+            auto prep = prepare_prompt(user_message_index, rag_context);
+            if (!prep) {
                 rollback_last_message();
-                return finish(tl::unexpected(tokens_result.error()));
+                return finish(tl::unexpected(prep.error()));
             }
-            const auto& prompt_tokens = *tokens_result;
-            total_prompt_tokens += static_cast<int>(prompt_tokens.size());
 
-            // Pre-generate safety check: if the formatted prompt alone exceeds the
-            // context size, generation will certainly fail. Catch it here with a
-            // descriptive error instead of letting it fail inside generate().
+            auto prompt_tokens = std::move(prep->tokens);
+
+            // Pre-generate safety check: verify the prompt fits and enough
+            // headroom remains for a meaningful response.
             {
                 int prompt_size = static_cast<int>(prompt_tokens.size());
                 int ctx_size = backend_->get_context_size();
-
-                if (prompt_size > ctx_size) {
-                    rollback_last_message();
-                    return finish(tl::unexpected(Error{
-                        ErrorCode::ContextWindowExceeded,
-                        "Context window exceeded: formatted prompt requires " +
-                        std::to_string(prompt_size) +
-                        " tokens but context size is " + std::to_string(ctx_size) +
-                        " (chat template overhead not captured by token estimator)"
-                    }));
-                }
-
-                // Headroom check: ensure there is enough room in the context for a
-                // meaningful response. cap min_response_reserve_ at remaining ctx space
-                // when max_tokens is set (avoids requiring more than the user asked for).
-                const int remaining_ctx = ctx_size - prompt_size;
                 const int effective_reserve = (config_.max_tokens > 0)
                     ? std::min(min_response_reserve_, config_.max_tokens)
                     : min_response_reserve_;
-                if (remaining_ctx < effective_reserve) {
-                    rollback_last_message();
-                    return finish(tl::unexpected(Error{
-                        ErrorCode::ContextWindowExceeded,
-                        "Insufficient context headroom for response: " +
-                        std::to_string(remaining_ctx) + " tokens remaining, " +
-                        std::to_string(effective_reserve) + " required"
-                    }));
+                const int remaining_ctx = ctx_size - prompt_size;
+                const bool headroom_ok = (prompt_size <= ctx_size) && (remaining_ctx >= effective_reserve);
+
+                if (!headroom_ok) {
+                    if (iteration == 1) {
+                        // First iteration: attempt compaction before rejecting
+                        auto compact_result = try_compact(
+                            user_message_index, rag_context, rag_context);
+                        if (!compact_result) {
+                            rollback_last_message();
+                            return finish(tl::unexpected(compact_result.error()));
+                        }
+                        prompt_tokens = std::move(compact_result->tokens);
+                        // RAG may have been cleared by try_compact — update ephemeral flag
+                        using_ephemeral_rag = !rag_context.empty();
+                    } else {
+                        // Tool-loop iteration: cannot prune mid-chain
+                        rollback_last_message();
+                        return finish(tl::unexpected(Error{
+                            ErrorCode::ContextWindowExceeded,
+                            "Insufficient context headroom for response: " +
+                            std::to_string(remaining_ctx) + " tokens remaining, " +
+                            std::to_string(effective_reserve) + " required"
+                        }));
+                    }
                 }
             }
+
+            total_prompt_tokens += static_cast<int>(prompt_tokens.size());
 
             // Generate with streaming callback
             int completion_tokens = 0;
@@ -485,6 +476,122 @@ private:
     int memory_retrieval_top_k_ = 4;
     int memory_min_messages_to_keep_ = 6;
     double memory_prune_target_ratio_ = 0.75;
+    double aggressive_prune_target_ratio_ = 0.50;
+
+    /** @brief Holds tokenized prompt data returned by prepare_prompt(). */
+    struct PreparedPrompt {
+        std::vector<int> tokens;
+    };
+
+    /**
+     * @brief Format and tokenize the current history into a prompt.
+     *
+     * Extracts the repeated format→tokenize block so both the main loop
+     * and try_compact() can call it without duplicating logic.
+     */
+    Expected<PreparedPrompt> prepare_prompt(
+        size_t user_message_index,
+        const std::string& rag_context
+    ) {
+        Expected<std::string> prompt_result;
+        if (rag_context.empty()) {
+            prompt_result = backend_->format_prompt(history_->get_messages());
+        } else {
+            auto prompt_messages = build_prompt_messages(
+                history_->get_messages(),
+                user_message_index,
+                rag_context
+            );
+            prompt_result = backend_->format_prompt(prompt_messages);
+        }
+        if (!prompt_result) {
+            return tl::unexpected(prompt_result.error());
+        }
+
+        auto tokens_result = backend_->tokenize(*prompt_result);
+        if (!tokens_result) {
+            return tl::unexpected(tokens_result.error());
+        }
+
+        return PreparedPrompt{std::move(*tokens_result)};
+    }
+
+    /**
+     * @brief Attempt to compact history when the headroom check fails.
+     *
+     * Phase 1: Aggressively prune history to aggressive_prune_target_ratio_,
+     *          archive pruned messages, clear KV cache, re-prepare prompt.
+     * Phase 2: If still insufficient and RAG context exists, drop RAG entirely.
+     * Phase 3: If still insufficient, return ContextWindowExceeded.
+     */
+    Expected<PreparedPrompt> try_compact(
+        size_t& user_message_index,
+        const std::string& /*original_rag_context*/,
+        std::string& active_rag_context
+    ) {
+        const int ctx_size = backend_->get_context_size();
+        const int effective_reserve = (config_.max_tokens > 0)
+            ? std::min(min_response_reserve_, config_.max_tokens)
+            : min_response_reserve_;
+
+        // Phase 1: Aggressive history pruning
+        {
+            const int target_tokens = std::max(
+                1,
+                static_cast<int>(
+                    static_cast<double>(ctx_size) * aggressive_prune_target_ratio_));
+
+            auto pruned = history_->prune_oldest_messages_until(
+                target_tokens, memory_min_messages_to_keep_);
+
+            // Archive pruned messages if context_database_ is available (non-fatal on failure)
+            if (!pruned.empty() && context_database_) {
+                (void)context_database_->add_messages(pruned, "compaction_archive");
+            }
+
+            // Recalculate user_message_index after pruning
+            user_message_index = history_->get_messages().size() - 1;
+
+            backend_->clear_kv_cache();
+
+            auto prep = prepare_prompt(user_message_index, active_rag_context);
+            if (!prep) {
+                return tl::unexpected(prep.error());
+            }
+
+            int prompt_size = static_cast<int>(prep->tokens.size());
+            int remaining = ctx_size - prompt_size;
+            if (prompt_size <= ctx_size && remaining >= effective_reserve) {
+                // Sync estimate with actual post-compaction token count
+                history_->sync_token_estimate(prompt_size);
+                return prep;  // Phase 1 succeeded
+            }
+        }
+
+        // Phase 2: Drop RAG context if present
+        if (!active_rag_context.empty()) {
+            active_rag_context.clear();
+
+            auto prep = prepare_prompt(user_message_index, active_rag_context);
+            if (!prep) {
+                return tl::unexpected(prep.error());
+            }
+
+            int prompt_size = static_cast<int>(prep->tokens.size());
+            int remaining = ctx_size - prompt_size;
+            if (prompt_size <= ctx_size && remaining >= effective_reserve) {
+                // Sync estimate with actual post-compaction token count
+                history_->sync_token_estimate(prompt_size);
+                return prep;  // Phase 2 succeeded
+            }
+        }
+
+        // Phase 3: Give up
+        return tl::unexpected(Error{
+            ErrorCode::ContextWindowExceeded,
+            "Context window exceeded after compaction: unable to free enough space"
+        });
+    }
 
     std::vector<Message> build_prompt_messages(
         const std::vector<Message>& history_messages,

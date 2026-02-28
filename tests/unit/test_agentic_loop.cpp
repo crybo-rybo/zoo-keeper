@@ -429,6 +429,206 @@ TEST_F(AgenticLoopToolTest, EmptyRegistryNoToolDetection) {
     EXPECT_TRUE(result->tool_calls.empty());
 }
 
+// ============================================================================
+// Context Compaction Tests
+// ============================================================================
+
+class AgenticLoopCompactionTest : public ::testing::Test {
+protected:
+    std::shared_ptr<MockBackend> backend;
+    Config config;
+
+    void SetUp() override {
+        backend = std::make_shared<MockBackend>();
+        config.model_path = "/path/to/model.gguf";
+    }
+
+    /**
+     * Helper: build a history filled with messages whose formatted+tokenized
+     * size is large relative to ctx_size.  The mock tokenizer counts
+     * text.length()/4 tokens, and format_prompt emits "role: content\n"
+     * per message (~overhead of the role prefix).
+     */
+    std::shared_ptr<HistoryManager> make_filled_history(
+        int ctx_size, int num_filler_pairs, int filler_length = 200
+    ) {
+        auto history = std::make_shared<HistoryManager>(ctx_size);
+        // Alternate user/assistant so role validation passes.
+        for (int i = 0; i < num_filler_pairs; ++i) {
+            std::string content(static_cast<size_t>(filler_length), 'x');
+            (void)history->add_message(Message::user(content));
+            (void)history->add_message(Message::assistant("ack"));
+        }
+        return history;
+    }
+};
+
+// Compaction recovers a context that would otherwise fail the headroom check.
+TEST_F(AgenticLoopCompactionTest, CompactionRecoversTightContext) {
+    // HistoryManager uses a large context_size so its estimate check passes.
+    // Backend uses a smaller context_size so the tokenized headroom check fails.
+    // After compaction prunes to 50% of HistoryManager's ctx, the tokenized
+    // prompt shrinks enough to fit the backend's context window.
+    //
+    // Mock tokenizer: text.length()/4 tokens
+    // Mock format_prompt: "role: content\n" per message
+    // 4 filler pairs @ 200 chars: ~4*(207/4 + 15/4) = 4*(51+3) = 216 tokens
+    // Plus new user "user: New question\n" ≈ 5 tokens → total ~221
+    // Backend ctx = 250, reserve = 50 → need 200 free → 250-221=29 < 50 → FAIL
+    // After compaction prunes 2 pairs (~108 tokens removed) → ~113 tokens
+    // 250-113=137 > 50 → OK
+    config.context_size = 250;
+    config.max_tokens = 50;
+    (void)backend->initialize(config);
+
+    // Use large HistoryManager ctx so estimate check doesn't trigger
+    auto history = make_filled_history(2000, 4, 200);
+    auto loop = std::make_unique<AgenticLoop>(backend, history, config);
+    loop->set_min_response_reserve(50);
+
+    backend->enqueue_response("Compacted response.");
+
+    Request req(Message::user("New question"));
+    auto result = loop->process_request(req);
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->text, "Compacted response.");
+    // Compaction should have cleared the KV cache
+    EXPECT_GT(backend->clear_kv_cache_calls, 0);
+}
+
+// Compaction archives pruned messages to the context database.
+TEST_F(AgenticLoopCompactionTest, CompactionArchivesToDatabase) {
+    // Same setup as CompactionRecoversTightContext but with a ContextDatabase.
+    config.context_size = 250;
+    config.max_tokens = 50;
+    (void)backend->initialize(config);
+
+    auto history = make_filled_history(2000, 4, 200);
+
+    // Create an in-memory context database
+    auto db_result = zoo::engine::ContextDatabase::open(":memory:");
+    ASSERT_TRUE(db_result.has_value()) << db_result.error().message;
+    auto db = *db_result;
+
+    auto loop = std::make_unique<AgenticLoop>(backend, history, config);
+    loop->set_min_response_reserve(50);
+    loop->set_context_database(db);
+
+    backend->enqueue_response("Archived response.");
+
+    Request req(Message::user("New question"));
+    auto result = loop->process_request(req);
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->text, "Archived response.");
+
+    // Verify pruned messages were archived — database size should be > 0
+    auto db_size = db->size();
+    ASSERT_TRUE(db_size.has_value());
+    EXPECT_GT(*db_size, 0u);
+}
+
+// When context is too small for even a single message, compaction fails gracefully.
+TEST_F(AgenticLoopCompactionTest, CompactionFailsGracefully) {
+    // Backend context is tiny. HistoryManager context is large so estimate
+    // check passes, but the actual tokenized prompt can't fit.
+    config.context_size = 20;  // Backend context
+    config.max_tokens = 10;
+    (void)backend->initialize(config);
+
+    // Large HistoryManager context so estimate check doesn't block
+    auto history = std::make_shared<HistoryManager>(5000);
+    auto loop = std::make_unique<AgenticLoop>(backend, history, config);
+    loop->set_min_response_reserve(10);
+
+    backend->enqueue_response("Should not appear.");
+
+    // Message that tokenizes to ~50 tokens (200 chars / 4) — way over backend ctx of 20
+    std::string big_msg(200, 'z');
+    Request req(Message::user(big_msg));
+    auto result = loop->process_request(req);
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ContextWindowExceeded);
+    EXPECT_NE(result.error().message.find("after compaction"), std::string::npos);
+}
+
+// RAG context is dropped during compaction when pruning alone isn't enough.
+TEST_F(AgenticLoopCompactionTest, CompactionDropsRagWhenNeeded) {
+    // Backend context = 300. History alone fits (~113 tokens for 2 pairs +
+    // new user msg), but adding the large RAG chunk (~100+ tokens) pushes
+    // the formatted prompt over headroom.
+    // After compaction: aggressive prune doesn't help enough (only 2 pairs,
+    // min_keep=6 prevents pruning), but dropping RAG frees the space.
+    config.context_size = 300;
+    config.max_tokens = 50;
+    (void)backend->initialize(config);
+
+    // 2 filler pairs, HistoryManager ctx large so estimate check passes
+    auto history = make_filled_history(5000, 2, 100);
+
+    // Create a retriever that returns a large chunk
+    class LargeRetriever : public zoo::engine::IRetriever {
+    public:
+        Expected<std::vector<RagChunk>> retrieve(const RagQuery&) override {
+            RagChunk chunk;
+            chunk.id = "large";
+            chunk.content = std::string(800, 'r');  // ~200 tokens of RAG
+            return std::vector<RagChunk>{chunk};
+        }
+    };
+
+    auto loop = std::make_unique<AgenticLoop>(backend, history, config);
+    loop->set_min_response_reserve(50);
+    loop->set_retriever(std::make_shared<LargeRetriever>());
+
+    backend->enqueue_response("Response after RAG drop.");
+
+    ChatOptions opts;
+    opts.rag.enabled = true;
+    Request req(Message::user("Query"), opts);
+    auto result = loop->process_request(req);
+
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result->text, "Response after RAG drop.");
+}
+
+// Context pressure during tool-loop iteration 2+ results in immediate rejection.
+TEST_F(AgenticLoopCompactionTest, NoCompactionDuringToolLoop) {
+    // Backend context = 150. HistoryManager ctx is large.
+    // Fill with 2 pairs (each user 80 chars). Tokenized prompt for iteration 1:
+    //   2 user msgs @ ~(6+80+1)/4 = 21 + 2 assistant "ack" @ 3 + new user ~5 = 50 tokens
+    //   150 - 50 = 100 > 80 reserve → first iteration OK
+    // After tool call, assistant response + tool result are added (~30+ more tokens).
+    //   Iteration 2: ~80 tokens → 150-80=70 < 80 → headroom fails at iteration 2
+    //   No compaction attempted (iteration > 1) → immediate rejection
+    config.context_size = 150;
+    config.max_tokens = 80;
+    (void)backend->initialize(config);
+
+    auto history = make_filled_history(5000, 2, 80);
+    auto registry = std::make_shared<ToolRegistry>();
+    registry->register_tool("add", "Add two integers",
+        {"a", "b"}, zoo::testing::tools::add);
+
+    auto loop = std::make_unique<AgenticLoop>(backend, history, config);
+    loop->set_tool_registry(registry);
+    loop->set_min_response_reserve(80);
+
+    // First iteration produces a tool call, second iteration should fail
+    // because tool call + result messages inflate the prompt beyond headroom.
+    backend->enqueue_response(R"({"name": "add", "arguments": {"a": 1, "b": 2}})");
+    backend->enqueue_response("Should not appear.");
+
+    Request req(Message::user("Add 1+2"));
+    auto result = loop->process_request(req);
+
+    // Should fail with ContextWindowExceeded (not compaction — iteration > 1)
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ContextWindowExceeded);
+}
+
 TEST_F(AgenticLoopToolTest, ToolInvokeError) {
     // Register a tool whose handler returns an error
     ToolHandler broken_handler = [](const nlohmann::json&) -> Expected<nlohmann::json> {
