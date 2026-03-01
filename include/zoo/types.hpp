@@ -252,7 +252,7 @@ struct Config {
     std::optional<std::string> custom_template;              ///< Custom Jinja2 template (required if PromptTemplate::Custom)
 
     // Generation limits
-    int max_tokens = 512;                                    ///< Maximum tokens to generate per response (> 0)
+    int max_tokens = -1;                                     ///< Maximum tokens to generate per response (> 0, or -1 for unlimited)
     std::vector<std::string> stop_sequences;                 ///< Additional stop strings to halt generation
 
     // System prompt
@@ -286,8 +286,8 @@ struct Config {
         if (context_size <= 0) {
             return tl::unexpected(Error{ErrorCode::InvalidContextSize, "Context size must be positive"});
         }
-        if (max_tokens <= 0) {
-            return tl::unexpected(Error{ErrorCode::InvalidConfig, "max_tokens must be positive"});
+        if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
+            return tl::unexpected(Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
         }
         if (prompt_template == PromptTemplate::Custom && !custom_template.has_value()) {
             return tl::unexpected(Error{ErrorCode::InvalidTemplate, "Custom template string required for PromptTemplate::Custom"});
