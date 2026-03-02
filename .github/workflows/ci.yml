@@ -8,6 +8,64 @@ on:
 
 jobs:
   build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+            cmake_extra: ""
+          - os: ubuntu-latest
+            compiler: clang
+            cmake_extra: ""
+          - os: macos-latest
+            compiler: clang
+            cmake_extra: "-DZOO_ENABLE_METAL=ON"
+          - os: windows-latest
+            compiler: msvc
+            cmake_extra: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Clang (Ubuntu)
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+
+      - name: Configure CMake (Unix)
+        if: matrix.os != 'windows-latest'
+        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
+
+      - name: Configure CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
+
+      - name: Build (Unix)
+        if: matrix.os != 'windows-latest'
+        run: cmake --build build -j$(nproc)
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+
+      - name: Run tests (Unix)
+        if: matrix.os != 'windows-latest'
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows-latest'
+        run: ctest --test-dir build --config Release --output-on-failure
+
+  sanitizers:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,11 +74,11 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Configure CMake
-        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
+      - name: Configure CMake with sanitizers
+        run: cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build -j$(nproc)
 
-      - name: Run tests
+      - name: Run tests under sanitizers
         run: ctest --test-dir build --output-on-failure

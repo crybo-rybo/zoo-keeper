@@ -192,18 +192,21 @@ public:
      * @param description Human-readable description of what the tool does
      * @param param_names Parameter names (must match function arity)
      * @param func Callable to invoke when the tool is called
-     * @throws std::invalid_argument if param_names.size() does not match function arity
+     * @return Expected<void> Success or InvalidToolSignature error if param_names count
+     *         does not match function arity
      */
     template<typename Func>
-    void register_tool(const std::string& name, const std::string& description,
+    Expected<void> register_tool(const std::string& name, const std::string& description,
                        const std::vector<std::string>& param_names, Func func) {
         using traits = detail::function_traits<Func>;
         using args_tuple = typename traits::args_tuple;
 
         if (param_names.size() != traits::arity) {
-            throw std::invalid_argument(
+            return tl::unexpected(Error{
+                ErrorCode::InvalidToolSignature,
                 "Parameter name count (" + std::to_string(param_names.size()) +
-                ") does not match function arity (" + std::to_string(traits::arity) + ")");
+                ") does not match function arity (" + std::to_string(traits::arity) + ")"
+            });
         }
 
         // Generate schema from function signature
@@ -245,6 +248,7 @@ public:
         };
 
         register_tool(name, description, std::move(schema), std::move(handler));
+        return {};
     }
 
     /**

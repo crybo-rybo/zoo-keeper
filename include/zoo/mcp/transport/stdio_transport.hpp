@@ -94,12 +94,28 @@ public:
             });
         }
 
+        // Cache FILE* handles at connect time so send() and disconnect()
+        // operate on stable pointers protected by io_mutex_.
+        stdin_fp_ = subprocess_stdin(&process_);
+
         connected_.store(true);
 
-        // Start read thread
-        read_thread_ = std::thread([this]() {
-            read_loop();
-        });
+        // Start read thread; if thread creation fails, clean up the
+        // subprocess so it is not leaked (connected_ would remain true
+        // but no reader would be draining stdout).
+        try {
+            read_thread_ = std::thread([this]() {
+                read_loop();
+            });
+        } catch (const std::system_error& e) {
+            connected_.store(false);
+            stdin_fp_ = nullptr;
+            subprocess_destroy(&process_);
+            return tl::unexpected(Error{
+                ErrorCode::McpTransportFailed,
+                std::string("Failed to start read thread: ") + e.what()
+            });
+        }
 
         return {};
     }
@@ -112,10 +128,14 @@ public:
         // Signal the read loop to stop
         connected_.store(false);
 
-        // Close only stdin to trigger child exit and EOF on stdout
-        FILE* stdin_fp = subprocess_stdin(&process_);
-        if (stdin_fp) {
-            fclose(stdin_fp);
+        // Close stdin under the I/O lock to prevent send() from writing
+        // to a closed handle (TOCTOU race).
+        {
+            std::lock_guard<std::mutex> lock(io_mutex_);
+            if (stdin_fp_) {
+                fclose(stdin_fp_);
+                stdin_fp_ = nullptr;
+            }
         }
 
         // Wait for read thread to finish (it will see EOF and break)
@@ -138,14 +158,15 @@ public:
 
         std::string line = message + "\n";
 
-        std::lock_guard<std::mutex> lock(write_mutex_);
-        FILE* stdin_fp = subprocess_stdin(&process_);
-        if (!stdin_fp) {
+        // Hold io_mutex_ while writing to prevent disconnect() from
+        // closing stdin_fp_ between our check and the write.
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        if (!stdin_fp_) {
             return tl::unexpected(Error{ErrorCode::McpTransportFailed, "Subprocess stdin not available"});
         }
 
-        size_t written = fwrite(line.c_str(), 1, line.size(), stdin_fp);
-        fflush(stdin_fp);
+        size_t written = fwrite(line.c_str(), 1, line.size(), stdin_fp_);
+        fflush(stdin_fp_);
 
         if (written != line.size()) {
             return tl::unexpected(Error{ErrorCode::McpTransportFailed, "Failed to write to subprocess stdin"});
@@ -221,7 +242,8 @@ private:
     subprocess_s process_{};
     std::atomic<bool> connected_{false};
     std::thread read_thread_;
-    std::mutex write_mutex_;
+    std::mutex io_mutex_;         ///< Guards stdin_fp_ across send() and disconnect()
+    FILE* stdin_fp_ = nullptr;    ///< Cached at connect(), nulled at disconnect()
     ReceiveCallback receive_callback_;
     ErrorCallback error_callback_;
 };
