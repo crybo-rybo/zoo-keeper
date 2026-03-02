@@ -41,13 +41,23 @@ jobs:
           echo "CC=clang" >> $GITHUB_ENV
           echo "CXX=clang++" >> $GITHUB_ENV
 
+      - name: Install SQLite3 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install sqlite -y
+
+      - name: Set SQLite3 paths (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "SQLite3_INCLUDE_DIR=C:/ProgramData/chocolatey/lib/SQLite/tools" >> $env:GITHUB_ENV
+          echo "SQLite3_LIBRARY=C:/ProgramData/chocolatey/lib/SQLite/tools/sqlite3.lib" >> $env:GITHUB_ENV
+
       - name: Configure CMake (Unix)
         if: matrix.os != 'windows-latest'
         run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
 
       - name: Configure CMake (Windows)
         if: matrix.os == 'windows-latest'
-        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
+        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }} -DSQLite3_INCLUDE_DIR="$env:SQLite3_INCLUDE_DIR" -DSQLite3_LIBRARY="$env:SQLite3_LIBRARY"
 
       - name: Build (Unix)
         if: matrix.os != 'windows-latest'

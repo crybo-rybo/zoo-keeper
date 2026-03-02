@@ -59,11 +59,13 @@ else()
 endif()
 
 # Sanitizers
+# Note: ASan and TSan are mutually exclusive; use ASan + UBSan here.
 if(ZOO_ENABLE_SANITIZERS)
     if(NOT MSVC)
-        set(SANITIZER_FLAGS "-fsanitize=address,undefined,thread -fno-omit-frame-pointer")
-        target_compile_options(zoo_backend PRIVATE ${SANITIZER_FLAGS})
-        target_link_options(zoo_backend PRIVATE ${SANITIZER_FLAGS})
+        target_compile_options(zoo_backend PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(zoo_backend PRIVATE
+            -fsanitize=address,undefined)
     endif()
 endif()
 
