@@ -333,10 +333,10 @@ TEST_F(AgentTest, AgentRegisterTool) {
 
     EXPECT_EQ(agent->tool_count(), 0);
 
-    agent->register_tool("add", "Add two numbers", {"a", "b"}, tools::add);
+    (void)agent->register_tool("add", "Add two numbers", {"a", "b"}, tools::add);
     EXPECT_EQ(agent->tool_count(), 1);
 
-    agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
+    (void)agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
     EXPECT_EQ(agent->tool_count(), 2);
 }
 
@@ -353,7 +353,7 @@ TEST_F(AgentTest, AgentToolCallEndToEnd) {
     ASSERT_TRUE(agent_result.has_value());
     auto& agent = *agent_result;
 
-    agent->register_tool("add", "Add two integers", {"a", "b"}, tools::add);
+    (void)agent->register_tool("add", "Add two integers", {"a", "b"}, tools::add);
 
     auto handle = agent->chat(Message::user("What is 10 + 20?"));
     auto response = handle.future.get();
@@ -402,7 +402,7 @@ TEST_F(AgentTest, AgentRegisterToolAfterChat) {
     EXPECT_EQ(response1->text, "Plain response.");
 
     // Register tool after first chat
-    agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
+    (void)agent->register_tool("greet", "Greet someone", {"name"}, tools::greet);
 
     // Second chat with tool
     auto handle2 = agent->chat(Message::user("Greet World"));

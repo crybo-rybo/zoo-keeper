@@ -16,9 +16,9 @@ protected:
     ErrorRecovery recovery{2};
 
     void SetUp() override {
-        registry.register_tool("add", "Add two integers", {"a", "b"}, add);
-        registry.register_tool("greet", "Greet someone", {"name"}, greet);
-        registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply);
+        (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+        (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
+        (void)registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply);
     }
 };
 

@@ -51,26 +51,7 @@ gtest_discover_tests(zoo_tests
         LABELS "unit"
 )
 
-# Add compile options
-if(MSVC)
-    target_compile_options(zoo_tests PRIVATE /W4)
-else()
-    target_compile_options(zoo_tests PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-# Coverage support
-if(ZOO_ENABLE_COVERAGE)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(zoo_tests PRIVATE --coverage)
-        target_link_options(zoo_tests PRIVATE --coverage)
-    endif()
-endif()
-
-# Sanitizers
-if(ZOO_ENABLE_SANITIZERS)
-    if(NOT MSVC)
-        set(SANITIZER_FLAGS "-fsanitize=address,undefined -fno-omit-frame-pointer")
-        target_compile_options(zoo_tests PRIVATE ${SANITIZER_FLAGS})
-        target_link_options(zoo_tests PRIVATE ${SANITIZER_FLAGS})
-    endif()
-endif()
+# Compiler warnings, coverage, and sanitizers
+zoo_set_warnings(zoo_tests PRIVATE)
+zoo_enable_coverage(zoo_tests)
+zoo_enable_sanitizers(zoo_tests)

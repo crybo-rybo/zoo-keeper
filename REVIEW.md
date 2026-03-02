@@ -114,85 +114,101 @@
 
 ## 2. SHOULD CHANGE (High Priority)
 
-### 2.1 FILE* TOCTOU race between `send()` and `disconnect()`
+### ~~2.1 FILE* TOCTOU race between `send()` and `disconnect()`~~ ✅ Fixed
 
-**File:** `include/zoo/mcp/transport/stdio_transport.hpp:112-114, 138-140`
+~~**File:** `include/zoo/mcp/transport/stdio_transport.hpp:112-114, 138-140`~~
 
-`send()` calls `subprocess_stdin(&process_)` to get a `FILE*`. `disconnect()` calls `fclose()` on the same handle. If both execute concurrently, `send()` writes to a closed `FILE*` — undefined behavior. The `connected_` atomic doesn't fully protect this because the check-then-use window exists.
+~~`send()` calls `subprocess_stdin(&process_)` to get a `FILE*`. `disconnect()` calls `fclose()` on the same handle. If both execute concurrently, `send()` writes to a closed `FILE*` — undefined behavior. The `connected_` atomic doesn't fully protect this because the check-then-use window exists.~~
 
-**Fix:** Store the `FILE*` handles at connect time. Use a mutex around `send()` and `disconnect()`, or use an atomic flag that `send()` checks before writing.
+~~**Fix:** Store the `FILE*` handles at connect time. Use a mutex around `send()` and `disconnect()`, or use an atomic flag that `send()` checks before writing.~~
 
----
-
-### 2.2 Unchecked JSON types from MCP server responses
-
-**File:** `include/zoo/mcp/mcp_client.hpp:119-147`
-
-The `discover_tools()` loop iterates over `(*result)["tools"]` without validating that each element is a JSON object. A malicious or buggy MCP server sending `"tools": [null, 42, "garbage"]` would silently create tools with empty names via `.value("name", "")`.
-
-Similarly, `include/zoo/mcp/protocol/session.hpp:231-260` accesses `result["capabilities"]` without an `is_object()` check. A server returning `"capabilities": null` crashes.
-
-**Fix:** Add `is_object()` guards before accessing fields. Return `McpProtocolError` for malformed responses.
+**Resolution:** `stdin_fp_` is now cached at connect time and protected by `io_mutex_`. Both `send()` and `disconnect()` hold `io_mutex_` while accessing the handle, eliminating the TOCTOU race.
 
 ---
 
-### 2.3 Cancel tokens map grows unboundedly
+### ~~2.2 Unchecked JSON types from MCP server responses~~ ✅ Fixed
 
-**File:** `include/zoo/agent.hpp:222-228`
+~~**File:** `include/zoo/mcp/mcp_client.hpp:119-147`~~
 
-`cancel()` sets a flag but never removes the entry from `cancel_tokens_`. Over a long-running session with many requests, this map leaks memory linearly.
+~~The `discover_tools()` loop iterates over `(*result)["tools"]` without validating that each element is a JSON object. A malicious or buggy MCP server sending `"tools": [null, 42, "garbage"]` would silently create tools with empty names via `.value("name", "")`.~~
 
-**Fix:** Erase the entry in `inference_loop()` after the request completes.
+~~Similarly, `include/zoo/mcp/protocol/session.hpp:231-260` accesses `result["capabilities"]` without an `is_object()` check. A server returning `"capabilities": null` crashes.~~
 
----
+~~**Fix:** Add `is_object()` guards before accessing fields. Return `McpProtocolError` for malformed responses.~~
 
-### 2.4 `ToolRegistry::register_tool()` throws instead of returning `Expected`
-
-**File:** `include/zoo/engine/tool_registry.hpp:203-207`
-
-Every other API in the library returns `Expected<T>`. This one throws `std::invalid_argument`. Callers wrapping registration in a try-catch are doing busywork that the `Expected` pattern was designed to eliminate.
-
-**Fix:** Return `Expected<void>`.
+**Resolution:** Added `is_object()` guard in `discover_tools()` — non-object tool entries now return `McpProtocolError`. Added `is_object()` guard on `result["capabilities"]` in `parse_initialize_result()` so null/non-object capabilities are safely ignored.
 
 ---
 
-### 2.5 O(n^2) pruning in `HistoryManager::prune_oldest_messages_until()`
+### ~~2.3 Cancel tokens map grows unboundedly~~ ✅ Fixed
 
-**File:** `include/zoo/engine/history_manager.hpp:209-212`
+~~**File:** `include/zoo/agent.hpp:222-228`~~
 
-Each `messages_.erase(begin + offset)` is O(n) because it shifts all subsequent elements. In a loop, this becomes O(n^2). For histories of thousands of messages, this is a noticeable stall on the inference thread.
+~~`cancel()` sets a flag but never removes the entry from `cancel_tokens_`. Over a long-running session with many requests, this map leaks memory linearly.~~
 
-**Fix:** Collect indices to remove, then erase in a single batch (e.g., `std::remove_if` + `erase`).
+~~**Fix:** Erase the entry in `inference_loop()` after the request completes.~~
 
----
-
-### 2.6 Read thread lifecycle is fragile
-
-**File:** `include/zoo/mcp/transport/stdio_transport.hpp:96-98`
-
-If `std::thread` construction throws (e.g., resource exhaustion), `connected_` was never set to `true`, but `process_` has already been spawned. The destructor path won't call `disconnect()` (because `connected_` is false), leaking the child process.
-
-**Fix:** Wrap thread creation in try-catch. On failure, destroy the subprocess and return an error.
+**Resolution:** The drain loop in `inference_loop()` now erases cancel tokens for remaining queued requests during shutdown, matching the cleanup already done for processed requests.
 
 ---
 
-### 2.7 CI only tests on Ubuntu
+### ~~2.4 `ToolRegistry::register_tool()` throws instead of returning `Expected`~~ ✅ Fixed
 
-**File:** `.github/workflows/ci.yml`
+~~**File:** `include/zoo/engine/tool_registry.hpp:203-207`~~
 
-The project documents support for macOS (Metal), Linux (GCC/Clang), and Windows (MSVC). CI only runs `ubuntu-latest`. Metal acceleration, MSVC compilation, and platform-specific code paths (sysctl on macOS, /proc/meminfo on Linux) are never tested in CI.
+~~Every other API in the library returns `Expected<T>`. This one throws `std::invalid_argument`. Callers wrapping registration in a try-catch are doing busywork that the `Expected` pattern was designed to eliminate.~~
 
-**Fix:** Add a build matrix: `{ubuntu-latest, macos-latest, windows-latest}`. Enable Metal on macOS, test both GCC and Clang on Linux.
+~~**Fix:** Return `Expected<void>`.~~
+
+**Resolution:** Template `register_tool()` now returns `Expected<void>` with `ErrorCode::InvalidToolSignature` on arity mismatch. `Agent::register_tool()` propagates the result. All callers updated. Test changed from `EXPECT_THROW` to checking the returned error.
 
 ---
 
-### 2.8 No sanitizers in CI
+### ~~2.5 O(n^2) pruning in `HistoryManager::prune_oldest_messages_until()`~~ ✅ Fixed
 
-**File:** `CMakeLists.txt:62-68` (sanitizer flags configured), `.github/workflows/ci.yml` (not used)
+~~**File:** `include/zoo/engine/history_manager.hpp:209-212`~~
 
-ASan, TSan, and UBSan are fully wired into CMake but never exercised in CI. The use-after-free bugs documented above would likely be caught by ASan.
+~~Each `messages_.erase(begin + offset)` is O(n) because it shifts all subsequent elements. In a loop, this becomes O(n^2). For histories of thousands of messages, this is a noticeable stall on the inference thread.~~
 
-**Fix:** Add a CI job: `cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build`.
+~~**Fix:** Collect indices to remove, then erase in a single batch (e.g., `std::remove_if` + `erase`).~~
+
+**Resolution:** Replaced iterative single-element erase with a two-pass approach: first counts removable messages and accumulates token costs, then moves them into the result vector and performs a single range erase. Now O(n) instead of O(n^2).
+
+---
+
+### ~~2.6 Read thread lifecycle is fragile~~ ✅ Fixed
+
+~~**File:** `include/zoo/mcp/transport/stdio_transport.hpp:96-98`~~
+
+~~If `std::thread` construction throws (e.g., resource exhaustion), `connected_` was never set to `true`, but `process_` has already been spawned. The destructor path won't call `disconnect()` (because `connected_` is false), leaking the child process.~~
+
+~~**Fix:** Wrap thread creation in try-catch. On failure, destroy the subprocess and return an error.~~
+
+**Resolution:** Thread creation in `connect()` is now wrapped in `try/catch(std::system_error)`. On failure, `connected_` is reset, `stdin_fp_` is cleared, and `subprocess_destroy()` is called before returning `McpTransportFailed`.
+
+---
+
+### ~~2.7 CI only tests on Ubuntu~~ ✅ Fixed
+
+~~**File:** `.github/workflows/ci.yml`~~
+
+~~The project documents support for macOS (Metal), Linux (GCC/Clang), and Windows (MSVC). CI only runs `ubuntu-latest`. Metal acceleration, MSVC compilation, and platform-specific code paths (sysctl on macOS, /proc/meminfo on Linux) are never tested in CI.~~
+
+~~**Fix:** Add a build matrix: `{ubuntu-latest, macos-latest, windows-latest}`. Enable Metal on macOS, test both GCC and Clang on Linux.~~
+
+**Resolution:** CI now uses a build matrix with four configurations: Ubuntu/GCC, Ubuntu/Clang, macOS/Clang (with Metal), and Windows/MSVC.
+
+---
+
+### ~~2.8 No sanitizers in CI~~ ✅ Fixed
+
+~~**File:** `CMakeLists.txt:62-68` (sanitizer flags configured), `.github/workflows/ci.yml` (not used)~~
+
+~~ASan, TSan, and UBSan are fully wired into CMake but never exercised in CI. The use-after-free bugs documented above would likely be caught by ASan.~~
+
+~~**Fix:** Add a CI job: `cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build`.~~
+
+**Resolution:** Added a dedicated `sanitizers` CI job that builds with `-DZOO_ENABLE_SANITIZERS=ON` and runs the full test suite.
 
 ---
 
@@ -394,6 +410,6 @@ Failed JSON parses are silently swallowed. Consider logging or incrementing a di
 | Priority | Count | Resolved | Remaining | Key Theme |
 |----------|-------|----------|-----------|-----------|
 | **Should Definitely Change** | 6 | ✅ 6 | 0 | Memory safety, signal safety, compilation errors in docs, missing LICENSE |
-| **Should Change** | 8 | — | 8 | Thread safety, resource leaks, CI gaps, error handling consistency |
+| **Should Change** | 8 | ✅ 8 | 0 | Thread safety, resource leaks, CI gaps, error handling consistency |
 | **Consider Changing** | 10 | — | 10 | API ergonomics, validation, documentation, test reliability |
 | **Cleanup** | 10 | — | 10 | Conventions, magic numbers, minor inefficiencies |

@@ -227,7 +227,7 @@ private:
                 init.server_info.version = result["serverInfo"].value("version", "");
             }
 
-            if (result.contains("capabilities")) {
+            if (result.contains("capabilities") && result["capabilities"].is_object()) {
                 auto& caps = result["capabilities"];
 
                 if (caps.contains("tools")) {
