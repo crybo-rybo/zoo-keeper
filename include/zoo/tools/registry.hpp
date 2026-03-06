@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include <nlohmann/json.hpp>
 #include <functional>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>

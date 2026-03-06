@@ -127,8 +127,8 @@ examples/
 
 ## Compiler Requirements
 
-- **macOS**: Clang 16.0+ (C++23 support)
-- **Linux**: GCC 13.0+ or Clang 16.0+
+- **macOS**: Apple Clang 16.0+ (C++23 support)
+- **Linux**: GCC 13.0+ or Clang 18.0+ (Clang 16/17 lack `std::expected`)
 
 ## Key Types
 
