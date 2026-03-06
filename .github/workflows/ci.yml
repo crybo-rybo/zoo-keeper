@@ -21,9 +21,6 @@ jobs:
           - os: macos-latest
             compiler: clang
             cmake_extra: "-DZOO_ENABLE_METAL=ON"
-          # - os: windows-latest
-          #   compiler: msvc
-          #   cmake_extra: ""
 
     runs-on: ${{ matrix.os }}
 
@@ -42,28 +39,13 @@ jobs:
           echo "CXX=clang++" >> $GITHUB_ENV
 
       - name: Configure CMake (Unix)
-        if: matrix.os != 'windows-latest'
-        run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
-
-      - name: Configure CMake (Windows)
-        if: matrix.os == 'windows-latest'
         run: cmake -B build -DZOO_ENABLE_MCP=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
 
       - name: Build (Unix)
-        if: matrix.os != 'windows-latest'
         run: cmake --build build -j$(nproc)
 
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
-
       - name: Run tests (Unix)
-        if: matrix.os != 'windows-latest'
         run: ctest --test-dir build --output-on-failure
-
-      - name: Run tests (Windows)
-        if: matrix.os == 'windows-latest'
-        run: ctest --test-dir build --config Release --output-on-failure
 
   sanitizers:
     runs-on: ubuntu-latest
