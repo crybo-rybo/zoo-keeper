@@ -5,13 +5,7 @@ add_executable(demo_chat demo_chat.cpp)
 
 target_link_libraries(demo_chat
     PRIVATE
-        zoo
         zoo_backend
-)
-
-target_include_directories(demo_chat
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 # Compiler warnings

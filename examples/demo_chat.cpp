@@ -1,330 +1,267 @@
 /**
- * Zoo-Keeper Demo Chat Application
+ * Zoo-Keeper Demo Chat
  *
- * Interactive CLI demonstrating the Zoo-Keeper Agent Engine with real LLM inference.
+ * Interactive CLI for chatting with a locally hosted LLM.
+ * Configuration is loaded from a JSON file.
  *
  * Usage:
- *   ./demo_chat <model_path> [options]
+ *   ./demo_chat <config.json>
+ *   ./demo_chat --help
  *
- * Options:
- *   --temperature <float>    Sampling temperature (default: 0.7)
- *   --max-tokens <int>       Max tokens to generate (default: 512)
- *   --context-size <int>     Context window size (default: 8192)
- *   --template <type>        Template type: llama3, chatml (default: llama3)
- *   --system <prompt>        System prompt
- *   --no-stream              Disable token streaming
- *   --help                   Show this help message
+ * Example config.json:
+ *   {
+ *     "model_path": "models/llama-3-8b.gguf",
+ *     "context_size": 8192,
+ *     "max_tokens": -1,
+ *     "n_gpu_layers": -1,
+ *     "system_prompt": "You are a helpful AI assistant.",
+ *     "sampling": {
+ *       "temperature": 0.7,
+ *       "top_p": 0.9,
+ *       "top_k": 40,
+ *       "repeat_penalty": 1.1,
+ *       "seed": -1
+ *     },
+ *     "stop_sequences": [],
+ *     "tools": true
+ *   }
  */
 
-#include "zoo/agent.hpp"
-#include "zoo/types.hpp"
+#include <zoo/zoo.hpp>
 
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <csignal>
 #include <atomic>
 #include <chrono>
 #include <iomanip>
-#include <future>
 #include <ctime>
 
-// Global flag for Ctrl+C handling
-std::atomic<bool> g_interrupted{false};
+static std::atomic<bool> g_interrupted{false};
 
 // ============================================================================
 // Example Tools
 // ============================================================================
 
-int calculate_add(int a, int b) { return a + b; }
-int calculate_subtract(int a, int b) { return a - b; }
-double calculate_multiply(double a, double b) { return a * b; }
+static int calculate_add(int a, int b) { return a + b; }
+static int calculate_subtract(int a, int b) { return a - b; }
+static double calculate_multiply(double a, double b) { return a * b; }
 
-std::string get_current_time() {
+static std::string get_current_time() {
     auto now = std::time(nullptr);
     char buf[64];
     std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
     return std::string(buf);
 }
 
-void signal_handler(int signal) {
-    if (signal == SIGINT) {
-        g_interrupted = true;
-        std::cout << "\n\nInterrupted. Stopping generation...\n";
-    }
-}
+// ============================================================================
+// Config loading
+// ============================================================================
 
-struct CLIArgs {
-    std::string model_path;
-    float temperature = 0.7f;
-    int max_tokens = 512;
-    int context_size = 8192;
-    zoo::PromptTemplate template_type = zoo::PromptTemplate::Llama3;
-    std::string system_prompt = "You are a helpful AI assistant.";
-    bool no_stream = false;
-    bool help = false;
+struct DemoConfig {
+    zoo::Config zoo;
+    bool tools_enabled = true;
 };
 
-void print_usage(const char* program_name) {
-    std::cout << "Zoo-Keeper Demo Chat Application\n\n";
-    std::cout << "Usage:\n";
-    std::cout << "  " << program_name << " <model_path> [options]\n\n";
-    std::cout << "Options:\n";
-    std::cout << "  --temperature <float>    Sampling temperature (default: 0.7)\n";
-    std::cout << "  --max-tokens <int>       Max tokens to generate (default: 512)\n";
-    std::cout << "  --context-size <int>     Context window size (default: 8192)\n";
-    std::cout << "  --template <type>        Template type: llama3, chatml (default: llama3)\n";
-    std::cout << "  --system <prompt>        System prompt\n";
-    std::cout << "  --no-stream              Disable token streaming\n";
-    std::cout << "  --help                   Show this help message\n\n";
-    std::cout << "Example:\n";
-    std::cout << "  " << program_name << " model.gguf --temperature 0.8 --max-tokens 1024\n\n";
-    std::cout << "Interactive Commands:\n";
-    std::cout << "  /quit, /exit    Exit the application\n";
-    std::cout << "  /clear          Clear conversation history\n";
-    std::cout << "  /help           Show available commands\n";
-    std::cout << "  Ctrl+C          Stop current generation\n";
+static DemoConfig load_config(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open config file: " + path);
+    }
+
+    auto j = nlohmann::json::parse(file);
+    DemoConfig dc;
+
+    dc.zoo.model_path = j.at("model_path").get<std::string>();
+    if (j.contains("context_size"))    dc.zoo.context_size    = j["context_size"].get<int>();
+    if (j.contains("max_tokens"))      dc.zoo.max_tokens      = j["max_tokens"].get<int>();
+    if (j.contains("n_gpu_layers"))    dc.zoo.n_gpu_layers    = j["n_gpu_layers"].get<int>();
+    if (j.contains("use_mmap"))        dc.zoo.use_mmap        = j["use_mmap"].get<bool>();
+    if (j.contains("use_mlock"))       dc.zoo.use_mlock       = j["use_mlock"].get<bool>();
+    if (j.contains("system_prompt"))   dc.zoo.system_prompt   = j["system_prompt"].get<std::string>();
+    if (j.contains("stop_sequences")) {
+        dc.zoo.stop_sequences = j["stop_sequences"].get<std::vector<std::string>>();
+    }
+    if (j.contains("tools")) {
+        dc.tools_enabled = j["tools"].get<bool>();
+    }
+
+    if (j.contains("sampling")) {
+        auto& s = j["sampling"];
+        if (s.contains("temperature"))    dc.zoo.sampling.temperature    = s["temperature"].get<float>();
+        if (s.contains("top_p"))          dc.zoo.sampling.top_p          = s["top_p"].get<float>();
+        if (s.contains("top_k"))          dc.zoo.sampling.top_k          = s["top_k"].get<int>();
+        if (s.contains("repeat_penalty")) dc.zoo.sampling.repeat_penalty = s["repeat_penalty"].get<float>();
+        if (s.contains("repeat_last_n"))  dc.zoo.sampling.repeat_last_n  = s["repeat_last_n"].get<int>();
+        if (s.contains("seed"))           dc.zoo.sampling.seed           = s["seed"].get<int>();
+    }
+
+    return dc;
 }
 
-CLIArgs parse_args(int argc, char** argv) {
-    CLIArgs args;
+// ============================================================================
+// Display helpers
+// ============================================================================
 
-    if (argc < 2) {
-        args.help = true;
-        return args;
-    }
-
-    // Check if first argument is --help
-    if (std::string(argv[1]) == "--help") {
-        args.help = true;
-        return args;
-    }
-
-    args.model_path = argv[1];
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-
-        if (arg == "--help") {
-            args.help = true;
-            return args;
-        }
-        else if (arg == "--temperature" && i + 1 < argc) {
-            args.temperature = std::stof(argv[++i]);
-        }
-        else if (arg == "--max-tokens" && i + 1 < argc) {
-            args.max_tokens = std::stoi(argv[++i]);
-        }
-        else if (arg == "--context-size" && i + 1 < argc) {
-            args.context_size = std::stoi(argv[++i]);
-        }
-        else if (arg == "--template" && i + 1 < argc) {
-            std::string tmpl = argv[++i];
-            if (tmpl == "llama3") {
-                args.template_type = zoo::PromptTemplate::Llama3;
-            } else if (tmpl == "chatml") {
-                args.template_type = zoo::PromptTemplate::ChatML;
-            } else {
-                std::cerr << "Unknown template type: " << tmpl << "\n";
-                args.help = true;
-                return args;
-            }
-        }
-        else if (arg == "--system" && i + 1 < argc) {
-            args.system_prompt = argv[++i];
-        }
-        else if (arg == "--no-stream") {
-            args.no_stream = true;
-        }
-        else {
-            std::cerr << "Unknown option: " << arg << "\n";
-            args.help = true;
-            return args;
-        }
-    }
-
-    return args;
-}
-
-void print_separator() {
+static void print_separator() {
     std::cout << std::string(60, '-') << "\n";
 }
 
-void print_metrics(const zoo::Metrics& metrics, const zoo::TokenUsage& usage) {
+static void print_metrics(const zoo::Metrics& metrics, const zoo::TokenUsage& usage) {
     std::cout << "\n";
     print_separator();
-    std::cout << "Metrics:\n";
     std::cout << "  Tokens: " << usage.prompt_tokens << " prompt + "
               << usage.completion_tokens << " completion = "
               << usage.total_tokens << " total\n";
     std::cout << "  Latency: " << metrics.latency_ms.count() << " ms\n";
-    std::cout << "  Time to first token: " << metrics.time_to_first_token_ms.count() << " ms\n";
-    std::cout << "  Speed: " << std::fixed << std::setprecision(2)
-              << metrics.tokens_per_second << " tokens/sec\n";
+    std::cout << "  TTFT: " << metrics.time_to_first_token_ms.count() << " ms\n";
+    std::cout << "  Speed: " << std::fixed << std::setprecision(1)
+              << metrics.tokens_per_second << " tok/s\n";
     print_separator();
 }
 
-void print_welcome(const zoo::Config& config, bool streaming) {
+static void print_welcome(const DemoConfig& dc) {
     std::cout << "\n";
     print_separator();
     std::cout << "Zoo-Keeper Demo Chat\n";
     print_separator();
-    std::cout << "Model: " << config.model_path << "\n";
-    std::cout << "Template: " << zoo::template_to_string(config.prompt_template) << "\n";
-    std::cout << "Temperature: " << config.sampling.temperature << "\n";
-    std::cout << "Max Tokens: " << config.max_tokens << "\n";
-    std::cout << "Context Size: " << config.context_size << "\n";
-    std::cout << "System Prompt: " << config.system_prompt.value_or("(none)") << "\n";
-    std::cout << "Streaming: " << (streaming ? "enabled" : "disabled") << "\n";
+    std::cout << "  Model: " << dc.zoo.model_path << "\n";
+    std::cout << "  Context: " << dc.zoo.context_size << " tokens\n";
+    std::cout << "  Max tokens: " << (dc.zoo.max_tokens == -1 ? "unlimited" : std::to_string(dc.zoo.max_tokens)) << "\n";
+    std::cout << "  Temperature: " << dc.zoo.sampling.temperature << "\n";
+    std::cout << "  GPU layers: " << dc.zoo.n_gpu_layers << "\n";
+    std::cout << "  System: " << dc.zoo.system_prompt.value_or("(none)") << "\n";
+    std::cout << "  Tools: " << (dc.tools_enabled ? "enabled" : "disabled") << "\n";
     print_separator();
-    std::cout << "\nType your message and press Enter. Type '/quit' to exit.\n";
-    std::cout << "Type '/help' for available commands.\n\n";
+    std::cout << "\nType a message and press Enter. Commands: /quit /clear /help\n\n";
+}
+
+static void print_usage(const char* prog) {
+    std::cout << "Zoo-Keeper Demo Chat\n\n"
+              << "Usage:\n"
+              << "  " << prog << " <config.json>\n"
+              << "  " << prog << " --help\n\n"
+              << "The config file is a JSON object with these fields:\n\n"
+              << "  model_path      (required) Path to GGUF model file\n"
+              << "  context_size    Context window size (default: 8192)\n"
+              << "  max_tokens      Max generation tokens, -1 = unlimited (default: -1)\n"
+              << "  n_gpu_layers    GPU layers to offload, -1 = all (default: -1)\n"
+              << "  use_mmap        Memory-map model file (default: true)\n"
+              << "  use_mlock       Lock model in RAM (default: false)\n"
+              << "  system_prompt   System prompt string\n"
+              << "  stop_sequences  Array of stop strings\n"
+              << "  tools           Enable example tools (default: true)\n"
+              << "  sampling        Object with: temperature, top_p, top_k,\n"
+              << "                  repeat_penalty, repeat_last_n, seed\n\n"
+              << "Example:\n"
+              << "  " << prog << " config.json\n";
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+static void signal_handler(int) {
+    g_interrupted.store(true, std::memory_order_release);
 }
 
 int main(int argc, char** argv) {
-    // Parse arguments first before any other operations
-    CLIArgs args = parse_args(argc, argv);
-
-    if (args.help) {
+    if (argc != 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h") {
         print_usage(argv[0]);
-        return args.model_path.empty() ? 1 : 0;
+        return argc == 2 ? 0 : 1;
     }
 
-    // Setup signal handler
-    std::signal(SIGINT, signal_handler);
+    // Load config
+    DemoConfig dc;
+    try {
+        dc = load_config(argv[1]);
+    } catch (const std::exception& e) {
+        std::cerr << "Error loading config: " << e.what() << "\n";
+        return 1;
+    }
 
-    // Build zoo::Config from CLI args
-    zoo::Config config;
-    config.model_path = args.model_path;
-    config.context_size = args.context_size;
-    config.max_tokens = args.max_tokens;
-    config.sampling.temperature = args.temperature;
-    config.prompt_template = args.template_type;
-    config.system_prompt = args.system_prompt;
+    std::signal(SIGINT, signal_handler);
 
     // Create agent
     std::cout << "Loading model...\n";
-    auto agent_result = zoo::Agent::create(config);
+    auto agent_result = zoo::Agent::create(dc.zoo);
     if (!agent_result) {
         std::cerr << "Error: " << agent_result.error().to_string() << "\n";
         return 1;
     }
-    auto agent = std::move(*agent_result);  // Now a std::unique_ptr<Agent>
+    auto agent = std::move(*agent_result);
 
     // Register example tools
-    (void)agent->register_tool("add", "Add two integers", {"a", "b"}, calculate_add);
-    (void)agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
-    (void)agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
-    (void)agent->register_tool("get_current_time", "Get the current date and time", {}, get_current_time);
-    std::cout << "Registered " << agent->tool_count() << " tools.\n";
+    if (dc.tools_enabled) {
+        (void)agent->register_tool("add", "Add two integers", {"a", "b"}, calculate_add);
+        (void)agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
+        (void)agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
+        (void)agent->register_tool("get_time", "Get the current date and time", {}, get_current_time);
+    }
 
-    // Print welcome
-    print_welcome(config, !args.no_stream);
+    print_welcome(dc);
 
-    // Main chat loop
+    // Chat loop
     std::string line;
-    while (!g_interrupted) {
-        // Print prompt
-        std::cout << "\nYou: ";
+    while (!g_interrupted.load(std::memory_order_acquire)) {
+        std::cout << "You: ";
         std::cout.flush();
 
-        // Read user input
-        if (!std::getline(std::cin, line)) {
-            break;  // EOF or error
+        if (!std::getline(std::cin, line)) break;
+
+        // Trim
+        auto start = line.find_first_not_of(" \t\n\r");
+        if (start == std::string::npos) continue;
+        line = line.substr(start, line.find_last_not_of(" \t\n\r") - start + 1);
+
+        // Commands
+        if (line == "/quit" || line == "/exit") break;
+        if (line == "/clear") {
+            agent->clear_history();
+            std::cout << "History cleared.\n\n";
+            continue;
         }
-
-        // Trim whitespace
-        line.erase(0, line.find_first_not_of(" \t\n\r"));
-        line.erase(line.find_last_not_of(" \t\n\r") + 1);
-
-        if (line.empty()) {
+        if (line == "/help") {
+            std::cout << "  /quit, /exit  Exit\n"
+                      << "  /clear        Clear conversation history\n"
+                      << "  /help         Show commands\n"
+                      << "  Ctrl+C        Stop generation\n\n";
             continue;
         }
 
-        // Handle commands
-        if (line[0] == '/') {
-            if (line == "/quit" || line == "/exit") {
-                std::cout << "Goodbye!\n";
-                break;
-            }
-            else if (line == "/clear") {
-                agent->clear_history();
-                std::cout << "Conversation history cleared.\n";
-                continue;
-            }
-            else if (line == "/help") {
-                std::cout << "\nAvailable commands:\n";
-                std::cout << "  /quit, /exit    Exit the application\n";
-                std::cout << "  /clear          Clear conversation history\n";
-                std::cout << "  /help           Show this help\n";
-                continue;
-            }
-            else {
-                std::cout << "Unknown command: " << line << "\n";
-                std::cout << "Type '/help' for available commands.\n";
-                continue;
-            }
-        }
-
-        // Print assistant prompt
         std::cout << "\nAssistant: ";
         std::cout.flush();
+        g_interrupted.store(false, std::memory_order_release);
 
-        // Reset interrupt flag
-        g_interrupted = false;
+        auto handle = agent->chat(
+            zoo::Message::user(line),
+            [](std::string_view token) { std::cout << token << std::flush; }
+        );
 
-        // Submit chat request with optional streaming callback
-        zoo::RequestHandle handle;
-        if (args.no_stream) {
-            // No streaming
-            handle = agent->chat(zoo::Message::user(line));
-        } else {
-            // With streaming
-            auto callback = [](std::string_view token) {
-                std::cout << token << std::flush;
-            };
-            handle = agent->chat(zoo::Message::user(line), callback);
-        }
-
-        // Poll for interrupt during generation
+        // Poll for Ctrl+C during generation
         while (handle.future.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout) {
-            if (g_interrupted) {
-                agent->stop();
-                std::cout << "\n[Generation stopped]\n";
-
-                // Recreate agent for next request
-                std::cout << "Reloading agent...\n";
-                agent_result = zoo::Agent::create(config);
-                if (!agent_result) {
-                    std::cerr << "Error: " << agent_result.error().to_string() << "\n";
-                    return 1;
-                }
-                agent = std::move(*agent_result);
-
-                g_interrupted = false;
+            if (g_interrupted.load(std::memory_order_acquire)) {
+                agent->cancel(handle.id);
                 break;
             }
         }
 
-        // Get result if not interrupted
-        if (!g_interrupted) {
-            auto result = handle.future.get();
+        auto result = handle.future.get();
 
-            if (!result.has_value()) {
+        if (!result) {
+            if (result.error().code == zoo::ErrorCode::RequestCancelled) {
+                std::cout << "\n[cancelled]\n";
+            } else {
                 std::cerr << "\nError: " << result.error().to_string() << "\n";
-                continue;
             }
-
-            // If not streaming, print the full response
-            if (args.no_stream) {
-                std::cout << result->text;
-            }
-            std::cout << "\n";
-
-            // Print metrics
-            print_metrics(result->metrics, result->usage);
+            continue;
         }
+
+        std::cout << "\n";
+        print_metrics(result->metrics, result->usage);
     }
 
-    std::cout << "\n";
+    std::cout << "\nGoodbye!\n";
     return 0;
 }
