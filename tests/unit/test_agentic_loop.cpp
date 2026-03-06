@@ -28,9 +28,9 @@ protected:
         history = std::make_shared<HistoryManager>(config.context_size);
         registry = std::make_shared<ToolRegistry>();
 
-        registry->register_tool("add", "Add two integers", {"a", "b"}, add);
-        registry->register_tool("greet", "Greet someone", {"name"}, greet);
-        registry->register_tool("get_time", "Get current time", {}, get_time);
+        (void)registry->register_tool("add", "Add two integers", {"a", "b"}, add);
+        (void)registry->register_tool("greet", "Greet someone", {"name"}, greet);
+        (void)registry->register_tool("get_time", "Get current time", {}, get_time);
     }
 
     std::unique_ptr<AgenticLoop> make_loop() {
@@ -318,7 +318,7 @@ TEST_F(AgenticLoopToolTest, ToolExecutionFailureInjectedAsError) {
     auto loop = make_loop();
 
     // Register a dummy tool (not used in this test)
-    registry->register_tool("fail_tool", "Always fails", {}, get_time);
+    (void)registry->register_tool("fail_tool", "Always fails", {}, get_time);
 
     // Tool call for a tool not in registry (invoke returns ToolNotFound)
     backend->enqueue_response(R"({"name": "unknown_tool", "arguments": {}})");
@@ -609,7 +609,7 @@ TEST_F(AgenticLoopCompactionTest, NoCompactionDuringToolLoop) {
 
     auto history = make_filled_history(5000, 2, 80);
     auto registry = std::make_shared<ToolRegistry>();
-    registry->register_tool("add", "Add two integers",
+    (void)registry->register_tool("add", "Add two integers",
         {"a", "b"}, zoo::testing::tools::add);
 
     auto loop = std::make_unique<AgenticLoop>(backend, history, config);

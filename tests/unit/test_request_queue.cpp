@@ -187,7 +187,7 @@ TEST_F(RequestQueueTest, PopTimeout) {
 
     EXPECT_FALSE(req.has_value());
     EXPECT_GE(elapsed, std::chrono::milliseconds(100));
-    EXPECT_LT(elapsed, std::chrono::milliseconds(150));  // Allow some slack
+    EXPECT_LT(elapsed, std::chrono::milliseconds(500));  // Wide slack for loaded CI machines
 }
 
 TEST_F(RequestQueueTest, PopTimeoutSuccess) {

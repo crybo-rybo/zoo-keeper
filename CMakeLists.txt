@@ -19,9 +19,13 @@ endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
 option(ZOO_ENABLE_MCP "Enable MCP (Model Context Protocol) client support" OFF)
 
-# Include dependencies
+# Include dependencies (SQLite3 is handled inside FetchDependencies.cmake)
 include(cmake/FetchDependencies.cmake)
-find_package(SQLite3 REQUIRED)
+
+# Include platform-specific utility modules
+include(cmake/CompilerWarnings.cmake)
+include(cmake/Sanitizers.cmake)
+include(cmake/Coverage.cmake)
 
 # Header-only library target
 add_library(zoo INTERFACE)
@@ -50,30 +54,14 @@ target_include_directories(zoo_backend PUBLIC
 )
 
 # Compiler warnings
-if(MSVC)
-    target_compile_options(zoo INTERFACE /W4)
-    target_compile_options(zoo_backend PRIVATE /W4)
-else()
-    target_compile_options(zoo INTERFACE -Wall -Wextra -Wpedantic)
-    target_compile_options(zoo_backend PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+zoo_set_warnings(zoo INTERFACE)
+zoo_set_warnings(zoo_backend PRIVATE)
 
-# Sanitizers
-if(ZOO_ENABLE_SANITIZERS)
-    if(NOT MSVC)
-        set(SANITIZER_FLAGS "-fsanitize=address,undefined,thread -fno-omit-frame-pointer")
-        target_compile_options(zoo_backend PRIVATE ${SANITIZER_FLAGS})
-        target_link_options(zoo_backend PRIVATE ${SANITIZER_FLAGS})
-    endif()
-endif()
+# Sanitizers (ASan + UBSan; TSan is mutually exclusive with ASan)
+zoo_enable_sanitizers(zoo_backend)
 
 # Coverage
-if(ZOO_ENABLE_COVERAGE)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(zoo_backend PRIVATE --coverage)
-        target_link_options(zoo_backend PRIVATE --coverage)
-    endif()
-endif()
+zoo_enable_coverage(zoo_backend)
 
 # Tests
 if(ZOO_BUILD_TESTS)

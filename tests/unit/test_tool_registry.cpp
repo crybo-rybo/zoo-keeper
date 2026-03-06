@@ -19,7 +19,7 @@ protected:
 // ============================================================================
 
 TEST_F(ToolRegistryTest, RegisterIntParams) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     EXPECT_TRUE(registry.has_tool("add"));
     EXPECT_EQ(registry.size(), 1);
@@ -39,7 +39,7 @@ TEST_F(ToolRegistryTest, RegisterIntParams) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, IntTypeSchema) {
-    registry.register_tool("negate", "Negate a number", {"value"}, negate);
+    (void)registry.register_tool("negate", "Negate a number", {"value"}, negate);
 
     auto schema = registry.get_tool_schema("negate");
     auto params = schema["function"]["parameters"];
@@ -51,7 +51,7 @@ TEST_F(ToolRegistryTest, IntTypeSchema) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, DoubleTypeSchema) {
-    registry.register_tool("multiply", "Multiply two doubles", {"a", "b"}, multiply);
+    (void)registry.register_tool("multiply", "Multiply two doubles", {"a", "b"}, multiply);
 
     auto schema = registry.get_tool_schema("multiply");
     auto params = schema["function"]["parameters"];
@@ -64,7 +64,7 @@ TEST_F(ToolRegistryTest, DoubleTypeSchema) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, BoolTypeSchema) {
-    registry.register_tool("is_positive", "Check if positive", {"n"}, is_positive);
+    (void)registry.register_tool("is_positive", "Check if positive", {"n"}, is_positive);
 
     auto schema = registry.get_tool_schema("is_positive");
     auto params = schema["function"]["parameters"];
@@ -76,7 +76,7 @@ TEST_F(ToolRegistryTest, BoolTypeSchema) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, StringTypeSchema) {
-    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
 
     auto schema = registry.get_tool_schema("greet");
     auto params = schema["function"]["parameters"];
@@ -88,7 +88,7 @@ TEST_F(ToolRegistryTest, StringTypeSchema) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, MultipleParametersInSchema) {
-    registry.register_tool("concat", "Concatenate strings", {"a", "b"}, concat);
+    (void)registry.register_tool("concat", "Concatenate strings", {"a", "b"}, concat);
 
     auto schema = registry.get_tool_schema("concat");
     auto params = schema["function"]["parameters"];
@@ -103,7 +103,7 @@ TEST_F(ToolRegistryTest, MultipleParametersInSchema) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, ValidJsonSchema) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto schema = registry.get_tool_schema("add");
 
@@ -128,7 +128,7 @@ TEST_F(ToolRegistryTest, ValidJsonSchema) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, SchemaIncludesDescription) {
-    registry.register_tool("greet", "Greet a person by name", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet a person by name", {"name"}, greet);
 
     auto schema = registry.get_tool_schema("greet");
     EXPECT_EQ(schema["function"]["description"], "Greet a person by name");
@@ -139,7 +139,7 @@ TEST_F(ToolRegistryTest, SchemaIncludesDescription) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, InvokeWithValidArgs) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", 3}, {"b", 4}});
     ASSERT_TRUE(result.has_value());
@@ -147,7 +147,7 @@ TEST_F(ToolRegistryTest, InvokeWithValidArgs) {
 }
 
 TEST_F(ToolRegistryTest, InvokeStringTool) {
-    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
 
     auto result = registry.invoke("greet", {{"name", "Alice"}});
     ASSERT_TRUE(result.has_value());
@@ -155,7 +155,7 @@ TEST_F(ToolRegistryTest, InvokeStringTool) {
 }
 
 TEST_F(ToolRegistryTest, InvokeDoubleTool) {
-    registry.register_tool("circle_area", "Compute circle area", {"radius"}, circle_area);
+    (void)registry.register_tool("circle_area", "Compute circle area", {"radius"}, circle_area);
 
     auto result = registry.invoke("circle_area", {{"radius", 1.0}});
     ASSERT_TRUE(result.has_value());
@@ -163,7 +163,7 @@ TEST_F(ToolRegistryTest, InvokeDoubleTool) {
 }
 
 TEST_F(ToolRegistryTest, InvokeBoolResult) {
-    registry.register_tool("is_positive", "Check if positive", {"n"}, is_positive);
+    (void)registry.register_tool("is_positive", "Check if positive", {"n"}, is_positive);
 
     auto result_pos = registry.invoke("is_positive", {{"n", 5}});
     ASSERT_TRUE(result_pos.has_value());
@@ -179,7 +179,7 @@ TEST_F(ToolRegistryTest, InvokeBoolResult) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, InvokeWrongArgType) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", "not_a_number"}, {"b", 4}});
     EXPECT_FALSE(result.has_value());
@@ -187,7 +187,7 @@ TEST_F(ToolRegistryTest, InvokeWrongArgType) {
 }
 
 TEST_F(ToolRegistryTest, InvokeMissingArg) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", 3}});
     EXPECT_FALSE(result.has_value());
@@ -209,10 +209,10 @@ TEST_F(ToolRegistryTest, InvokeUnregisteredTool) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, ReRegisterOverwrites) {
-    registry.register_tool("calc", "Old description", {"a", "b"}, add);
+    (void)registry.register_tool("calc", "Old description", {"a", "b"}, add);
     EXPECT_EQ(registry.size(), 1);
 
-    registry.register_tool("calc", "New description", {"a", "b"}, multiply);
+    (void)registry.register_tool("calc", "New description", {"a", "b"}, multiply);
     EXPECT_EQ(registry.size(), 1);
 
     auto schema = registry.get_tool_schema("calc");
@@ -229,8 +229,8 @@ TEST_F(ToolRegistryTest, ReRegisterOverwrites) {
 // ============================================================================
 
 TEST_F(ToolRegistryTest, GetToolNames) {
-    registry.register_tool("add", "Add", {"a", "b"}, add);
-    registry.register_tool("greet", "Greet", {"name"}, greet);
+    (void)registry.register_tool("add", "Add", {"a", "b"}, add);
+    (void)registry.register_tool("greet", "Greet", {"name"}, greet);
 
     auto names = registry.get_tool_names();
     EXPECT_EQ(names.size(), 2);
@@ -242,8 +242,8 @@ TEST_F(ToolRegistryTest, GetToolNames) {
 }
 
 TEST_F(ToolRegistryTest, GetAllSchemas) {
-    registry.register_tool("add", "Add numbers", {"a", "b"}, add);
-    registry.register_tool("greet", "Greet", {"name"}, greet);
+    (void)registry.register_tool("add", "Add numbers", {"a", "b"}, add);
+    (void)registry.register_tool("greet", "Greet", {"name"}, greet);
 
     auto schemas = registry.get_all_schemas();
     EXPECT_EQ(schemas.size(), 2);
@@ -282,7 +282,7 @@ TEST_F(ToolRegistryTest, ManualRegistration) {
         return nlohmann::json{{"result", "found: " + args["query"].get<std::string>()}};
     };
 
-    registry.register_tool("search", "Search for something", std::move(schema), std::move(handler));
+    (void)registry.register_tool("search", "Search for something", std::move(schema), std::move(handler));
 
     EXPECT_TRUE(registry.has_tool("search"));
     auto result = registry.invoke("search", {{"query", "test"}});
@@ -292,7 +292,7 @@ TEST_F(ToolRegistryTest, ManualRegistration) {
 
 TEST_F(ToolRegistryTest, LambdaRegistration) {
     auto lambda = [](int x, int y) -> int { return x * y; };
-    registry.register_tool("multiply_ints", "Multiply integers", {"x", "y"}, lambda);
+    (void)registry.register_tool("multiply_ints", "Multiply integers", {"x", "y"}, lambda);
 
     auto result = registry.invoke("multiply_ints", {{"x", 5}, {"y", 6}});
     ASSERT_TRUE(result.has_value());
@@ -300,7 +300,7 @@ TEST_F(ToolRegistryTest, LambdaRegistration) {
 }
 
 TEST_F(ToolRegistryTest, ZeroArgTool) {
-    registry.register_tool("get_time", "Get current time", {}, get_time);
+    (void)registry.register_tool("get_time", "Get current time", {}, get_time);
 
     EXPECT_TRUE(registry.has_tool("get_time"));
     auto schema = registry.get_tool_schema("get_time");
@@ -312,7 +312,7 @@ TEST_F(ToolRegistryTest, ZeroArgTool) {
 }
 
 TEST_F(ToolRegistryTest, RequiredFieldsInSchema) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto schema = registry.get_tool_schema("add");
     auto required = schema["function"]["parameters"]["required"];
@@ -328,28 +328,28 @@ TEST_F(ToolRegistryTest, RequiredFieldsInSchema) {
 // Additional coverage tests
 // ============================================================================
 
-TEST_F(ToolRegistryTest, ArityMismatchThrows) {
-    EXPECT_THROW(
-        registry.register_tool("add", "Add", {"a"}, add),
-        std::invalid_argument
-    );
-    EXPECT_THROW(
-        registry.register_tool("add", "Add", {"a", "b", "c"}, add),
-        std::invalid_argument
-    );
+TEST_F(ToolRegistryTest, ArityMismatchReturnsError) {
+    auto result1 = registry.register_tool("add", "Add", {"a"}, add);
+    EXPECT_FALSE(result1.has_value());
+    EXPECT_EQ(result1.error().code, ErrorCode::InvalidToolSignature);
+
+    auto result2 = registry.register_tool("add", "Add", {"a", "b", "c"}, add);
+    EXPECT_FALSE(result2.has_value());
+    EXPECT_EQ(result2.error().code, ErrorCode::InvalidToolSignature);
+
     EXPECT_EQ(registry.size(), 0);
 }
 
 TEST_F(ToolRegistryTest, FloatTypeSchema) {
     auto float_func = [](float x) -> float { return x * 2.0f; };
-    registry.register_tool("double_it", "Double a float", {"x"}, float_func);
+    (void)registry.register_tool("double_it", "Double a float", {"x"}, float_func);
 
     auto schema = registry.get_tool_schema("double_it");
     EXPECT_EQ(schema["function"]["parameters"]["properties"]["x"]["type"], "number");
 }
 
 TEST_F(ToolRegistryTest, GetParametersSchemaReturnsCopy) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto params = registry.get_parameters_schema("add");
     ASSERT_TRUE(params.has_value());
@@ -367,7 +367,7 @@ TEST_F(ToolRegistryTest, ConstLambdaWithCapture) {
     auto const_lambda = [multiplier](int x) -> int {
         return x * multiplier;
     };
-    registry.register_tool("triple", "Triple a number", {"x"}, const_lambda);
+    (void)registry.register_tool("triple", "Triple a number", {"x"}, const_lambda);
 
     auto result = registry.invoke("triple", {{"x", 5}});
     ASSERT_TRUE(result.has_value());
@@ -378,7 +378,7 @@ TEST_F(ToolRegistryTest, StdFunctionRegistration) {
     std::function<std::string(std::string)> func = [](std::string s) {
         return "prefix_" + s;
     };
-    registry.register_tool("prefix", "Add prefix", {"s"}, func);
+    (void)registry.register_tool("prefix", "Add prefix", {"s"}, func);
 
     EXPECT_TRUE(registry.has_tool("prefix"));
     auto result = registry.invoke("prefix", {{"s", "test"}});
@@ -391,7 +391,7 @@ TEST_F(ToolRegistryTest, HandlerThrowsStdException) {
         if (x < 0) throw std::runtime_error("negative input");
         return x;
     };
-    registry.register_tool("check", "Check positive", {"x"}, throwing);
+    (void)registry.register_tool("check", "Check positive", {"x"}, throwing);
 
     auto result = registry.invoke("check", {{"x", -1}});
     EXPECT_FALSE(result.has_value());
@@ -400,7 +400,7 @@ TEST_F(ToolRegistryTest, HandlerThrowsStdException) {
 }
 
 TEST_F(ToolRegistryTest, ConcurrentReadsDuringWrite) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     std::atomic<bool> start{false};
     std::atomic<int> successes{0};
@@ -417,7 +417,7 @@ TEST_F(ToolRegistryTest, ConcurrentReadsDuringWrite) {
     auto writer = [&]() {
         while (!start.load()) {}
         for (int i = 0; i < 100; ++i) {
-            registry.register_tool("t_" + std::to_string(i), "Tool", {"a", "b"}, add);
+            (void)registry.register_tool("t_" + std::to_string(i), "Tool", {"a", "b"}, add);
         }
     };
 
@@ -440,7 +440,7 @@ TEST_F(ToolRegistryTest, MixedParameterTypes) {
         return name + ": " + std::to_string(static_cast<int>(count * multiplier));
     };
 
-    registry.register_tool("mixed", "Tool with mixed types", {"count", "name", "multiplier"}, mixed_tool);
+    (void)registry.register_tool("mixed", "Tool with mixed types", {"count", "name", "multiplier"}, mixed_tool);
 
     auto schema = registry.get_tool_schema("mixed");
     auto props = schema["function"]["parameters"]["properties"];
@@ -454,7 +454,7 @@ TEST_F(ToolRegistryTest, MixedParameterTypes) {
 }
 
 TEST_F(ToolRegistryTest, EmptyStringArgument) {
-    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
 
     auto result = registry.invoke("greet", {{"name", ""}});
     ASSERT_TRUE(result.has_value());
@@ -462,7 +462,7 @@ TEST_F(ToolRegistryTest, EmptyStringArgument) {
 }
 
 TEST_F(ToolRegistryTest, UnicodeInArguments) {
-    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
 
     auto result = registry.invoke("greet", {{"name", "世界"}});
     ASSERT_TRUE(result.has_value());
@@ -470,7 +470,7 @@ TEST_F(ToolRegistryTest, UnicodeInArguments) {
 }
 
 TEST_F(ToolRegistryTest, VeryLongString) {
-    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
 
     std::string long_name(10000, 'x');
     auto result = registry.invoke("greet", {{"name", long_name}});
@@ -479,7 +479,7 @@ TEST_F(ToolRegistryTest, VeryLongString) {
 }
 
 TEST_F(ToolRegistryTest, SpecialCharactersInString) {
-    registry.register_tool("greet", "Greet someone", {"name"}, greet);
+    (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
 
     auto result = registry.invoke("greet", {{"name", "Alice \"Bob\" O'Connor"}});
     ASSERT_TRUE(result.has_value());
@@ -487,7 +487,7 @@ TEST_F(ToolRegistryTest, SpecialCharactersInString) {
 }
 
 TEST_F(ToolRegistryTest, NegativeNumbers) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", -5}, {"b", -3}});
     ASSERT_TRUE(result.has_value());
@@ -495,7 +495,7 @@ TEST_F(ToolRegistryTest, NegativeNumbers) {
 }
 
 TEST_F(ToolRegistryTest, ZeroValues) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", 0}, {"b", 0}});
     ASSERT_TRUE(result.has_value());
@@ -503,7 +503,7 @@ TEST_F(ToolRegistryTest, ZeroValues) {
 }
 
 TEST_F(ToolRegistryTest, VeryLargeNumbers) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", 1000000000}, {"b", 2000000000}});
     ASSERT_TRUE(result.has_value());
@@ -511,7 +511,7 @@ TEST_F(ToolRegistryTest, VeryLargeNumbers) {
 }
 
 TEST_F(ToolRegistryTest, FloatPrecision) {
-    registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply);
+    (void)registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply);
 
     auto result = registry.invoke("multiply", {{"a", 0.1}, {"b", 0.2}});
     ASSERT_TRUE(result.has_value());
@@ -519,7 +519,7 @@ TEST_F(ToolRegistryTest, FloatPrecision) {
 }
 
 TEST_F(ToolRegistryTest, ExtraArgumentsIgnored) {
-    registry.register_tool("add", "Add two integers", {"a", "b"}, add);
+    (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
 
     auto result = registry.invoke("add", {{"a", 3}, {"b", 4}, {"c", 999}});
     ASSERT_TRUE(result.has_value());
@@ -531,7 +531,7 @@ TEST_F(ToolRegistryTest, ZeroArgToolThrows) {
         throw std::runtime_error("Intentional error");
     };
 
-    registry.register_tool("thrower", "A tool that throws", {}, throwing_tool);
+    (void)registry.register_tool("thrower", "A tool that throws", {}, throwing_tool);
 
     auto result = registry.invoke("thrower", nlohmann::json::object());
     EXPECT_FALSE(result.has_value());
@@ -541,7 +541,7 @@ TEST_F(ToolRegistryTest, ZeroArgToolThrows) {
 
 TEST_F(ToolRegistryTest, VeryLongToolName) {
     std::string long_name(1000, 'x');
-    registry.register_tool(long_name, "Tool with very long name", {"a", "b"}, add);
+    (void)registry.register_tool(long_name, "Tool with very long name", {"a", "b"}, add);
 
     EXPECT_TRUE(registry.has_tool(long_name));
     auto result = registry.invoke(long_name, {{"a", 1}, {"b", 2}});
@@ -551,7 +551,7 @@ TEST_F(ToolRegistryTest, VeryLongToolName) {
 
 TEST_F(ToolRegistryTest, VeryLongDescription) {
     std::string long_desc(10000, 'y');
-    registry.register_tool("test", long_desc, {"a", "b"}, add);
+    (void)registry.register_tool("test", long_desc, {"a", "b"}, add);
 
     auto schema = registry.get_tool_schema("test");
     EXPECT_EQ(schema["function"]["description"], long_desc);

@@ -211,10 +211,10 @@ int main(int argc, char** argv) {
     auto agent = std::move(*agent_result);  // Now a std::unique_ptr<Agent>
 
     // Register example tools
-    agent->register_tool("add", "Add two integers", {"a", "b"}, calculate_add);
-    agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
-    agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
-    agent->register_tool("get_current_time", "Get the current date and time", {}, get_current_time);
+    (void)agent->register_tool("add", "Add two integers", {"a", "b"}, calculate_add);
+    (void)agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
+    (void)agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
+    (void)agent->register_tool("get_current_time", "Get the current date and time", {}, get_current_time);
     std::cout << "Registered " << agent->tool_count() << " tools.\n";
 
     // Print welcome

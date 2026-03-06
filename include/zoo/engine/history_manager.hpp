@@ -205,15 +205,28 @@ public:
         const bool has_system = messages_[0].role == Role::System;
         const size_t first_removable_index = has_system ? 1U : 0U;
 
-        while (estimated_tokens_ > target_tokens) {
-            if (messages_.size() <= first_removable_index + min_messages_to_keep) {
+        // Count how many messages to remove without modifying the vector,
+        // then erase them in a single batch to avoid O(n^2) shifts.
+        size_t remove_count = 0;
+        int tokens_to_subtract = 0;
+        while (estimated_tokens_ - tokens_to_subtract > target_tokens) {
+            if (messages_.size() - remove_count <= first_removable_index + min_messages_to_keep) {
                 break;
             }
+            size_t idx = first_removable_index + remove_count;
+            tokens_to_subtract += estimate_tokens(messages_[idx].content) + template_overhead_per_message_;
+            ++remove_count;
+        }
 
-            Message removed_msg = std::move(messages_[first_removable_index]);
-            estimated_tokens_ -= estimate_tokens(removed_msg.content) + template_overhead_per_message_;
-            messages_.erase(messages_.begin() + static_cast<std::ptrdiff_t>(first_removable_index));
-            removed.push_back(std::move(removed_msg));
+        if (remove_count > 0) {
+            auto begin = messages_.begin() + static_cast<std::ptrdiff_t>(first_removable_index);
+            auto end = begin + static_cast<std::ptrdiff_t>(remove_count);
+            removed.reserve(remove_count);
+            for (auto it = begin; it != end; ++it) {
+                removed.push_back(std::move(*it));
+            }
+            messages_.erase(begin, end);
+            estimated_tokens_ -= tokens_to_subtract;
         }
 
         return removed;

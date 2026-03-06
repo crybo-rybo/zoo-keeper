@@ -119,6 +119,12 @@ public:
         try {
             if (result->contains("tools") && (*result)["tools"].is_array()) {
                 for (const auto& tool_json : (*result)["tools"]) {
+                    if (!tool_json.is_object()) {
+                        return tl::unexpected(Error{
+                            ErrorCode::McpProtocolError,
+                            "Malformed tools/list response: tool entry is not a JSON object"
+                        });
+                    }
                     McpToolDefinition def;
                     def.name = tool_json.value("name", "");
                     def.description = tool_json.value("description", "");

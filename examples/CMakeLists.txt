@@ -15,11 +15,7 @@ target_include_directories(demo_chat
 )
 
 # Compiler warnings
-if(MSVC)
-    target_compile_options(demo_chat PRIVATE /W4)
-else()
-    target_compile_options(demo_chat PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+zoo_set_warnings(demo_chat PRIVATE)
 
 # Install demo
 install(TARGETS demo_chat

@@ -334,9 +334,9 @@ public:
      * @param func Callable to invoke when tool is called
      */
     template<typename Func>
-    void register_tool(const std::string& name, const std::string& description,
+    Expected<void> register_tool(const std::string& name, const std::string& description,
                        const std::vector<std::string>& param_names, Func func) {
-        tool_registry_->register_tool(name, description, param_names, std::move(func));
+        return tool_registry_->register_tool(name, description, param_names, std::move(func));
     }
 
     /**
@@ -607,6 +607,11 @@ private:
                     ErrorCode::AgentNotRunning,
                     "Agent stopped before request could be processed"
                 }));
+            }
+            // Clean up cancel token so the map doesn't grow unboundedly
+            {
+                std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
+                cancel_tokens_.erase(remaining->id);
             }
         }
     }
