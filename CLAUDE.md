@@ -59,6 +59,7 @@ Layer 2: zoo::tools (tools/)
   Standalone — no dependency on Layer 1
 
 Layer 1: zoo::core (core/)
+  Model is the direct llama.cpp wrapper
   Model loading, inference, tokenization, chat formatting, KV cache, history
   Zero dependency on Layers 2 or 3
 ```
@@ -73,26 +74,26 @@ All callbacks execute on the inference thread. Consumer is responsible for cross
 ### Key Design Decisions
 
 - **C++23**: Uses `std::expected` (no external expected library)
-- **`zoo::core::Model`**: Synchronous, single-threaded llama.cpp wrapper. Usable standalone.
-- **Dependency injection**: `core::IBackend` interface enables testing with MockBackend
+- **`zoo::core::Model`**: Direct llama.cpp wrapper. Synchronous, single-threaded. Usable standalone.
+- **No IBackend abstraction**: Model directly owns llama.cpp resources
 - **Value semantics**: Predictable ownership, fewer lifetime bugs
 - **Header-only tools layer**: Tools have no llama.cpp dependency
+- **Testing philosophy**: Unit tests cover pure logic only (types, tools). Model/Agent are tested via integration tests.
 
 ### CMake Targets
 
 | Target | Description | Links |
 |--------|-------------|-------|
 | `zoo` | INTERFACE library (headers + nlohmann_json) | — |
-| `zoo_model` | STATIC library (Model class, no llama dep) | zoo |
-| `zoo_backend` | STATIC library (LlamaBackend) | zoo_model, llama |
+| `zoo_core` | STATIC library (Model + llama.cpp) | zoo, llama |
 
 ## File Structure
 
 ```
 include/zoo/
 ├── core/
-│   ├── types.hpp          # Message, Role, Error, Config, SamplingParams, Response
-│   └── model.hpp          # Model class + IBackend interface
+│   ├── types.hpp          # Message, Role, Error, Config, SamplingParams, Response, validate_role_sequence
+│   └── model.hpp          # Model class (direct llama.cpp wrapper)
 ├── tools/
 │   ├── types.hpp          # ToolCall, ToolEntry, ToolHandler
 │   ├── registry.hpp       # ToolRegistry (template registration + invocation)
@@ -101,22 +102,19 @@ include/zoo/
 ├── agent.hpp              # Agent class + RequestQueue + RequestHandle
 └── zoo.hpp                # Convenience header
 src/core/
-├── model.cpp              # Model implementation (no llama dep)
-└── llama_backend.cpp      # LlamaBackend implementation
+└── model.cpp              # Model implementation (llama.cpp calls)
 tests/
 ├── unit/
-│   ├── test_types.cpp
-│   ├── test_model.cpp
-│   ├── test_tool_registry.cpp
-│   ├── test_tool_parser.cpp
-│   ├── test_error_recovery.cpp
-│   └── test_agent.cpp
-├── mocks/
-│   ├── mock_backend.hpp
-│   └── mock_backend.cpp
+│   ├── test_types.cpp         # Types, config validation, role sequence validation
+│   ├── test_tool_registry.cpp # Tool registration, schema, invocation
+│   ├── test_tool_parser.cpp   # Tool call parsing
+│   └── test_error_recovery.cpp # Argument validation, retries
 └── fixtures/
     ├── sample_responses.hpp
     └── tool_definitions.hpp
+examples/
+├── demo_chat.cpp          # Interactive CLI chat app
+└── config.example.json    # Example JSON configuration
 ```
 
 ## Dependencies
@@ -137,8 +135,7 @@ tests/
 - `zoo::Config` — Model path, context size, sampling params, max tokens
 - `zoo::Message` — Value type with role (System/User/Assistant/Tool) and content
 - `zoo::Response` — Generated text, token usage, metrics, tool call history
-- `zoo::core::Model` — Synchronous llama.cpp wrapper (Layer 1)
-- `zoo::core::IBackend` — Backend interface for dependency injection
+- `zoo::core::Model` — Direct llama.cpp wrapper (Layer 1)
 - `zoo::tools::ToolCall` — Parsed tool call with id, name, arguments
 - `zoo::tools::ToolRegistry` — Thread-safe tool registration and invocation
 - `zoo::tools::ToolCallParser` — Detects tool calls in model output

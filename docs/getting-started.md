@@ -76,7 +76,6 @@ The primary entry point for agentic behavior. Created via the `Agent::create()` 
 | Method | Description |
 |--------|-------------|
 | `create(config)` | Factory: validate config, load model, start inference thread |
-| `create(config, backend)` | Factory with custom backend (for testing) |
 | `chat(message)` | Submit a message, returns `RequestHandle` (holds `.id` and `.future`) |
 | `chat(message, callback)` | Chat with per-token streaming callback |
 | `cancel(id)` | Cancel a pending request by ID |

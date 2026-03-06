@@ -5,7 +5,7 @@ add_executable(demo_chat demo_chat.cpp)
 
 target_link_libraries(demo_chat
     PRIVATE
-        zoo_backend
+        zoo_core
 )
 
 # Compiler warnings

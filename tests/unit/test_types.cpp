@@ -121,6 +121,55 @@ TEST(ConfigTest, Equality) {
     EXPECT_NE(c1, c2);
 }
 
+// ============================================================================
+// Role Sequence Validation
+// ============================================================================
+
+TEST(RoleValidationTest, EmptyHistoryAcceptsUser) {
+    std::vector<zoo::Message> history;
+    EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::User).has_value());
+}
+
+TEST(RoleValidationTest, EmptyHistoryAcceptsSystem) {
+    std::vector<zoo::Message> history;
+    EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::System).has_value());
+}
+
+TEST(RoleValidationTest, EmptyHistoryRejectsTool) {
+    std::vector<zoo::Message> history;
+    auto result = zoo::validate_role_sequence(history, zoo::Role::Tool);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
+}
+
+TEST(RoleValidationTest, SystemOnlyAllowedAtBeginning) {
+    std::vector<zoo::Message> history = {zoo::Message::user("Hello")};
+    auto result = zoo::validate_role_sequence(history, zoo::Role::System);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
+}
+
+TEST(RoleValidationTest, ConsecutiveSameRoleFails) {
+    std::vector<zoo::Message> history = {zoo::Message::user("Hello")};
+    auto result = zoo::validate_role_sequence(history, zoo::Role::User);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
+}
+
+TEST(RoleValidationTest, ConsecutiveToolAllowed) {
+    std::vector<zoo::Message> history = {
+        zoo::Message::user("Hello"),
+        zoo::Message::assistant("I'll use tools"),
+        zoo::Message::tool("result1", "id1")
+    };
+    EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Tool).has_value());
+}
+
+TEST(RoleValidationTest, NormalAlternation) {
+    std::vector<zoo::Message> history = {zoo::Message::user("Hello")};
+    EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Assistant).has_value());
+}
+
 TEST(TokenUsageTest, Defaults) {
     zoo::TokenUsage usage;
     EXPECT_EQ(usage.prompt_tokens, 0);

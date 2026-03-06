@@ -23,9 +23,7 @@ Consumer Code
      |
      v
 +-- Layer 1: Core -----------+
-|   zoo::core::Model          |   Synchronous llama.cpp wrapper
-|   zoo::core::IBackend       |   Abstract inference operations
-|   zoo::core::LlamaBackend   |   Production: wraps llama.cpp
+|   zoo::core::Model          |   Direct llama.cpp wrapper
 +----------------------------+
 ```
 
@@ -33,22 +31,9 @@ Consumer Code
 
 ### Layer 1: Core (`zoo::core`)
 
-**Model** is a synchronous, single-threaded llama.cpp wrapper. It manages model loading, conversation history, prompt formatting, tokenization, inference, and KV cache state. It is usable standalone without tools or agents.
+**Model** is the direct llama.cpp wrapper. It directly owns `llama_model`, `llama_context`, `llama_sampler`, and `llama_vocab`, and manages model loading, tokenization, inference, prompt formatting (incremental via `llama_chat_apply_template()`), KV cache state, conversation history, and GPU/Metal acceleration. It is usable standalone without tools or agents.
 
-**IBackend** defines the abstract interface that decouples the Model from llama.cpp:
-
-- `initialize(config)` -- load model, create context
-- `format_prompt(messages)` -- incremental prompt building via `llama_chat_apply_template()`
-- `tokenize(text)` -- text to tokens
-- `generate(tokens, max_tokens, stop_sequences, callback)` -- run inference
-- `finalize_response(messages)` -- update prompt cache state
-- `clear_kv_cache()` -- reset KV cache
-
-**LlamaBackend** is the production implementation. It owns `llama_model`, `llama_context`, and `llama_sampler`, manages formatting state for incremental prompt building, and handles GPU/Metal acceleration.
-
-The CMake target split enables testing without llama.cpp:
-- `zoo_model` links only `zoo` (headers + nlohmann_json) -- tests use this
-- `zoo_backend` links `zoo_model` + llama.cpp -- production code uses this
+There is no IBackend abstraction -- Model IS the llama.cpp wrapper, keeping the architecture simple and honest. The header (`model.hpp`) uses forward declarations for llama types so consumers don't need to include `llama.h`.
 
 ### Layer 2: Tools (`zoo::tools`)
 
@@ -102,17 +87,17 @@ All callbacks (`on_token`, tool handlers) execute on the **inference thread**. T
 |-----------|-----------|
 | Three clean layers | Each layer can be used independently; strict dependency direction |
 | C++23 `std::expected` | Modern, composable error handling without exceptions |
-| Dependency injection | `IBackend` interface enables testing via MockBackend without llama.cpp |
+| Direct wrapping | Model owns llama.cpp resources directly -- no unnecessary abstraction |
 | Value semantics | Predictable ownership, fewer lifetime bugs |
 | Synchronous core | Model is single-threaded; async behavior is layered on top by Agent |
+| Pure logic testing | Unit tests cover types and tools; Model/Agent tested via integration |
 
 ## CMake Targets
 
 | Target | Type | Links | Description |
 |--------|------|-------|-------------|
 | `zoo` | INTERFACE | nlohmann_json | Headers only (types, tools) |
-| `zoo_model` | STATIC | zoo | Model class (no llama.cpp dependency) |
-| `zoo_backend` | STATIC | zoo_model, llama | LlamaBackend (production inference) |
+| `zoo_core` | STATIC | zoo, llama | Model class (direct llama.cpp wrapper) |
 
 ## See Also
 

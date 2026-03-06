@@ -212,4 +212,39 @@ struct Response {
 
 using RequestId = uint64_t;
 
+// ============================================================================
+// Conversation Validation (pure logic, no model dependency)
+// ============================================================================
+
+[[nodiscard]] inline Expected<void> validate_role_sequence(
+    const std::vector<Message>& messages, Role role
+) {
+    if (messages.empty()) {
+        if (role == Role::Tool) {
+            return std::unexpected(Error{
+                ErrorCode::InvalidMessageSequence,
+                "First message cannot be a tool response"
+            });
+        }
+        return {};
+    }
+
+    if (role == Role::System) {
+        return std::unexpected(Error{
+            ErrorCode::InvalidMessageSequence,
+            "System message only allowed at the beginning"
+        });
+    }
+
+    const Role last_role = messages.back().role;
+    if (role == last_role && role != Role::Tool) {
+        return std::unexpected(Error{
+            ErrorCode::InvalidMessageSequence,
+            "Cannot have consecutive messages with the same role (except Tool)"
+        });
+    }
+
+    return {};
+}
+
 } // namespace zoo

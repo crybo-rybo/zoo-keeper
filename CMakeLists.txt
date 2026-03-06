@@ -35,30 +35,19 @@ target_include_directories(zoo INTERFACE
 target_compile_features(zoo INTERFACE cxx_std_23)
 target_link_libraries(zoo INTERFACE nlohmann_json::nlohmann_json)
 
-# Model library (no llama.cpp dependency - can be tested with mocks)
-add_library(zoo_model STATIC src/core/model.cpp)
-target_link_libraries(zoo_model PUBLIC zoo)
-
-# Backend library (llama.cpp integration)
-add_library(zoo_backend STATIC src/core/llama_backend.cpp)
-target_link_libraries(zoo_backend PUBLIC zoo_model llama)
-target_include_directories(zoo_backend PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
+# Core library (Model + llama.cpp)
+add_library(zoo_core STATIC src/core/model.cpp)
+target_link_libraries(zoo_core PUBLIC zoo llama)
 
 # Compiler warnings
 zoo_set_warnings(zoo INTERFACE)
-zoo_set_warnings(zoo_model PRIVATE)
-zoo_set_warnings(zoo_backend PRIVATE)
+zoo_set_warnings(zoo_core PRIVATE)
 
 # Sanitizers
-zoo_enable_sanitizers(zoo_model)
-zoo_enable_sanitizers(zoo_backend)
+zoo_enable_sanitizers(zoo_core)
 
 # Coverage
-zoo_enable_coverage(zoo_model)
-zoo_enable_coverage(zoo_backend)
+zoo_enable_coverage(zoo_core)
 
 # Tests
 if(ZOO_BUILD_TESTS)
@@ -72,7 +61,7 @@ if(ZOO_BUILD_EXAMPLES)
 endif()
 
 # Install rules
-install(TARGETS zoo_backend
+install(TARGETS zoo_core
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin

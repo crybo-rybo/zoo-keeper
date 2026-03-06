@@ -95,11 +95,8 @@ struct RequestHandle {
  */
 class Agent {
 public:
-    static Expected<std::unique_ptr<Agent>> create(
-        const Config& config,
-        std::unique_ptr<core::IBackend> backend = nullptr
-    ) {
-        auto model_result = core::Model::load(config, std::move(backend));
+    static Expected<std::unique_ptr<Agent>> create(const Config& config) {
+        auto model_result = core::Model::load(config);
         if (!model_result) {
             return std::unexpected(model_result.error());
         }
@@ -320,7 +317,7 @@ private:
 
                     // Commit assistant message with tool call
                     model_->add_message(Message::assistant(generated_text));
-                    model_->backend().finalize_response(model_->get_history());
+                    model_->finalize_response();
 
                     // Validate arguments
                     auto validation_error = error_recovery.validate_args(tc, tool_registry_);
@@ -362,7 +359,7 @@ private:
 
             // Commit assistant response
             model_->add_message(Message::assistant(generated_text));
-            model_->backend().finalize_response(model_->get_history());
+            model_->finalize_response();
 
             Response response;
             response.text = std::move(generated_text);

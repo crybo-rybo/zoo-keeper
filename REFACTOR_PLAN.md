@@ -97,13 +97,13 @@ Layer 1: Core (llama.cpp Wrapper)
 | Windows support | CI + platform code | Simplify. Linux/macOS only. |
 | PromptTemplate enum | types.hpp | Just use llama_chat_apply_template auto-detect. |
 
-## New File Structure
+## Final File Structure
 
 ```
 include/zoo/
   core/
-    types.hpp        # Message, Role, Error, Config, SamplingParams, Response
-    model.hpp        # Model class (load, generate, history, KV cache)
+    types.hpp        # Message, Role, Error, Config, SamplingParams, Response, validate_role_sequence
+    model.hpp        # Model class (direct llama.cpp wrapper)
   tools/
     types.hpp        # ToolCall, ToolEntry
     registry.hpp     # ToolRegistry (template registration + invocation)
@@ -113,24 +113,41 @@ include/zoo/
   zoo.hpp            # Convenience header
 src/
   core/
-    model.cpp        # LlamaBackend implementation (the only .cpp file)
+    model.cpp        # Model implementation (all llama.cpp calls)
 tests/
   unit/
-    test_model.cpp
-    test_tool_registry.cpp
-    test_tool_parser.cpp
-    test_error_recovery.cpp
-    test_agent.cpp
-  mocks/
-    mock_model.hpp   # Simple mock for testing Agent without llama.cpp
+    test_types.cpp           # Types, config validation, role sequence validation
+    test_tool_registry.cpp   # Tool registration, schema, invocation
+    test_tool_parser.cpp     # Tool call parsing
+    test_error_recovery.cpp  # Argument validation, retries
+  fixtures/
+    sample_responses.hpp
+    tool_definitions.hpp
+examples/
+  demo_chat.cpp      # Interactive CLI chat app
+  config.example.json
 ```
 
-## Migration Steps
+## CMake Targets
+
+| Target | Type | Links |
+|--------|------|-------|
+| `zoo` | INTERFACE | nlohmann_json |
+| `zoo_core` | STATIC | zoo, llama |
+
+## Testing Philosophy
+
+- Unit tests: pure logic only (54 tests)
+- Model/Agent: integration tests with real GGUF models
+- No mocks or IBackend abstraction
+
+## Migration Steps (completed)
 
 1. Create feature branch `feature/v2-refactor`
 2. Build Layer 1 — core types + Model class
 3. Build Layer 2 — move tool files to new namespace
 4. Build Layer 3 — rewrite Agent as thin composer
 5. Delete removed features (RAG, MCP, gguf_utils, memory_estimate, context_database)
-6. Update tests
-7. Update CMakeLists.txt, docs, CLAUDE.md
+6. Remove IBackend abstraction — merge Model + LlamaBackend into one class
+7. Restructure tests to pure logic only (remove MockBackend, test_model, test_agent)
+8. Update CMakeLists.txt, docs, CLAUDE.md

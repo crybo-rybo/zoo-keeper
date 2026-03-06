@@ -4,17 +4,14 @@ include(GoogleTest)
 
 add_executable(zoo_tests
     unit/test_types.cpp
-    unit/test_model.cpp
     unit/test_tool_registry.cpp
     unit/test_tool_parser.cpp
     unit/test_error_recovery.cpp
-    unit/test_agent.cpp
-    mocks/mock_backend.cpp
 )
 
 target_link_libraries(zoo_tests
     PRIVATE
-        zoo_model
+        zoo
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
@@ -23,7 +20,6 @@ target_link_libraries(zoo_tests
 target_include_directories(zoo_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/mocks
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
 )
 
