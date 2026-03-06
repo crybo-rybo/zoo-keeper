@@ -199,6 +199,20 @@ public:
         return tool_registry_.size();
     }
 
+    std::string build_tool_system_prompt(const std::string& base_prompt) const {
+        auto schemas = tool_registry_.get_all_schemas();
+        if (schemas.empty()) return base_prompt;
+        return base_prompt
+            + "\n\nWhen you need to use a tool, respond with a JSON object containing "
+              "\"name\" and \"arguments\" fields. For example:\n"
+              "{\"name\": \"tool_name\", \"arguments\": {\"param1\": \"value1\"}}\n"
+              "\nOutput ONLY the JSON tool call when invoking a tool — no text after it.\n"
+              "After receiving a tool result, incorporate it into a natural response.\n"
+              "If no tool is needed, respond normally without JSON.\n"
+              "\nAvailable tools:\n"
+            + schemas.dump(2);
+    }
+
 private:
     Agent(const Config& config, std::unique_ptr<core::Model> model)
         : config_(config)
@@ -283,17 +297,17 @@ private:
                 });
             }
 
-            // Build streaming callback
+            // Build streaming callback — buffer tokens so we can suppress
+            // tool call iterations from being streamed to the user
             int completion_tokens = 0;
+            std::vector<std::string> token_buffer;
             auto wrapped_callback = [&](std::string_view token) {
                 if (!first_token_received) {
                     first_token_time = std::chrono::steady_clock::now();
                     first_token_received = true;
                 }
                 ++completion_tokens;
-                if (request.streaming_callback) {
-                    (*request.streaming_callback)(token);
-                }
+                token_buffer.emplace_back(token);
             };
 
             auto generated = model_->generate_from_history(
@@ -316,7 +330,7 @@ private:
                 if (parse_result.tool_call.has_value()) {
                     const auto& tc = *parse_result.tool_call;
 
-                    // Commit assistant message with tool call
+                    // Commit assistant message with tool call (don't flush buffer)
                     model_->add_message(Message::assistant(generated_text));
                     model_->finalize_response();
 
@@ -355,7 +369,13 @@ private:
                 }
             }
 
-            // No tool call — final response
+            // No tool call — final response. Flush buffered tokens to user.
+            if (request.streaming_callback) {
+                for (const auto& tok : token_buffer) {
+                    (*request.streaming_callback)(tok);
+                }
+            }
+
             auto end_time = std::chrono::steady_clock::now();
 
             // Commit assistant response

@@ -79,7 +79,7 @@ Expected<void> Model::initialize() {
 
     auto ctx_params = llama_context_default_params();
     ctx_params.n_ctx = static_cast<uint32_t>(config_.context_size);
-    ctx_params.n_batch = 512;
+    ctx_params.n_batch = static_cast<uint32_t>(config_.context_size);
     ctx_params.n_ubatch = 512;
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;

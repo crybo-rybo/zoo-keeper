@@ -198,6 +198,9 @@ int main(int argc, char** argv) {
         (void)agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
         (void)agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
         (void)agent->register_tool("get_time", "Get the current date and time", {}, get_current_time);
+
+        auto base_prompt = dc.zoo.system_prompt.value_or("You are a helpful AI assistant.");
+        agent->set_system_prompt(agent->build_tool_system_prompt(base_prompt));
     }
 
     print_welcome(dc);
