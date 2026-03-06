@@ -1,37 +1,20 @@
 cmake_minimum_required(VERSION 3.18)
 
-# GoogleTest is fetched by parent CMakeLists.txt
 include(GoogleTest)
 
-# Test executable
 add_executable(zoo_tests
     unit/test_types.cpp
-    unit/test_request_queue.cpp
-    unit/test_history_manager.cpp
+    unit/test_model.cpp
     unit/test_tool_registry.cpp
+    unit/test_tool_parser.cpp
     unit/test_error_recovery.cpp
-    unit/test_agentic_loop.cpp
     unit/test_agent.cpp
-    unit/test_rag_store.cpp
-    unit/test_context_database.cpp
-    unit/test_memory_estimate.cpp
     mocks/mock_backend.cpp
 )
 
-# Add MCP test sources if MCP is enabled
-if(ZOO_ENABLE_MCP)
-    target_sources(zoo_tests PRIVATE
-        unit/test_mcp_json_rpc.cpp
-        unit/test_mcp_message_router.cpp
-        unit/test_mcp_session.cpp
-        unit/test_mcp_client.cpp
-    )
-endif()
-
 target_link_libraries(zoo_tests
     PRIVATE
-        zoo
-        zoo_backend
+        zoo_model
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
@@ -44,14 +27,12 @@ target_include_directories(zoo_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
 )
 
-# Discover tests
 gtest_discover_tests(zoo_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     PROPERTIES
         LABELS "unit"
 )
 
-# Compiler warnings, coverage, and sanitizers
 zoo_set_warnings(zoo_tests PRIVATE)
 zoo_enable_coverage(zoo_tests)
 zoo_enable_sanitizers(zoo_tests)

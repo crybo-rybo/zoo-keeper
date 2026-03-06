@@ -1,16 +1,12 @@
-// Mock backend implementation
-// This file provides stubs needed for linking tests without llama.cpp
-
-#include "mock_backend.hpp"
-
-namespace zoo {
-namespace backend {
-
-// Stub for create_backend() so Agent::create() links without zoo_backend.
+// Stub for create_llama_backend() so tests link without llama.cpp.
 // Tests always pass a MockBackend explicitly, so this is never called.
-std::unique_ptr<IBackend> create_backend() {
+
+#include "zoo/core/model.hpp"
+
+namespace zoo::core {
+
+std::unique_ptr<IBackend> create_llama_backend() {
     return nullptr;
 }
 
-} // namespace backend
-} // namespace zoo
+} // namespace zoo::core
