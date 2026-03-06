@@ -41,8 +41,14 @@ public:
         std::optional<std::function<void(std::string_view)>> on_token = std::nullopt
     );
 
+    // Result from generate_from_history
+    struct GenerationResult {
+        std::string text;
+        int prompt_tokens = 0;
+    };
+
     // Generate from current history state (low-level: used by Agent for tool loop)
-    Expected<std::string> generate_from_history(
+    Expected<GenerationResult> generate_from_history(
         std::optional<std::function<void(std::string_view)>> on_token = std::nullopt
     );
 

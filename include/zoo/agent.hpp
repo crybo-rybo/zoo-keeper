@@ -305,8 +305,9 @@ private:
             }
 
             total_completion_tokens += completion_tokens;
+            total_prompt_tokens += generated->prompt_tokens;
 
-            std::string generated_text = std::move(*generated);
+            std::string generated_text = std::move(generated->text);
 
             // Check for tool calls
             if (tool_registry_.size() > 0) {

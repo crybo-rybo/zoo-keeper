@@ -345,7 +345,7 @@ Expected<Response> Model::generate(
 // Low-Level Generate (for Agent tool loop)
 // ============================================================================
 
-Expected<std::string> Model::generate_from_history(
+Expected<Model::GenerationResult> Model::generate_from_history(
     std::optional<std::function<void(std::string_view)>> on_token
 ) {
     auto prompt_result = format_prompt();
@@ -358,12 +358,20 @@ Expected<std::string> Model::generate_from_history(
         return std::unexpected(tokens_result.error());
     }
 
-    return run_inference(
+    int prompt_tokens = static_cast<int>(tokens_result->size());
+
+    auto text_result = run_inference(
         *tokens_result,
         config_.max_tokens,
         config_.stop_sequences,
         on_token
     );
+
+    if (!text_result) {
+        return std::unexpected(text_result.error());
+    }
+
+    return GenerationResult{std::move(*text_result), prompt_tokens};
 }
 
 // ============================================================================
