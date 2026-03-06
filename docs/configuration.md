@@ -27,23 +27,11 @@ Configured via `config.sampling`:
 | `repeat_last_n` | `int` | `64` | Number of tokens to consider for repeat penalty |
 | `seed` | `int` | `-1` | Random seed. -1 = random seed per request |
 
-### Prompt Template
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `prompt_template` | `PromptTemplate` | `Llama3` | Chat template format |
-| `custom_template` | `optional<string>` | empty | Custom template string (required if `PromptTemplate::Custom`) |
-
-Available templates:
-- `PromptTemplate::Llama3` -- Meta Llama 3 format
-- `PromptTemplate::ChatML` -- ChatML format (`<|im_start|>` / `<|im_end|>`)
-- `PromptTemplate::Custom` -- User-provided template string
-
 ### Generation Limits
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_tokens` | `int` | `512` | Maximum tokens to generate per response. Must be > 0 |
+| `max_tokens` | `int` | `-1` | Maximum tokens to generate per response. -1 = unlimited, must be positive or -1 |
 | `stop_sequences` | `vector<string>` | empty | Additional stop strings to halt generation |
 
 ### System Prompt
@@ -54,11 +42,21 @@ Available templates:
 
 The system prompt can also be set/updated after creation via `agent->set_system_prompt()`.
 
+### Request Queue
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `request_queue_capacity` | `size_t` | `0` | Maximum queued requests. 0 = unlimited |
+
 ### Callbacks
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `on_token` | `optional<function<void(string_view)>>` | empty | Global per-token streaming callback (runs on inference thread) |
+
+## Prompt Template
+
+Zoo-Keeper uses `llama_chat_apply_template()` to auto-detect the chat template from the model's metadata. No manual template configuration is needed -- the correct format (Llama 3, ChatML, etc.) is determined automatically from the GGUF file.
 
 ## Example: Custom Configuration
 
@@ -79,37 +77,11 @@ config.sampling.seed = 42;
 // Stop sequences
 config.stop_sequences = {"\n\n", "User:"};
 
-// Custom template
-config.prompt_template = zoo::PromptTemplate::Custom;
-config.custom_template = "{{role}}: {{content}}\n";
-
 // System prompt
 config.system_prompt = "You are a helpful AI assistant.";
 
 auto agent = std::move(*zoo::Agent::create(config));
 ```
-
-## ChatOptions (Per-Request)
-
-Per-request options are passed to `chat()`:
-
-```cpp
-zoo::ChatOptions options;
-options.rag.enabled = true;
-options.rag.top_k = 4;
-
-auto future = agent->chat(zoo::Message::user("Hello"), options);
-```
-
-### RagOptions
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `bool` | `false` | Enable RAG retrieval for this request |
-| `top_k` | `int` | `4` | Number of chunks to retrieve |
-| `context_override` | `optional<string>` | empty | Bypass retriever with precomputed context |
-
-See [RAG Retrieval](rag.md) for details.
 
 ## Validation
 
@@ -117,8 +89,7 @@ See [RAG Retrieval](rag.md) for details.
 
 - `model_path` is not empty
 - `context_size` > 0
-- `max_tokens` > 0
-- If `prompt_template` is `Custom`, `custom_template` must be provided
+- `max_tokens` is positive or -1 (unlimited)
 
 Invalid configs produce an `Error` with the appropriate `ErrorCode` (100-series).
 
@@ -126,4 +97,3 @@ Invalid configs produce an `Error` with the appropriate `ErrorCode` (100-series)
 
 - [Getting Started](getting-started.md) -- basic setup walkthrough
 - [Building](building.md) -- CMake options and platform setup
-- [RAG Retrieval](rag.md) -- RagOptions details

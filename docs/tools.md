@@ -32,7 +32,7 @@ agent->register_tool("get_time", "Get current time", {}, get_time);
 | `bool` | `boolean` |
 | `std::string` | `string` |
 
-The `param_names` vector must match the function's arity. A mismatch throws `std::invalid_argument`.
+The `param_names` vector must match the function's arity. A mismatch returns an error with `ErrorCode::InvalidToolSignature`.
 
 ### Generated Schema
 
@@ -70,7 +70,7 @@ nlohmann::json schema = {
     {"required", {"query"}}
 };
 
-zoo::engine::ToolHandler handler = [](const nlohmann::json& args)
+zoo::tools::ToolHandler handler = [](const nlohmann::json& args)
     -> zoo::Expected<nlohmann::json> {
     std::string query = args.at("query").get<std::string>();
     int limit = args.value("limit", 10);
@@ -105,7 +105,7 @@ An optional `id` field is used for correlation; if absent, one is auto-generated
 
 ## Agentic Loop
 
-The tool system integrates into the inference loop as follows:
+The tool system integrates into the Agent's inference loop as follows:
 
 1. Model generates text
 2. Parser checks for a tool call in the output
@@ -120,7 +120,8 @@ Tool call and result history is captured in `Response::tool_calls`.
 After a chat request completes, inspect which tools were called:
 
 ```cpp
-auto response = agent->chat(zoo::Message::user("What is 42 + 58?")).get();
+auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
+auto response = handle.future.get();
 if (response) {
     for (const auto& msg : response->tool_calls) {
         std::cout << msg.content << std::endl;
@@ -138,17 +139,8 @@ if (response) {
 | 503 | `ToolRetriesExhausted` | Max retries exceeded |
 | 504 | `ToolLoopLimitReached` | Max agentic loop iterations exceeded |
 
-## MCP Tool Federation
-
-Tools discovered from MCP (Model Context Protocol) servers are automatically wrapped and registered into the same `ToolRegistry` used by local tools. This means MCP tools participate in tool call detection, validation, and the agentic loop exactly like native tools.
-
-MCP tool names are prefixed as `mcp_<server_id>:<tool_name>` to avoid collisions with locally registered tools.
-
-See [MCP](mcp.md) for full details on connecting to MCP servers and configuring tool federation.
-
 ## See Also
 
 - [Getting Started](getting-started.md) -- basic Agent setup
 - [Examples](examples.md) -- complete tool usage snippets
-- [MCP](mcp.md) -- MCP client and tool federation
 - [Architecture](architecture.md) -- how the agentic loop works internally

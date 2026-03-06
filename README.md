@@ -1,20 +1,17 @@
 # Zoo-Keeper
 
-[![Tests](https://img.shields.io/badge/tests-316%20passing-success)]() [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-74%20passing-success)]() [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
-A header-only C++17 Agent Engine for local LLM inference, built on [llama.cpp](https://github.com/ggerganov/llama.cpp). Zoo-Keeper handles the hard parts of building agentic AI -- conversation management, tool calling, context window pressure, and retrieval-augmented generation -- so you can focus on your application.
+A C++23 library built on [llama.cpp](https://github.com/ggerganov/llama.cpp) that wraps and harnesses local LLMs for agentic behavior. Zoo-Keeper handles model loading, inference, conversation management, type-safe tool calling, and an async agentic loop -- so you can focus on your application.
 
 ## Features
 
 - **Async Inference** -- non-blocking `chat()` with `std::future`, streaming token callbacks
 - **Tool Calling** -- type-safe registration with automatic JSON schema generation
-- **Agentic Loop** -- tool detection, validation, execution, result injection, retry
-- **MCP Integration** -- connect to Model Context Protocol servers for tool federation
-- **RAG** -- per-request ephemeral context injection via pluggable retrievers
-- **Long-Term Memory** -- SQLite context database with automatic archival and retrieval
-- **Context Management** -- automatic history tracking, FIFO pruning, system prompt preservation
+- **Agentic Loop** -- tool detection, argument validation, execution, result injection, retry
+- **Context Management** -- automatic history tracking, system prompt preservation
 - **Hardware Acceleration** -- Metal (macOS) and CUDA via llama.cpp
-- **Modern Error Handling** -- `std::expected` throughout, no exceptions
+- **Modern Error Handling** -- C++23 `std::expected` throughout, no exceptions
 
 ## Quick Start
 
@@ -32,7 +29,8 @@ int main() {
     agent->set_system_prompt("You are a helpful assistant.");
     agent->register_tool("add", "Add two numbers", {"a", "b"}, add);
 
-    auto response = agent->chat(zoo::Message::user("What is 42 + 58?")).get();
+    auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
+    auto response = handle.future.get();
     if (response) {
         std::cout << response->text << std::endl;
     }
@@ -48,15 +46,17 @@ cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
 cmake --build build -j$(nproc)
 ```
 
-See [docs/building.md](docs/building.md) for platform setup (Metal, CUDA), CMake options, sanitizers, coverage, and FetchContent integration.
+See [docs/building.md](docs/building.md) for platform setup (Metal, CUDA), CMake options, sanitizers, coverage, and integration instructions.
 
 ## Architecture
 
-Zoo-Keeper uses a three-layer design:
+Zoo-Keeper uses a three-layer design with strict dependency direction:
 
-- **Public API** -- `zoo::Agent` is the single entry point; owns the inference thread
-- **Engine** -- RequestQueue, HistoryManager, ToolRegistry, AgenticLoop, ErrorRecovery
-- **Backend** -- abstract `IBackend` interface; production LlamaBackend + MockBackend for testing
+```
+Layer 3: zoo::Agent        -- async orchestration, request queue, agentic tool loop
+Layer 2: zoo::tools        -- tool registry, parser, validation (no llama.cpp dependency)
+Layer 1: zoo::core         -- synchronous llama.cpp wrapper (Model, IBackend)
+```
 
 See [docs/architecture.md](docs/architecture.md) for the full design.
 
@@ -65,18 +65,15 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 | Guide | Description |
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | Prerequisites, build, hello-world agent, core API overview |
-| [Tools](docs/tools.md) | Template registration, supported types, manual schema, error recovery |
-| [Context Database](docs/context-database.md) | SQLite long-term memory, pruning, FTS5 retrieval |
-| [RAG Retrieval](docs/rag.md) | IRetriever interface, InMemoryRagStore, ephemeral injection |
 | [Architecture](docs/architecture.md) | Three-layer design, threading model, design principles |
-| [Configuration](docs/configuration.md) | Config fields, sampling params, templates, ChatOptions |
-| [Examples](docs/examples.md) | Streaming, tools, RAG, context DB, error handling, cancellation |
-| [MCP](docs/mcp.md) | Model Context Protocol client, tool federation, transport |
+| [Tools](docs/tools.md) | Template registration, supported types, manual schema, error recovery |
+| [Configuration](docs/configuration.md) | Config fields, sampling params, generation limits |
+| [Examples](docs/examples.md) | Streaming, tools, error handling, cancellation, metrics |
 | [Building](docs/building.md) | CMake options, platform setup, sanitizers, coverage |
 
 ## Testing
 
-316 unit tests using GoogleTest:
+74 unit tests using GoogleTest:
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -86,7 +83,6 @@ ctest --test-dir build --output-on-failure
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
 - [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann
-- [tl::expected](https://github.com/TartanLlama/expected) by Sy Brand
 
 ## License
 

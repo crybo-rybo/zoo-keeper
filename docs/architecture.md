@@ -1,6 +1,6 @@
 # Architecture
 
-Zoo-Keeper follows a three-layer architecture that separates concerns between the public API, core engine logic, and inference backend.
+Zoo-Keeper follows a three-layer architecture with strict dependency direction. Each layer depends only on the layers below it.
 
 ## Layer Structure
 
@@ -8,65 +8,71 @@ Zoo-Keeper follows a three-layer architecture that separates concerns between th
 Consumer Code
      |
      v
-+-- Public API Layer -------+
-|   zoo::Agent               |   Single entry point for all functionality
++-- Layer 3: Agent ---------+
+|   zoo::Agent               |   Async orchestration, request queue, agentic tool loop
+|   RequestQueue             |   Thread-safe MPSC request queue
+|   RequestHandle            |   Future-based response handle
 +----------------------------+
      |
      v
-+-- Engine Layer ------------+
-|   RequestQueue              |   Thread-safe MPSC request queue
-|   HistoryManager            |   Conversation state + context window management
-|   ToolRegistry              |   Tool definitions, schema generation, invocation
-|   ToolCallParser            |   Tool call detection in model output
-|   ErrorRecovery             |   Argument validation + retry tracking
-|   AgenticLoop               |   Inference -> tool -> inject -> loop orchestration
-|   McpClient                 |   MCP server connection, tool discovery & federation
-|   Session / MessageRouter   |   JSON-RPC lifecycle and response routing
-|   JsonRpc                   |   JSON-RPC 2.0 serialization
-|   ITransport / StdioTransport|  Abstract transport; production stdio pipe impl
++-- Layer 2: Tools ----------+
+|   zoo::tools::ToolRegistry  |   Tool definitions, schema generation, invocation
+|   zoo::tools::ToolCallParser |   Tool call detection in model output
+|   zoo::tools::ErrorRecovery  |   Argument validation + retry tracking
 +----------------------------+
      |
      v
-+-- Backend Layer -----------+
-|   IBackend (interface)      |   Abstract inference operations
-|   LlamaBackend              |   Production: wraps llama.cpp
-|   MockBackend               |   Testing: scripted responses
++-- Layer 1: Core -----------+
+|   zoo::core::Model          |   Synchronous llama.cpp wrapper
+|   zoo::core::IBackend       |   Abstract inference operations
+|   zoo::core::LlamaBackend   |   Production: wraps llama.cpp
 +----------------------------+
 ```
 
 ## Component Responsibilities
 
-### Public API Layer
+### Layer 1: Core (`zoo::core`)
 
-**Agent** is the single entry point. It owns all internal components, spawns the inference thread, and exposes a thread-safe public API. Created via the `Agent::create()` factory method, which validates config, initializes the backend, and starts the inference thread.
+**Model** is a synchronous, single-threaded llama.cpp wrapper. It manages model loading, conversation history, prompt formatting, tokenization, inference, and KV cache state. It is usable standalone without tools or agents.
 
-Agent is non-copyable and non-movable because the inference thread captures `this`.
+**IBackend** defines the abstract interface that decouples the Model from llama.cpp:
 
-### Engine Layer
-
-| Component | Responsibility |
-|-----------|---------------|
-| **RequestQueue** | Thread-safe queue connecting calling threads to the inference thread. Multiple producers, single consumer. |
-| **HistoryManager** | Owns the `vector<Message>` conversation history. Validates role sequences, tracks estimated token counts, implements FIFO pruning with system prompt preservation. |
-| **ToolRegistry** | Stores tool definitions with JSON schemas. Supports template-based registration (auto-generates schema from function signatures) and manual registration. Thread-safe via shared mutex. |
-| **ToolCallParser** | Scans model output for JSON objects with `name` and `arguments` fields. Handles nested JSON and string escaping. |
-| **ErrorRecovery** | Validates tool call arguments against registered schemas. Tracks retry counts per tool with configurable limits (default: 2). |
-| **AgenticLoop** | The core orchestration loop. Formats prompts, runs inference, detects tool calls, validates/executes/injects results, and loops until a final response or limit is reached. Also handles RAG context injection and context database pruning. |
-
-### Backend Layer
-
-**IBackend** defines the abstract interface that decouples the engine from llama.cpp:
-
-- `initialize(config)` -- load model
-- `format_prompt(messages)` -- incremental prompt building
+- `initialize(config)` -- load model, create context
+- `format_prompt(messages)` -- incremental prompt building via `llama_chat_apply_template()`
 - `tokenize(text)` -- text to tokens
 - `generate(tokens, max_tokens, stop_sequences, callback)` -- run inference
 - `finalize_response(messages)` -- update prompt cache state
 - `clear_kv_cache()` -- reset KV cache
 
-**LlamaBackend** is the production implementation. It owns `llama_model` and `llama_context`, manages formatting state (`prev_len_`, `formatted_`) for incremental prompt building, and handles GPU/Metal acceleration.
+**LlamaBackend** is the production implementation. It owns `llama_model`, `llama_context`, and `llama_sampler`, manages formatting state for incremental prompt building, and handles GPU/Metal acceleration.
 
-**MockBackend** supports scripted responses, tool call simulation, and error injection for unit testing without real models.
+The CMake target split enables testing without llama.cpp:
+- `zoo_model` links only `zoo` (headers + nlohmann_json) -- tests use this
+- `zoo_backend` links `zoo_model` + llama.cpp -- production code uses this
+
+### Layer 2: Tools (`zoo::tools`)
+
+| Component | Responsibility |
+|-----------|---------------|
+| **ToolRegistry** | Stores tool definitions with JSON schemas. Supports template-based registration (auto-generates schema from function signatures) and manual registration. Thread-safe via shared mutex. |
+| **ToolCallParser** | Scans model output for JSON objects with `name` and `arguments` fields. Handles nested JSON and string escaping. |
+| **ErrorRecovery** | Validates tool call arguments against registered schemas. Tracks retry counts per tool with configurable limits (default: 2). |
+
+The tools layer is header-only and has zero dependency on Layer 1. It operates entirely on strings and JSON.
+
+### Layer 3: Agent (`zoo::Agent`)
+
+**Agent** is the async orchestration layer. It composes a `core::Model` and `tools::ToolRegistry`, spawns an inference thread, and implements the agentic tool loop.
+
+Created via the `Agent::create()` factory method, which validates config, initializes the backend, loads the model, and starts the inference thread. Agent is non-copyable and non-movable because the inference thread captures `this`.
+
+The agentic tool loop runs inline in `process_request()`:
+1. Add user message to history
+2. Generate response via `Model::generate_from_history()`
+3. Parse output for tool calls
+4. If tool call found: validate args, execute handler, inject result, loop back to step 2
+5. If no tool call: return final response
+6. Loop limit: 5 iterations (returns `ToolLoopLimitReached` if exceeded)
 
 ## Threading Model
 
@@ -76,15 +82,14 @@ Zoo-Keeper uses a two-thread architecture:
 |--------|-----------------|
 | **Calling Thread** | Submits `chat()` requests, receives `std::future<Response>`, registers tools, sets system prompt |
 | **Inference Thread** | Processes request queue, runs inference, executes tools, manages history, fires callbacks |
-| **MCP Transport Thread** (per server) | Reads stdout from MCP server process, routes responses via MessageRouter |
 
 ### Synchronization
 
 | Resource | Mechanism |
 |----------|-----------|
 | Request Queue | Mutex + condition variable |
-| Cancellation Flag | `std::atomic<bool>` |
-| System Prompt / History | `std::mutex` (shared between Agent and AgenticLoop) |
+| Model Access | `std::mutex` (model_mutex_) |
+| Cancellation Flag | `std::atomic<bool>` per request |
 | Tool Registry | `std::shared_mutex` (read-heavy) |
 
 ### Callback Context
@@ -95,11 +100,19 @@ All callbacks (`on_token`, tool handlers) execute on the **inference thread**. T
 
 | Principle | Rationale |
 |-----------|-----------|
-| Header-only distribution | Simplifies integration; no linking complexity |
-| Single `Agent` entry point | Minimal API surface; easy to learn |
-| `std::expected` for errors | Modern, composable error handling without exceptions |
-| Dependency injection for backend | Enables comprehensive unit testing via MockBackend |
+| Three clean layers | Each layer can be used independently; strict dependency direction |
+| C++23 `std::expected` | Modern, composable error handling without exceptions |
+| Dependency injection | `IBackend` interface enables testing via MockBackend without llama.cpp |
 | Value semantics | Predictable ownership, fewer lifetime bugs |
+| Synchronous core | Model is single-threaded; async behavior is layered on top by Agent |
+
+## CMake Targets
+
+| Target | Type | Links | Description |
+|--------|------|-------|-------------|
+| `zoo` | INTERFACE | nlohmann_json | Headers only (types, tools) |
+| `zoo_model` | STATIC | zoo | Model class (no llama.cpp dependency) |
+| `zoo_backend` | STATIC | zoo_model, llama | LlamaBackend (production inference) |
 
 ## See Also
 
