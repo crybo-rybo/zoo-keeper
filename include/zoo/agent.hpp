@@ -297,17 +297,16 @@ private:
                 });
             }
 
-            // Build streaming callback — buffer tokens so we can suppress
-            // tool call iterations from being streamed to the user
             int completion_tokens = 0;
-            std::vector<std::string> token_buffer;
             auto wrapped_callback = [&](std::string_view token) {
                 if (!first_token_received) {
                     first_token_time = std::chrono::steady_clock::now();
                     first_token_received = true;
                 }
                 ++completion_tokens;
-                token_buffer.emplace_back(token);
+                if (request.streaming_callback) {
+                    (*request.streaming_callback)(token);
+                }
             };
 
             auto generated = model_->generate_from_history(
@@ -369,13 +368,7 @@ private:
                 }
             }
 
-            // No tool call — final response. Flush buffered tokens to user.
-            if (request.streaming_callback) {
-                for (const auto& tok : token_buffer) {
-                    (*request.streaming_callback)(tok);
-                }
-            }
-
+            // No tool call — final response
             auto end_time = std::chrono::steady_clock::now();
 
             // Commit assistant response
