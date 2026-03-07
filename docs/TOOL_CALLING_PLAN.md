@@ -1,362 +1,119 @@
-# Tool Calling Implementation Plan
+# Tool Calling: Grammar-Constrained Evolution
 
-## Goal
+## Core Philosophy
 
-Implement reliable, grammar-constrained tool calling with chain-of-thought support
-and proper streaming control. The model can think freely, then emit a tool call in a
-guaranteed-valid format — or just respond normally.
+Zoo-keeper's current tool calling relies on heuristic detection: the `ToolCallInterceptor` buffers from the first `{` character, counts braces to find a complete JSON object, then `ToolCallParser` checks if it contains `"name"` and `"arguments"` keys. This works but has fundamental fragility:
 
-## Architecture: Sentinel + Lazy Grammar
+- **Ambiguous trigger**: `{` appears in normal prose, code snippets, and JSON-like text. Every `{` forces buffering and speculative parsing, delaying streaming.
+- **No structural guarantee**: The model can produce syntactically valid JSON that names a nonexistent tool, omits required arguments, or uses wrong types. These failures are caught downstream by `ErrorRecovery`, consuming a tool loop iteration and wasting inference.
+- **No chain-of-thought support**: The model cannot reason before calling a tool. The interceptor begins buffering at the first `{`, so any reasoning text containing braces (e.g., "I'll compute `{x + y}`") is mishandled. The system prompt currently instructs "Output ONLY the JSON tool call" which suppresses reasoning entirely.
+- **Streaming latency**: Every JSON-like object in the output stalls streaming while the interceptor buffers and parses. False positives (valid JSON that isn't a tool call) are flushed after the fact, creating visible pauses.
 
-**Core idea:** Use `llama_sampler_init_grammar_lazy_patterns` to let the model generate
-freely (streamable to the user) until a trigger pattern is detected. Once triggered,
-a GBNF grammar constrains the remainder to valid tool call JSON.
+## Sentinel + Lazy Grammar
+
+The solution is to replace heuristic detection with two complementary mechanisms:
+
+**Sentinel tags** provide an unambiguous boundary. The model is instructed (via system prompt) to wrap tool calls in `<tool_call>...</tool_call>` tags. Everything before the sentinel is free text — streamable immediately, no buffering needed. The sentinel never appears in normal prose, eliminating false positives entirely.
+
+**Lazy grammar constraint** guarantees structural validity. llama.cpp's `llama_sampler_init_grammar_lazy_patterns` activates a GBNF grammar only when a trigger pattern (the sentinel) is detected in the output. Before the trigger, the model generates freely. After the trigger, every subsequent token is constrained to produce valid JSON matching the registered tool schemas — correct tool names, correct argument names, correct types. The grammar is generated dynamically from the `ToolRegistry`'s existing JSON schema metadata.
+
+Together, these eliminate the entire class of problems the current approach has:
+
+| Current (heuristic) | Proposed (sentinel + grammar) |
+|---------------------|-------------------------------|
+| Buffer from `{`, parse speculatively | Stream freely until sentinel, then grammar takes over |
+| Model can invent tool names | Grammar constrains to registered names only |
+| Model can omit/mistype arguments | Grammar enforces required args with correct types |
+| CoT suppressed by prompt | CoT happens naturally before sentinel |
+| `ErrorRecovery` catches bad args at runtime | Grammar prevents bad args at sampling time |
+| `ToolCallParser` scans for JSON heuristically | Sentinel extraction is trivial string search |
+
+## Chain-of-Thought as a First-Class Concern
+
+The current architecture forces a binary choice: the model either outputs a tool call or responds normally. With sentinel-based tool calling, the model can reason before acting:
 
 ```
-Normal response:      "The answer is 42."              → streamed to user
-CoT + tool call:      "Let me calculate.\n<tool_call>  → streamed | buffered
-                       {"name":"add","arguments":{"a":2,"b":2}}\n</tool_call>"
+"The user wants to add 22 and 57, then multiply by 1.6.
+I'll start with the addition.
+<tool_call>{"name":"add","arguments":{"a":22,"b":57}}</tool_call>"
 ```
 
-The sentinel `<tool_call>` is:
-- Instructed via system prompt (with few-shot example)
-- Enforced by the GBNF grammar once triggered (model can't produce malformed JSON after it)
-- Unambiguous (won't appear in normal text)
-- Enables CoT (model can reason before deciding to call a tool)
-
-## Key llama.cpp APIs
-
-| API | Purpose |
-|-----|---------|
-| `llama_sampler_init_grammar_lazy_patterns` | Lazy grammar — free generation until trigger, then constrained |
-| `llama_model_chat_template(model, nullptr)` | Get chat template to detect native tool support |
-| `llama_vocab_get_text` / `llama_vocab_is_control` | Inspect tokens if needed |
-| `llama_sampler_chain_add` / `llama_sampler_chain_remove` | Manage sampler chain dynamically |
-
-### Lazy Grammar Sampler Signature
-
-```c
-llama_sampler * llama_sampler_init_grammar_lazy_patterns(
-    const llama_vocab * vocab,
-    const char * grammar_str,        // GBNF grammar (applied after trigger)
-    const char * grammar_root,       // root rule name
-    const char ** trigger_patterns,  // regex patterns that activate the grammar
-    size_t num_trigger_patterns,
-    const llama_token * trigger_tokens, // token IDs that activate the grammar
-    size_t num_trigger_tokens);
-```
-
-**Behavior:** The model generates freely. The sampler scans output for trigger patterns
-(from the start of generation). When a match is found, the grammar activates and constrains
-all subsequent tokens. Content is fed to the grammar starting from the first capture group.
-
-## Implementation Phases
-
-### Phase 1: Tool Support Detection
-
-**File:** `src/core/model.cpp`, `include/zoo/core/model.hpp`
-
-Detect whether the loaded model has tool-calling capability by inspecting the chat template.
-
-```cpp
-// In Model, after loading:
-bool Model::detect_tool_support() const {
-    if (!tmpl_) return false;
-    std::string_view t(tmpl_);
-    // Check for tool-related constructs in the Jinja template
-    return t.find("tool_calls") != std::string_view::npos
-        || t.find("tools") != std::string_view::npos;
-}
-```
-
-Also check for a dedicated tool_use template:
-```cpp
-const char* tool_tmpl = llama_model_chat_template(llama_model_, "tool_use");
-if (tool_tmpl) { /* model has explicit tool support */ }
-```
-
-**Expose:** `bool supports_tools() const` on Model.
-
-**Agent behavior:** If `!model_->supports_tools()`, skip tool registration and log a warning.
-This prevents users from registering tools on models that can't use them.
-
-### Phase 2: Dynamic GBNF Grammar Generation
+Everything before `<tool_call>` is streamed to the user in real-time. The reasoning is visible, the tool call is guaranteed valid, and the streaming boundary is explicit. This matches how more capable models naturally behave — they think before acting — rather than forcing an unnatural "JSON only" output mode.
 
-**File:** `include/zoo/tools/grammar.hpp` (new, header-only)
-
-Generate a GBNF grammar dynamically from the registered tools in the `ToolRegistry`.
-The grammar constrains tool calls to known tool names with correctly-typed arguments.
-
-**Example:** Given tools `add(a: int, b: int)` and `multiply(a: double, b: double)`:
-
-```gbnf
-root      ::= tool-call
-tool-call ::= add-call | multiply-call
-
-add-call      ::= "{" ws "\"name\"" ws ":" ws "\"add\"" ws ","
-                   ws "\"arguments\"" ws ":" ws add-args ws "}"
-multiply-call ::= "{" ws "\"name\"" ws ":" ws "\"multiply\"" ws ","
-                   ws "\"arguments\"" ws ":" ws multiply-args ws "}"
-
-add-args      ::= "{" ws "\"a\"" ws ":" ws integer ws ","
-                   ws "\"b\"" ws ":" ws integer ws "}"
-multiply-args ::= "{" ws "\"a\"" ws ":" ws number ws ","
-                   ws "\"b\"" ws ":" ws number ws "}"
-
-# Primitives
-integer ::= ("-"? ([0-9] | [1-9] [0-9]{0,15}))
-number  ::= integer ("." [0-9]+)? ([eE] [-+]? [0-9]{1,15})?
-string  ::= "\"" ([^"\\\x7F\x00-\x1F] | "\\" (["\\bfnrt] | "u" [0-9a-fA-F]{4}))* "\""
-boolean ::= "true" | "false"
-ws      ::= | " " | "\n" [ \t]{0,20}
-```
+## Mapping to the Three-Layer Architecture
 
-**Key design decisions:**
-- Each tool becomes a separate alternative in the grammar (context-free but exhaustive)
-- Argument types map from the existing `ToolRegistry` JSON schema types:
-  - `"integer"` → `integer` rule
-  - `"number"` → `number` rule
-  - `"string"` → `string` rule
-  - `"boolean"` → `boolean` rule
-- Tool names are literal strings (the grammar prevents the model from inventing tools)
-- Argument names are literal strings (prevents misspelled parameter names)
+### Layer 1: core::Model
 
-**Implementation:**
+The lazy grammar sampler slots into the existing sampler chain between the temperature sampler and the final distribution sampler. It has zero performance overhead until the sentinel is detected. Model gains two responsibilities:
 
-```cpp
-namespace zoo::tools {
+- **Tool support detection**: Inspect the chat template string for tool-related constructs (`tool_calls`, `tools`, etc.) and check for a dedicated `tool_use` template variant. Expose this as a query so the Agent can decide whether to enable tool calling. Also detect native tool tokens (e.g., `<|python_tag|>`) in the vocabulary for use as additional grammar triggers.
+- **Grammar lifecycle**: Accept a grammar string from the Agent, construct the lazy grammar sampler, and manage its position in the sampler chain. The grammar string is opaque to Layer 1 — it's generated by Layer 2 and passed through by Layer 3.
 
-class GrammarBuilder {
-public:
-    // Build GBNF grammar string from registered tools
-    static std::string build(const ToolRegistry& registry);
+The sentinel detection in `run_inference` replaces the current approach where streaming control is entirely delegated to the callback. The model can detect the sentinel in `generated_text` and stop forwarding tokens to the callback once the tool call region begins, providing a clean signal back to the caller.
 
-private:
-    static std::string type_to_rule(const std::string& json_type);
-    static std::string build_tool_call_rule(const std::string& name,
-                                             const nlohmann::json& params_schema);
-};
+### Layer 2: tools
 
-} // namespace zoo::tools
-```
+A new `GrammarBuilder` component generates GBNF grammar strings from the `ToolRegistry`'s existing schema metadata. Each registered tool becomes a named alternative in the grammar. Argument types map directly from the JSON schema types already stored in `ToolEntry::parameters_schema`:
 
-The `build()` method iterates over `registry.get_tool_names()`, gets each tool's
-parameter schema via `registry.get_parameters_schema(name)`, and generates the
-corresponding GBNF rules.
+- `"integer"` → GBNF integer rule
+- `"number"` → GBNF number rule (integer + optional decimal/exponent)
+- `"string"` → GBNF quoted string rule
+- `"boolean"` → GBNF `"true" | "false"` rule
 
-### Phase 3: Sampler Chain Integration
+Tool names and argument names are literal strings in the grammar, preventing the model from inventing tools or misspelling parameters. This is pure logic with no llama.cpp dependency — fully unit-testable.
 
-**File:** `src/core/model.cpp`, `include/zoo/core/model.hpp`
+The `ToolCallParser` simplifies from heuristic JSON scanning to sentinel extraction: find `<tool_call>`, find `</tool_call>`, parse the content between them. The existing heuristic parser remains available as a fallback for models that don't follow sentinel instructions.
 
-Add the lazy grammar sampler to the Model's sampler chain when tools are configured.
+`ErrorRecovery`'s argument validation role diminishes since the grammar prevents structural errors at sampling time. Its retry tracking remains useful for tool *execution* failures (network errors, invalid inputs the schema can't express, etc.).
 
-**New Model methods:**
+### Layer 3: Agent
 
-```cpp
-// Set the tool call grammar (called by Agent after tools are registered)
-void Model::set_tool_grammar(const std::string& grammar_str);
+The Agent orchestrates the integration:
 
-// Clear the tool grammar (if tools are unregistered)
-void Model::clear_tool_grammar();
-```
+1. After tools are registered, generate the GBNF grammar via `GrammarBuilder` (Layer 2)
+2. Pass the grammar string to `Model::set_tool_grammar()` (Layer 1)
+3. Construct the system prompt with sentinel instructions and few-shot examples
+4. In the tool loop, use the sentinel signal from `GenerationResult` to determine whether to parse for tool calls, rather than speculatively parsing every response
 
-**Sampler chain management:**
+The tool loop simplifies: when the model signals a tool call via sentinel, the grammar guarantees the JSON is valid and the tool exists. The Agent can skip argument validation and invoke the tool directly. The existing heuristic path (`ToolCallInterceptor` + `ToolCallParser` + `ErrorRecovery`) remains as a fallback behind a configuration toggle for models that don't respect sentinels.
 
-The sampler chain currently is:
-```
-[penalties] → [top_k] → [top_p] → [temperature] → [dist/greedy]
-```
+## Dual-Path Strategy
 
-With tool grammar, it becomes:
-```
-[penalties] → [top_k] → [top_p] → [temperature] → [lazy_grammar] → [dist/greedy]
-```
+Not all models will follow sentinel instructions. The architecture should support two paths:
 
-The lazy grammar sampler is inserted before the final distribution sampler. It has no
-effect until a trigger pattern is matched, so normal generation is unaffected.
+- **Primary (grammar)**: Sentinel triggers, grammar-constrained JSON, CoT support, clean streaming. Used when the model supports tools (detected via template) or when the user opts in.
+- **Fallback (heuristic)**: Current `ToolCallInterceptor` + `ToolCallParser` + `ErrorRecovery` pipeline. Used for models without tool support or when grammar-based calling is explicitly disabled.
 
-**Trigger configuration:**
+The Agent selects the path based on `Model::supports_tools()` and configuration. Both paths produce the same `ToolCall` type and feed into the same execution and re-injection logic, so the downstream tool loop is path-agnostic.
 
-```cpp
-// Trigger pattern: the sentinel string
-const char* trigger = "<tool_call>";
+## Impact on Existing Components
 
-// Build sampler
-auto* grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
-    vocab_,
-    grammar_str.c_str(),
-    "root",
-    &trigger, 1,     // trigger patterns
-    nullptr, 0        // no trigger tokens (could add <|python_tag|> here)
-);
-```
+| Component | Grammar path | Heuristic fallback |
+|-----------|-------------|-------------------|
+| `ToolCallInterceptor` | Replaced by sentinel detection in `run_inference` | Retained as-is |
+| `ToolCallParser` | Simplified to sentinel extraction | Retained as-is |
+| `ErrorRecovery` | Argument validation unused (grammar prevents it); retry tracking still active | Retained as-is |
+| `ToolRegistry` | Unchanged — schema metadata feeds `GrammarBuilder` | Unchanged |
+| `run_inference` | Sentinel detection, conditional streaming | No change |
+| Sampler chain | Lazy grammar sampler added | No change |
 
-**Optional native token trigger:** If the model has `<|python_tag|>` in its vocabulary
-(detected during Phase 1), add it as a trigger token alongside the sentinel pattern.
-This provides dual-path triggering — native token for models that emit it, sentinel
-for models that follow the system prompt instruction.
+## Testing Considerations
 
-### Phase 4: Streaming Control
+Grammar generation (`GrammarBuilder`) and sentinel extraction are pure logic — unit-testable without a model, consistent with zoo-keeper's testing philosophy. Grammar output can be validated by structure (correct GBNF syntax, correct tool names/types enumerated, correct argument constraints).
 
-**File:** `src/core/model.cpp`
+Integration testing with a real model validates the end-to-end path: CoT reasoning streams correctly, sentinel triggers grammar, constrained JSON parses successfully, tool executes and result re-injects. The dual-path architecture means the heuristic fallback's existing test coverage remains valid.
 
-Modify `run_inference()` to detect when the grammar has triggered and switch from
-streaming to buffering.
-
-**Detection strategy:**
-
-Since the trigger pattern is a known string (`<tool_call>`), detection is simple:
-scan the accumulated `generated_text` for the sentinel.
-
-```cpp
-// In the token generation loop within run_inference():
-generated_text.append(buff, n);
-
-// Check if we've entered tool call mode
-if (!in_tool_call && generated_text.find("<tool_call>") != std::string::npos) {
-    in_tool_call = true;
-    // Don't stream from here on — the rest is tool call JSON
-}
-
-if (!in_tool_call && on_token) {
-    (*on_token)(std::string_view(buff, n));
-}
-```
-
-**New return type for run_inference (or generate_from_history):**
-
-Extend `GenerationResult` to indicate whether a tool call was detected:
-
-```cpp
-struct GenerationResult {
-    std::string text;
-    int prompt_tokens = 0;
-    bool contains_tool_call = false;  // true if <tool_call> sentinel was detected
-};
-```
-
-The Agent can then use `contains_tool_call` to decide whether to parse for tool calls,
-rather than speculatively parsing every response.
-
-### Phase 5: Agent Integration
-
-**File:** `include/zoo/agent.hpp`
-
-Update the Agent's `process_request()` to leverage grammar-constrained tool calling.
-
-**Changes to the tool loop:**
-
-```cpp
-// In process_request(), after generate_from_history():
-if (generated->contains_tool_call) {
-    // Extract tool call JSON from between <tool_call> and </tool_call>
-    // Grammar guarantees this is valid JSON with correct structure
-    auto tool_call = extract_tool_call(generated->text);
-
-    // No need for ToolCallParser heuristic — grammar enforced validity
-    // No need for ErrorRecovery argument validation — grammar enforced types
-
-    // Execute tool directly
-    auto result = tool_registry_.invoke(tool_call.name, tool_call.arguments);
-    // ... inject result, continue loop
-} else {
-    // Normal response — already streamed to user
-    // ... build Response, return
-}
-```
-
-**Simplifications enabled by grammar:**
-- `ToolCallParser` becomes a simple sentinel extractor (no heuristic JSON scanning)
-- `ErrorRecovery` argument validation is largely unnecessary (grammar prevents bad args)
-- Streaming works correctly — free text is streamed, tool calls are buffered
-- No tool call JSON ever leaks to the user
-
-### Phase 6: System Prompt Construction
-
-**File:** `include/zoo/agent.hpp`
-
-Update `build_tool_system_prompt()` to instruct the model on the sentinel format
-with a few-shot example.
-
-```cpp
-std::string build_tool_system_prompt(const std::string& base_prompt) const {
-    auto schemas = tool_registry_.get_all_schemas();
-    if (schemas.empty()) return base_prompt;
-
-    return base_prompt +
-        "\n\nYou have access to tools. When you want to call a tool, "
-        "wrap the call in <tool_call> tags like this:\n\n"
-        "<tool_call>\n"
-        "{\"name\": \"tool_name\", \"arguments\": {\"param1\": \"value1\"}}\n"
-        "</tool_call>\n\n"
-        "Rules:\n"
-        "- You may think and reason before calling a tool.\n"
-        "- Place the tool call JSON inside <tool_call></tool_call> tags.\n"
-        "- Only call one tool at a time.\n"
-        "- After receiving a tool result, incorporate it into a natural response.\n"
-        "- If no tool is needed, respond normally without tags.\n\n"
-        "Available tools:\n" + schemas.dump(2);
-}
-```
-
-## File Changes Summary
-
-| File | Change |
-|------|--------|
-| `include/zoo/core/model.hpp` | Add `supports_tools()`, `set_tool_grammar()`, extend `GenerationResult` |
-| `src/core/model.cpp` | Tool detection, lazy grammar sampler setup, streaming control in `run_inference()` |
-| `include/zoo/tools/grammar.hpp` | **New** — `GrammarBuilder` for dynamic GBNF generation |
-| `include/zoo/agent.hpp` | Updated tool loop, simplified parsing, new system prompt |
-| `include/zoo/tools/parser.hpp` | Simplified to sentinel extraction (or kept as fallback) |
-| `include/zoo/tools/validation.hpp` | Reduced role (grammar handles most validation) |
-
-## Testing Strategy
-
-### Unit Tests (pure logic, no model)
-
-| Test | Validates |
-|------|-----------|
-| `test_grammar_builder.cpp` | GBNF generation from ToolRegistry schemas |
-| `test_tool_support_detection.cpp` | Template string parsing for tool support |
-| `test_sentinel_extraction.cpp` | Extracting tool call JSON from sentinel-wrapped text |
-
-### Integration Tests (requires GGUF model)
-
-| Test | Validates |
-|------|-----------|
-| Tool call with CoT | Model thinks, then calls tool correctly |
-| Normal response streaming | Tokens stream to callback without delay |
-| Tool call buffering | Tool call JSON is not streamed to user |
-| Grammar constraint | Invalid tool names / argument types are rejected |
-| Multi-turn tool loop | Tool result injection → re-generation works |
-
-## Migration Path
-
-The implementation can be done incrementally:
-
-1. **Phase 1-2** can be built and tested independently (pure logic)
-2. **Phase 3** requires integration testing with a real model
-3. **Phase 4-5** build on Phase 3 and can be tested together
-4. **Phase 6** is a system prompt change, testable immediately
-
-The existing `ToolCallParser` and `ErrorRecovery` remain as fallbacks during migration.
-Once grammar-based tool calling is stable, the heuristic parser can be simplified and
-the error recovery reduced.
-
-## Risks and Mitigations
+## Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Model ignores sentinel instruction | Grammar trigger also supports native tokens (`<\|python_tag\|>`) as fallback |
-| Grammar too restrictive for edge cases | Keep `ToolCallParser` as fallback path (config toggle) |
-| Performance overhead of grammar sampler | Lazy grammar has zero overhead until triggered |
-| Dynamic grammar generation bugs | Extensive unit tests on `GrammarBuilder` output |
-| `llama_chat_apply_template` doesn't support sentinel tags | Use raw prompt injection or switch to Jinja-capable template rendering |
+| Model ignores sentinel instruction | Dual-path: fall back to heuristic detection. Also register native tool tokens as additional grammar triggers. |
+| Grammar too restrictive for novel argument patterns | Keep heuristic path as config-toggled fallback. Grammar covers the common cases (int, number, string, boolean). |
+| Chat template doesn't preserve sentinel tags | Test with target model families. If template strips tags, use raw prompt injection or Jinja-capable rendering. |
+| Dynamic grammar regeneration on tool registration changes | Regenerate grammar string and reconstruct sampler only when tool set changes. Cache between calls. |
 
-## Future Extensions
+## Future Directions
 
-- **Parallel tool calls:** Grammar could be extended to allow arrays of tool calls
-- **Streaming tool arguments:** For tools with large string args, stream the argument value
-- **Grammar caching:** Cache compiled grammars when tool set doesn't change
-- **Native template integration:** Use model's native tool calling format when available,
-  falling back to sentinel for models without native support
+- **Parallel tool calls**: Extend the grammar root rule to accept an array of tool call objects, enabling the model to invoke multiple tools in a single generation.
+- **Streaming tool arguments**: For tools with large string arguments, stream the argument value as it's generated rather than buffering the entire tool call.
+- **Native template integration**: When a model has a dedicated tool-calling template variant, use the model's native format instead of sentinel tags, with the grammar still providing structural guarantees.
