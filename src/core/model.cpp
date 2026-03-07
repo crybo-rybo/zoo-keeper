@@ -182,11 +182,6 @@ Expected<std::string> Model::run_inference(
         generated_text.append(buff, static_cast<size_t>(n));
         ++token_count;
 
-        if (max_tokens > 0 && token_count >= max_tokens) {
-            if (on_token) (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
-            break;
-        }
-
         if (!stop_sequences.empty()) {
             size_t match_len = find_stop_sequence(generated_text, stop_sequences);
             if (match_len > 0) {
@@ -199,6 +194,9 @@ Expected<std::string> Model::run_inference(
             TokenAction action = (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
             if (action == TokenAction::Stop) break;
         }
+
+        if (max_tokens > 0 && token_count >= max_tokens) break;
+
         batch = llama_batch_get_one(&new_token, 1);
     }
 

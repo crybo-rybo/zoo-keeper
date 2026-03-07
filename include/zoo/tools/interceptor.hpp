@@ -24,6 +24,12 @@ public:
         : user_callback_(std::move(user_callback))
     {}
 
+    // make_callback() captures 'this', so moves would dangle the callback
+    ToolCallInterceptor(ToolCallInterceptor&&) = delete;
+    ToolCallInterceptor& operator=(ToolCallInterceptor&&) = delete;
+    ToolCallInterceptor(const ToolCallInterceptor&) = delete;
+    ToolCallInterceptor& operator=(const ToolCallInterceptor&) = delete;
+
     TokenCallback make_callback() {
         return [this](std::string_view token) -> TokenAction {
             full_text_.append(token.data(), token.size());
@@ -50,7 +56,8 @@ public:
                 result.visible_text = std::move(visible_text_);
                 return result;
             }
-            // Not a tool call — flush buffer as visible text
+            // Not a tool call — include buffer in visible_text for the Response.
+            // Not emitted via user_callback_ since streaming is already complete.
             visible_text_ += buffer_;
         }
 
@@ -137,6 +144,8 @@ private:
                     visible_text_ += buffer_;
                     emit(buffer_);
                     buffer_.clear();
+                    in_string_ = false;
+                    escape_next_ = false;
                     state_ = State::Normal;
 
                     // Process any remaining characters in this token
