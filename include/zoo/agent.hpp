@@ -396,6 +396,15 @@ private:
                 continue;
             }
 
+            // If the model emitted EOG immediately after a tool result,
+            // nudge it to produce a natural language response for the user.
+            if (response_text.empty() && !tool_call_history.empty() &&
+                iteration < max_tool_iterations) {
+                model_->add_message(Message::user(
+                    "Please respond to the user with the tool result."));
+                continue;
+            }
+
             // No tool call — final response
             auto end_time = std::chrono::steady_clock::now();
 
