@@ -291,3 +291,203 @@ TEST(ToolCallInterceptorTest, EmptyInput) {
     EXPECT_TRUE(result.visible_text.empty());
     EXPECT_TRUE(result.full_text.empty());
 }
+
+// ============================================================================
+// Full text tracking without a tool call
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, FullTextMatchesVisibleTextWhenNoToolCall) {
+    // When there is no tool call, full_text should equal visible_text exactly
+    std::vector<std::string> tokens = {
+        "The answer is ",
+        "42."
+    };
+
+    auto result = simulate_tokens(tokens);
+
+    EXPECT_FALSE(result.tool_call.has_value());
+    EXPECT_EQ(result.full_text, "The answer is 42.");
+    EXPECT_EQ(result.full_text, result.visible_text);
+}
+
+// ============================================================================
+// Argument type coverage
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, ToolCallWithBooleanArguments) {
+    std::vector<std::string> tokens = {
+        "{\"name\": \"set_flag\",",
+        " \"arguments\": {\"enabled\": true, \"verbose\": false}}"
+    };
+
+    auto result = simulate_tokens(tokens);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "set_flag");
+    EXPECT_EQ(result.tool_call->arguments["enabled"], true);
+    EXPECT_EQ(result.tool_call->arguments["verbose"], false);
+}
+
+TEST(ToolCallInterceptorTest, ToolCallWithNullArgument) {
+    std::vector<std::string> tokens = {
+        "{\"name\": \"process\",",
+        " \"arguments\": {\"value\": null, \"label\": \"test\"}}"
+    };
+
+    auto result = simulate_tokens(tokens);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "process");
+    EXPECT_TRUE(result.tool_call->arguments["value"].is_null());
+    EXPECT_EQ(result.tool_call->arguments["label"], "test");
+}
+
+TEST(ToolCallInterceptorTest, ToolCallWithNestedObjectArguments) {
+    std::vector<std::string> tokens = {
+        "{\"name\": \"create\",",
+        " \"arguments\": {\"config\": {\"x\": 1, \"y\": 2}}}"
+    };
+
+    auto result = simulate_tokens(tokens);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "create");
+    EXPECT_EQ(result.tool_call->arguments["config"]["x"], 1);
+    EXPECT_EQ(result.tool_call->arguments["config"]["y"], 2);
+}
+
+// ============================================================================
+// Non-tool JSON immediately followed by tool call in one token
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, NonToolJsonAndToolCallInSingleToken) {
+    // Both the non-tool JSON and the tool call JSON appear in one token.
+    // This exercises the process_normal(token.substr(i+1)) recursion after
+    // flushing the non-tool JSON.
+    std::vector<std::string> tokens = {
+        "{\"x\": 1}{\"name\": \"add\", \"arguments\": {\"a\": 5, \"b\": 6}}"
+    };
+
+    std::string streamed;
+    auto result = simulate_tokens(tokens, &streamed);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "add");
+    EXPECT_EQ(result.tool_call->arguments["a"], 5);
+    EXPECT_EQ(result.tool_call->arguments["b"], 6);
+    // The non-tool JSON should be in visible text; the tool call JSON should not
+    EXPECT_EQ(streamed, "{\"x\": 1}");
+    EXPECT_EQ(result.visible_text, "{\"x\": 1}");
+}
+
+// ============================================================================
+// Whitespace-only visible prefix
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, WhitespaceOnlyPrefixBeforeToolCall) {
+    // Some models emit a newline before tool call JSON — verify the newline
+    // is treated as visible text and the tool call is still detected.
+    std::vector<std::string> tokens = {
+        "\n",
+        "{\"name\": \"ping\", \"arguments\": {}}"
+    };
+
+    std::string streamed;
+    auto result = simulate_tokens(tokens, &streamed);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "ping");
+    EXPECT_EQ(streamed, "\n");
+    EXPECT_EQ(result.visible_text, "\n");
+}
+
+// ============================================================================
+// Closing brace arrives as its own token
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, ClosingBraceInSeparateToken) {
+    // The final '}' of the tool call arrives as a separate single-character
+    // token, distinct from the rest of the JSON body.
+    std::vector<std::string> tokens = {
+        "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}",
+        "}"
+    };
+
+    auto result = simulate_tokens(tokens);
+
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "add");
+    EXPECT_EQ(result.tool_call->arguments["a"], 1);
+    EXPECT_EQ(result.tool_call->arguments["b"], 2);
+    EXPECT_TRUE(result.visible_text.empty());
+}
+
+// ============================================================================
+// Empty JSON object is treated as non-tool and flushed as visible text
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, EmptyJsonObjectPassesThroughAsText) {
+    // {} has no "name" or "arguments" — should be flushed as plain text
+    std::vector<std::string> tokens = {
+        "Result: ",
+        "{}",
+        " done."
+    };
+
+    std::string streamed;
+    auto result = simulate_tokens(tokens, &streamed);
+
+    EXPECT_FALSE(result.tool_call.has_value());
+    EXPECT_EQ(streamed, "Result: {} done.");
+    EXPECT_EQ(result.visible_text, "Result: {} done.");
+}
+
+// ============================================================================
+// Tokens after Stop are not processed
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, TokensAfterStopAreIgnored) {
+    // After a tool call is detected and Stop is returned, any subsequent tokens
+    // that the caller might feed in should not affect the result.
+    std::vector<std::string> all_tokens = {
+        "{\"name\": \"first\", \"arguments\": {}}",
+        "{\"name\": \"second\", \"arguments\": {}}"  // should never be processed
+    };
+
+    // simulate_tokens already breaks on Stop, but let's also verify via
+    // explicit manual invocation that only the first tool call is captured
+    ToolCallInterceptor interceptor;
+    auto callback = interceptor.make_callback();
+
+    TokenAction action = callback(all_tokens[0]);
+    EXPECT_EQ(action, TokenAction::Stop);
+
+    // Feeding additional tokens after Stop — simulate_tokens wouldn't do this,
+    // but if a caller ignores the Stop signal and keeps feeding tokens, the
+    // interceptor should still only report the first tool call
+    callback(all_tokens[1]);
+
+    auto result = interceptor.finalize();
+    ASSERT_TRUE(result.tool_call.has_value());
+    EXPECT_EQ(result.tool_call->name, "first");
+}
+
+// ============================================================================
+// Full text with non-tool JSON accumulates all tokens
+// ============================================================================
+
+TEST(ToolCallInterceptorTest, FullTextIncludesNonToolJson) {
+    // full_text should be the raw concatenation of all tokens regardless of
+    // whether the content is a tool call or plain JSON
+    std::vector<std::string> tokens = {
+        "Prefix ",
+        "{\"info\": 99}",
+        " suffix"
+    };
+
+    auto result = simulate_tokens(tokens);
+
+    EXPECT_FALSE(result.tool_call.has_value());
+    EXPECT_EQ(result.full_text, "Prefix {\"info\": 99} suffix");
+    EXPECT_EQ(result.full_text, result.visible_text);
+}
