@@ -7,6 +7,7 @@ add_executable(zoo_tests
     unit/test_tool_registry.cpp
     unit/test_tool_parser.cpp
     unit/test_error_recovery.cpp
+    unit/test_tool_interceptor.cpp
 )
 
 target_link_libraries(zoo_tests

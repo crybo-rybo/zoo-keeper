@@ -350,7 +350,7 @@ Expected<Response> Model::generate(
 // ============================================================================
 
 Expected<Model::GenerationResult> Model::generate_from_history(
-    std::optional<std::function<void(std::string_view)>> on_token
+    std::optional<TokenCallback> on_token
 ) {
     auto prompt_result = format_prompt();
     if (!prompt_result) {
