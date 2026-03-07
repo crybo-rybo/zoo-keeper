@@ -5,6 +5,7 @@
 #include "tools/registry.hpp"
 #include "tools/parser.hpp"
 #include "tools/validation.hpp"
+#include "tools/interceptor.hpp"
 #include <thread>
 #include <future>
 #include <memory>
@@ -285,6 +286,7 @@ private:
         tools::ErrorRecovery error_recovery;
         int iteration = 0;
         constexpr int max_tool_iterations = 5;
+        const bool has_tools = tool_registry_.size() > 0;
 
         while (iteration < max_tool_iterations) {
             ++iteration;
@@ -298,20 +300,41 @@ private:
             }
 
             int completion_tokens = 0;
-            auto wrapped_callback = [&](std::string_view token) {
-                if (!first_token_received) {
-                    first_token_time = std::chrono::steady_clock::now();
-                    first_token_received = true;
-                }
-                ++completion_tokens;
-                if (request.streaming_callback) {
-                    (*request.streaming_callback)(token);
-                }
+
+            // Metrics-tracking wrapper that forwards to either the interceptor or user callback
+            auto make_metrics_callback = [&](auto inner_callback) -> TokenCallback {
+                return [&, cb = std::move(inner_callback)](std::string_view token) -> TokenAction {
+                    if (!first_token_received) {
+                        first_token_time = std::chrono::steady_clock::now();
+                        first_token_received = true;
+                    }
+                    ++completion_tokens;
+                    return cb(token);
+                };
             };
 
-            auto generated = model_->generate_from_history(
-                std::optional<std::function<void(std::string_view)>>(wrapped_callback)
-            );
+            // Build the appropriate callback chain
+            std::optional<TokenCallback> callback;
+            std::optional<tools::ToolCallInterceptor> interceptor;
+
+            if (has_tools) {
+                interceptor.emplace(request.streaming_callback);
+                auto interceptor_cb = interceptor->make_callback();
+                callback = make_metrics_callback(std::move(interceptor_cb));
+            } else if (request.streaming_callback) {
+                callback = make_metrics_callback(
+                    [&](std::string_view token) -> TokenAction {
+                        (*request.streaming_callback)(token);
+                        return TokenAction::Continue;
+                    }
+                );
+            } else {
+                callback = make_metrics_callback(
+                    [](std::string_view) -> TokenAction { return TokenAction::Continue; }
+                );
+            }
+
+            auto generated = model_->generate_from_history(std::move(callback));
 
             if (!generated) {
                 return std::unexpected(generated.error());
@@ -320,63 +343,68 @@ private:
             total_completion_tokens += completion_tokens;
             total_prompt_tokens += generated->prompt_tokens;
 
-            std::string generated_text = std::move(generated->text);
+            // Determine if a tool call was detected
+            std::optional<tools::ToolCall> detected_tool_call;
+            std::string response_text;
 
-            // Check for tool calls
-            if (tool_registry_.size() > 0) {
-                auto parse_result = tools::ToolCallParser::parse(generated_text);
+            if (interceptor) {
+                auto intercept_result = interceptor->finalize();
+                detected_tool_call = std::move(intercept_result.tool_call);
+                response_text = std::move(intercept_result.full_text);
+            } else {
+                response_text = std::move(generated->text);
+            }
 
-                if (parse_result.tool_call.has_value()) {
-                    const auto& tc = *parse_result.tool_call;
+            if (detected_tool_call.has_value()) {
+                const auto& tc = *detected_tool_call;
 
-                    // Commit assistant message with tool call (don't flush buffer)
-                    model_->add_message(Message::assistant(generated_text));
-                    model_->finalize_response();
+                // Commit assistant message with tool call
+                model_->add_message(Message::assistant(response_text));
+                model_->finalize_response();
 
-                    // Validate arguments
-                    auto validation_error = error_recovery.validate_args(tc, tool_registry_);
-                    if (!validation_error.empty()) {
-                        if (!error_recovery.can_retry(tc.name)) {
-                            return std::unexpected(Error{
-                                ErrorCode::ToolRetriesExhausted,
-                                "Tool retries exhausted for '" + tc.name + "': " + validation_error
-                            });
-                        }
-                        error_recovery.record_retry(tc.name);
-
-                        std::string error_content = "Error: " + validation_error;
-                        model_->add_message(Message::tool(
-                            error_content + "\nPlease correct the arguments.", tc.id));
-                        tool_call_history.push_back(
-                            Message::tool(std::move(error_content), tc.id));
-                        continue;
+                // Validate arguments
+                auto validation_error = error_recovery.validate_args(tc, tool_registry_);
+                if (!validation_error.empty()) {
+                    if (!error_recovery.can_retry(tc.name)) {
+                        return std::unexpected(Error{
+                            ErrorCode::ToolRetriesExhausted,
+                            "Tool retries exhausted for '" + tc.name + "': " + validation_error
+                        });
                     }
+                    error_recovery.record_retry(tc.name);
 
-                    // Execute tool
-                    auto invoke_result = tool_registry_.invoke(tc.name, tc.arguments);
-                    std::string tool_result_str;
-                    if (invoke_result) {
-                        tool_result_str = invoke_result->dump();
-                    } else {
-                        tool_result_str = "Error: " + invoke_result.error().message;
-                    }
-
-                    Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
-                    model_->add_message(tool_msg);
-                    tool_call_history.push_back(std::move(tool_msg));
+                    std::string error_content = "Error: " + validation_error;
+                    model_->add_message(Message::tool(
+                        error_content + "\nPlease correct the arguments.", tc.id));
+                    tool_call_history.push_back(
+                        Message::tool(std::move(error_content), tc.id));
                     continue;
                 }
+
+                // Execute tool
+                auto invoke_result = tool_registry_.invoke(tc.name, tc.arguments);
+                std::string tool_result_str;
+                if (invoke_result) {
+                    tool_result_str = invoke_result->dump();
+                } else {
+                    tool_result_str = "Error: " + invoke_result.error().message;
+                }
+
+                Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
+                model_->add_message(tool_msg);
+                tool_call_history.push_back(std::move(tool_msg));
+                continue;
             }
 
             // No tool call — final response
             auto end_time = std::chrono::steady_clock::now();
 
             // Commit assistant response
-            model_->add_message(Message::assistant(generated_text));
+            model_->add_message(Message::assistant(response_text));
             model_->finalize_response();
 
             Response response;
-            response.text = std::move(generated_text);
+            response.text = std::move(response_text);
             response.tool_calls = std::move(tool_call_history);
             response.usage.prompt_tokens = total_prompt_tokens;
             response.usage.completion_tokens = total_completion_tokens;
