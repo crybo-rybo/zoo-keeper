@@ -9,6 +9,7 @@
 #include "tools/registry.hpp"
 #include "tools/parser.hpp"
 #include "tools/validation.hpp"
+#include "tools/interceptor.hpp"
 
 // Agent (async orchestration)
 #include "agent.hpp"
