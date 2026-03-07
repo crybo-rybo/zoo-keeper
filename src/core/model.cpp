@@ -1,4 +1,5 @@
 #include "zoo/core/model.hpp"
+#include "zoo/core/batch.hpp"
 #include <llama.h>
 #include <algorithm>
 #include <chrono>
@@ -153,23 +154,42 @@ Expected<std::string> Model::run_inference(
     generated_text.reserve(max_tokens > 0 ? static_cast<size_t>(max_tokens) * 8 : 4096);
     int token_count = 0;
 
-    llama_batch batch = llama_batch_get_one(
-        const_cast<llama_token*>(reinterpret_cast<const llama_token*>(prompt_tokens.data())),
-        static_cast<int32_t>(prompt_tokens.size()));
+    const int n_batch = static_cast<int>(llama_n_batch(ctx_));
+    const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) + 1;
+
+    // --- Chunked prefill ---
+    auto chunks = compute_prefill_chunks(
+        static_cast<int>(prompt_tokens.size()), n_batch);
+
+    for (const auto& chunk : chunks) {
+        int n_ctx_used = base_pos + chunk.offset + chunk.count;
+        if (n_ctx_used > context_size_) {
+            return std::unexpected(Error{ErrorCode::ContextWindowExceeded,
+                "Prompt tokens exceed context size"});
+        }
+
+        llama_batch batch = llama_batch_init(chunk.count, 0, 1);
+        for (int i = 0; i < chunk.count; ++i) {
+            batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
+            batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
+        }
+        batch.n_tokens = chunk.count;
+
+        int rc = llama_decode(ctx_, batch);
+        llama_batch_free(batch);
+        if (rc != 0) {
+            return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode prefill batch"});
+        }
+    }
+
+    // --- Autoregressive generation ---
+    int current_pos = base_pos + static_cast<int>(prompt_tokens.size());
     llama_token new_token;
 
     while (true) {
-        int n_ctx_used = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) + 1;
-        if (n_ctx_used + batch.n_tokens > context_size_) {
-            if (token_count > 0) break;
-            return std::unexpected(Error{ErrorCode::ContextWindowExceeded,
-                "Batch tokens exceed context size"});
-        }
-
-        if (llama_decode(ctx_, batch) != 0) {
-            return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode batch"});
-        }
-
         new_token = llama_sampler_sample(sampler_, ctx_, -1);
         if (llama_vocab_is_eog(vocab_, new_token)) break;
 
@@ -197,7 +217,23 @@ Expected<std::string> Model::run_inference(
 
         if (max_tokens > 0 && token_count >= max_tokens) break;
 
-        batch = llama_batch_get_one(&new_token, 1);
+        if (current_pos >= context_size_) break;
+
+        // Decode the new token explicitly
+        llama_batch batch = llama_batch_init(1, 0, 1);
+        batch.token[0] = new_token;
+        batch.pos[0] = static_cast<llama_pos>(current_pos);
+        batch.n_seq_id[0] = 1;
+        batch.seq_id[0][0] = 0;
+        batch.logits[0] = true;
+        batch.n_tokens = 1;
+
+        int rc = llama_decode(ctx_, batch);
+        llama_batch_free(batch);
+        if (rc != 0) {
+            return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
+        }
+        ++current_pos;
     }
 
     return generated_text;
