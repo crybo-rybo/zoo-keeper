@@ -147,7 +147,7 @@ Expected<std::vector<int>> Model::tokenize(const std::string& text) {
 Expected<std::string> Model::run_inference(
     const std::vector<int>& prompt_tokens, int max_tokens,
     const std::vector<std::string>& stop_sequences,
-    const std::optional<std::function<void(std::string_view)>>& on_token
+    const std::optional<TokenCallback>& on_token
 ) {
     std::string generated_text;
     generated_text.reserve(max_tokens > 0 ? static_cast<size_t>(max_tokens) * 8 : 4096);
@@ -195,7 +195,10 @@ Expected<std::string> Model::run_inference(
             }
         }
 
-        if (on_token) (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
+        if (on_token) {
+            TokenAction action = (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
+            if (action == TokenAction::Stop) break;
+        }
         batch = llama_batch_get_one(&new_token, 1);
     }
 
@@ -260,7 +263,7 @@ void Model::clear_kv_cache() {
 
 Expected<Response> Model::generate(
     const std::string& user_message,
-    std::optional<std::function<void(std::string_view)>> on_token
+    std::optional<TokenCallback> on_token
 ) {
     auto start_time = std::chrono::steady_clock::now();
 
@@ -273,15 +276,16 @@ Expected<Response> Model::generate(
     bool first_token_received = false;
     int completion_tokens = 0;
 
-    auto wrapped_callback = [&](std::string_view token) {
+    auto wrapped_callback = [&](std::string_view token) -> TokenAction {
         if (!first_token_received) {
             first_token_time = std::chrono::steady_clock::now();
             first_token_received = true;
         }
         ++completion_tokens;
         if (on_token) {
-            (*on_token)(token);
+            return (*on_token)(token);
         }
+        return TokenAction::Continue;
     };
 
     auto prompt_result = format_prompt();
@@ -302,7 +306,7 @@ Expected<Response> Model::generate(
         *tokens_result,
         config_.max_tokens,
         config_.stop_sequences,
-        std::optional<std::function<void(std::string_view)>>(wrapped_callback)
+        std::optional<TokenCallback>(wrapped_callback)
     );
 
     if (!generate_result) {

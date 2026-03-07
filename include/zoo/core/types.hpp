@@ -147,7 +147,6 @@ struct Config {
 
     size_t request_queue_capacity = 0;
 
-    using TokenCallback = std::function<void(std::string_view)>;
     std::optional<TokenCallback> on_token;
 
     Expected<void> validate() const {
@@ -205,6 +204,17 @@ struct Response {
 
     bool operator==(const Response& other) const = default;
 };
+
+// ============================================================================
+// Token Callback Types
+// ============================================================================
+
+enum class TokenAction {
+    Continue,
+    Stop
+};
+
+using TokenCallback = std::function<TokenAction(std::string_view)>;
 
 // ============================================================================
 // Request Types

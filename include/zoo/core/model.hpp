@@ -4,7 +4,6 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include <functional>
 
 // Forward declarations for llama.cpp types
 struct llama_model;
@@ -38,7 +37,7 @@ public:
     // Generate a response to a user message (high-level: manages history)
     Expected<Response> generate(
         const std::string& user_message,
-        std::optional<std::function<void(std::string_view)>> on_token = std::nullopt
+        std::optional<TokenCallback> on_token = std::nullopt
     );
 
     // Result from generate_from_history
@@ -49,7 +48,7 @@ public:
 
     // Generate from current history state (low-level: used by Agent for tool loop)
     Expected<GenerationResult> generate_from_history(
-        std::optional<std::function<void(std::string_view)>> on_token = std::nullopt
+        std::optional<TokenCallback> on_token = std::nullopt
     );
 
     // Update internal template state after committing messages
@@ -76,7 +75,7 @@ private:
         const std::vector<int>& prompt_tokens,
         int max_tokens,
         const std::vector<std::string>& stop_sequences,
-        const std::optional<std::function<void(std::string_view)>>& on_token = std::nullopt
+        const std::optional<TokenCallback>& on_token = std::nullopt
     );
     Expected<std::string> format_prompt();
     void clear_kv_cache();
