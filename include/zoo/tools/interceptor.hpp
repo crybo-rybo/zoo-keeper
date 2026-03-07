@@ -2,7 +2,7 @@
 
 #include "types.hpp"
 #include "parser.hpp"
-#include "../core/types.hpp"
+#include <zoo/core/types.hpp>
 #include <string>
 #include <string_view>
 #include <optional>
