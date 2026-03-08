@@ -1,3 +1,8 @@
+/**
+ * @file interceptor.hpp
+ * @brief Streaming interceptor that hides tool-call JSON from end users.
+ */
+
 #pragma once
 
 #include "types.hpp"
@@ -10,26 +15,49 @@
 
 namespace zoo::tools {
 
+/**
+ * @brief Intercepts streamed tokens and extracts brace-delimited tool calls.
+ *
+ * In heuristic mode the interceptor forwards visible text to the user callback,
+ * buffers candidate JSON objects, and stops generation once a valid tool call
+ * has been fully observed.
+ */
 class ToolCallInterceptor {
 public:
+    /**
+     * @brief Final state produced after a streaming pass completes.
+     */
     struct Result {
-        std::optional<ToolCall> tool_call;
-        std::string visible_text;
-        std::string full_text;
+        std::optional<ToolCall> tool_call; ///< Parsed tool call when one was detected.
+        std::string visible_text; ///< User-visible text with tool-call JSON removed.
+        std::string full_text; ///< Full generated text including any buffered JSON.
     };
 
+    /**
+     * @brief Creates an interceptor for one streaming pass.
+     *
+     * @param user_callback Optional callback that receives only visible text.
+     */
     explicit ToolCallInterceptor(
         std::optional<std::function<void(std::string_view)>> user_callback = std::nullopt
     )
         : user_callback_(std::move(user_callback))
     {}
 
-    // make_callback() captures 'this', so moves would dangle the callback
+    /// Moving is disabled because callbacks returned by `make_callback()` capture `this`.
     ToolCallInterceptor(ToolCallInterceptor&&) = delete;
+    /// Moving is disabled because callbacks returned by `make_callback()` capture `this`.
     ToolCallInterceptor& operator=(ToolCallInterceptor&&) = delete;
+    /// Copying is disabled because the interceptor owns mutable streaming state.
     ToolCallInterceptor(const ToolCallInterceptor&) = delete;
+    /// Copying is disabled because the interceptor owns mutable streaming state.
     ToolCallInterceptor& operator=(const ToolCallInterceptor&) = delete;
 
+    /**
+     * @brief Returns a token callback that feeds the interceptor state machine.
+     *
+     * @return Callback suitable for `TokenCallback`.
+     */
     TokenCallback make_callback() {
         return [this](std::string_view token) -> TokenAction {
             full_text_.append(token.data(), token.size());
@@ -37,6 +65,11 @@ public:
         };
     }
 
+    /**
+     * @brief Finalizes interception after generation stops.
+     *
+     * @return Parsed tool call, user-visible text, and full generated text for the pass.
+     */
     Result finalize() {
         Result result;
         result.full_text = std::move(full_text_);
@@ -68,6 +101,7 @@ public:
 private:
     enum class State { Normal, Buffering };
 
+    /// Dispatches token handling based on whether JSON buffering is active.
     TokenAction process_token(std::string_view token) {
         if (state_ == State::Normal) {
             return process_normal(token);
@@ -75,6 +109,7 @@ private:
         return process_buffering(token);
     }
 
+    /// Streams normal text until a potential JSON object begins.
     TokenAction process_normal(std::string_view token) {
         // Scan each character for the start of a potential JSON object
         for (size_t i = 0; i < token.size(); ++i) {
@@ -101,6 +136,7 @@ private:
         return TokenAction::Continue;
     }
 
+    /// Buffers JSON text until it either parses as a tool call or falls back to visible text.
     TokenAction process_buffering(std::string_view token) {
         for (size_t i = 0; i < token.size(); ++i) {
             char c = token[i];
@@ -160,6 +196,7 @@ private:
         return TokenAction::Continue;
     }
 
+    /// Forwards visible text to the optional user callback.
     void emit(std::string_view text) {
         if (user_callback_) {
             (*user_callback_)(text);

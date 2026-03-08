@@ -1,9 +1,15 @@
+/**
+ * @file test_error_recovery.cpp
+ * @brief Unit tests for tool argument validation and retry tracking.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/tools/validation.hpp"
 #include "fixtures/tool_definitions.hpp"
 
 using namespace zoo::testing::tools;
 
+/// Shared fixture that pre-registers common tools for validation tests.
 class ErrorRecoveryTest : public ::testing::Test {
 protected:
     zoo::tools::ToolRegistry registry;

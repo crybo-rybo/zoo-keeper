@@ -1,8 +1,9 @@
 /**
- * Zoo-Keeper Demo Chat
+ * @file demo_chat.cpp
+ * @brief Interactive CLI example for chatting with a locally hosted model.
  *
- * Interactive CLI for chatting with a locally hosted LLM.
- * Configuration is loaded from a JSON file.
+ * Configuration is loaded from JSON and optional example tools are registered
+ * to demonstrate the agent tool loop end to end.
  *
  * Usage:
  *   ./demo_chat <config.json>
@@ -59,11 +60,15 @@ static std::string get_current_time() {
 // Config loading
 // ============================================================================
 
+/**
+ * @brief Example-only configuration wrapper that extends `zoo::Config`.
+ */
 struct DemoConfig {
     zoo::Config zoo;
     bool tools_enabled = true;
 };
 
+/// Loads the demo configuration from a JSON file on disk.
 static DemoConfig load_config(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -113,10 +118,12 @@ static DemoConfig load_config(const std::string& path) {
 // Display helpers
 // ============================================================================
 
+/// Prints a consistent separator line for the demo CLI.
 static void print_separator() {
     std::cout << std::string(60, '-') << "\n";
 }
 
+/// Prints latency and token usage metrics for the last response.
 static void print_metrics(const zoo::Metrics& metrics, const zoo::TokenUsage& usage) {
     std::cout << "\n";
     print_separator();
@@ -130,6 +137,7 @@ static void print_metrics(const zoo::Metrics& metrics, const zoo::TokenUsage& us
     print_separator();
 }
 
+/// Prints the startup banner and the active runtime configuration.
 static void print_welcome(const DemoConfig& dc) {
     std::cout << "\n";
     print_separator();
@@ -146,6 +154,7 @@ static void print_welcome(const DemoConfig& dc) {
     std::cout << "\nType a message and press Enter. Commands: /quit /clear /help\n\n";
 }
 
+/// Prints command-line usage information for the example executable.
 static void print_usage(const char* prog) {
     std::cout << "Zoo-Keeper Demo Chat\n\n"
               << "Usage:\n"
@@ -171,6 +180,7 @@ static void print_usage(const char* prog) {
 // Main
 // ============================================================================
 
+/// Records Ctrl-C so the main loop can exit cleanly.
 static void signal_handler(int) {
     g_interrupted.store(true, std::memory_order_release);
 }

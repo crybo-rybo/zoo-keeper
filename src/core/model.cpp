@@ -1,3 +1,8 @@
+/**
+ * @file model.cpp
+ * @brief Implementation of the llama.cpp-backed `zoo::core::Model`.
+ */
+
 #include "zoo/core/model.hpp"
 #include "zoo/core/batch.hpp"
 #include <llama.h>

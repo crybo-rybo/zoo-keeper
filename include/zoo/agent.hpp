@@ -1,3 +1,8 @@
+/**
+ * @file agent.hpp
+ * @brief Asynchronous orchestration layer that coordinates model inference and tool execution.
+ */
+
 #pragma once
 
 #include "core/types.hpp"
@@ -20,15 +25,23 @@
 
 namespace zoo {
 
-// Internal request representation
+/**
+ * @brief Internal request envelope processed by the agent worker thread.
+ */
 struct Request {
-    Message message;
-    std::optional<std::function<void(std::string_view)>> streaming_callback;
-    std::chrono::steady_clock::time_point submitted_at;
-    std::shared_ptr<std::promise<Expected<Response>>> promise;
-    RequestId id = 0;
-    std::shared_ptr<std::atomic<bool>> cancelled;
+    Message message; ///< User message to append before processing begins.
+    std::optional<std::function<void(std::string_view)>> streaming_callback; ///< Optional per-request streaming callback.
+    std::chrono::steady_clock::time_point submitted_at; ///< Submission timestamp used for diagnostics and metrics.
+    std::shared_ptr<std::promise<Expected<Response>>> promise; ///< Promise fulfilled when processing completes.
+    RequestId id = 0; ///< Unique request identifier assigned by `Agent`.
+    std::shared_ptr<std::atomic<bool>> cancelled; ///< Shared cancellation flag observed by the worker thread.
 
+    /**
+     * @brief Creates a request envelope and initializes its cancellation token.
+     *
+     * @param msg Message to process.
+     * @param callback Optional callback that receives streamed text fragments.
+     */
     Request(Message msg,
             std::optional<std::function<void(std::string_view)>> callback = std::nullopt)
         : message(std::move(msg))
@@ -38,12 +51,26 @@ struct Request {
     {}
 };
 
-// Thread-safe request queue
+/**
+ * @brief Thread-safe queue used to hand requests to the inference thread.
+ */
 class RequestQueue {
 public:
+    /**
+     * @brief Creates a queue with an optional maximum capacity.
+     *
+     * @param max_size Maximum number of queued requests, or `0` for unbounded.
+     */
     explicit RequestQueue(size_t max_size = 0)
         : max_size_(max_size), shutdown_(false) {}
 
+    /**
+     * @brief Attempts to enqueue a request.
+     *
+     * @param request Request to enqueue.
+     * @return `true` when the request was queued, or `false` if the queue is
+     *         shutting down or already at capacity.
+     */
     bool push(Request request) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (shutdown_) return false;
@@ -53,6 +80,12 @@ public:
         return true;
     }
 
+    /**
+     * @brief Waits for and pops the next queued request.
+     *
+     * @return The next request, or `std::nullopt` once shutdown has been
+     *         signaled and the queue has been drained.
+     */
     std::optional<Request> pop() {
         std::unique_lock<std::mutex> lock(mutex_);
         cv_.wait(lock, [this] { return !queue_.empty() || shutdown_; });
@@ -62,6 +95,7 @@ public:
         return req;
     }
 
+    /// Prevents new pushes and wakes any threads blocked in `pop()`.
     void shutdown() {
         std::lock_guard<std::mutex> lock(mutex_);
         shutdown_ = true;
@@ -76,28 +110,48 @@ private:
     bool shutdown_;
 };
 
-// Handle returned from Agent::chat()
+/**
+ * @brief Handle returned by `Agent::chat()` for request tracking and result retrieval.
+ */
 struct RequestHandle {
-    RequestId id;
-    std::future<Expected<Response>> future;
+    RequestId id; ///< Request identifier accepted by the agent.
+    std::future<Expected<Response>> future; ///< Future resolved with the final response or error.
 
+    /// Creates an empty handle with an invalid request id.
     RequestHandle() : id(0) {}
+    /**
+     * @brief Creates a handle bound to a live request future.
+     *
+     * @param id Assigned request identifier.
+     * @param future Future that resolves when processing completes.
+     */
     RequestHandle(RequestId id, std::future<Expected<Response>> future)
         : id(id), future(std::move(future)) {}
+    /// Moves ownership of the result future.
     RequestHandle(RequestHandle&&) = default;
+    /// Moves ownership of the result future.
     RequestHandle& operator=(RequestHandle&&) = default;
+    /// Request handles are non-copyable because `std::future` is move-only.
     RequestHandle(const RequestHandle&) = delete;
+    /// Request handles are non-copyable because `std::future` is move-only.
     RequestHandle& operator=(const RequestHandle&) = delete;
 };
 
 /**
- * Agent is the async orchestration layer.
+ * @brief Async orchestration layer built on top of `zoo::core::Model`.
  *
- * It composes a core::Model and tools::ToolRegistry, runs an inference thread,
- * and implements the agentic tool loop (detect -> validate -> execute -> inject -> re-generate).
+ * `Agent` owns a background inference thread, a request queue, and a tool
+ * registry. It implements the tool loop of detect, validate, execute, inject,
+ * and re-generate until the assistant produces a final user-visible response.
  */
 class Agent {
 public:
+    /**
+     * @brief Creates and starts an agent from the supplied configuration.
+     *
+     * @param config Runtime configuration used to load the underlying model.
+     * @return A running agent, or an error if model creation fails.
+     */
     static Expected<std::unique_ptr<Agent>> create(const Config& config) {
         auto model_result = core::Model::load(config);
         if (!model_result) {
@@ -107,15 +161,29 @@ public:
         return std::unique_ptr<Agent>(new Agent(config, std::move(*model_result)));
     }
 
+    /// Stops the worker thread and releases owned resources.
     ~Agent() {
         stop();
     }
 
+    /// Agents own background state and cannot be copied.
     Agent(const Agent&) = delete;
+    /// Agents own background state and cannot be copied.
     Agent& operator=(const Agent&) = delete;
+    /// Agents own thread-affine state and cannot be moved.
     Agent(Agent&&) = delete;
+    /// Agents own thread-affine state and cannot be moved.
     Agent& operator=(Agent&&) = delete;
 
+    /**
+     * @brief Queues a user message for asynchronous processing.
+     *
+     * @param message User message to append to the conversation.
+     * @param callback Optional callback that receives streamed visible text.
+     * @return Handle containing the request id and result future. If the agent
+     *         is not running or the queue rejects the request, the future is
+     *         resolved immediately with an error.
+     */
     RequestHandle chat(
         Message message,
         std::optional<std::function<void(std::string_view)>> callback = std::nullopt
@@ -154,6 +222,14 @@ public:
         return RequestHandle{request_id, std::move(future)};
     }
 
+    /**
+     * @brief Requests cancellation of a queued or running request.
+     *
+     * Cancellation is cooperative. Requests that have already completed or have
+     * been cleaned up are unaffected.
+     *
+     * @param id Request identifier returned by `chat()`.
+     */
     void cancel(RequestId id) {
         std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
         auto it = cancel_tokens_.find(id);
@@ -162,11 +238,17 @@ public:
         }
     }
 
+    /**
+     * @brief Replaces the current system prompt on the underlying model.
+     *
+     * @param prompt New system prompt content.
+     */
     void set_system_prompt(const std::string& prompt) {
         std::lock_guard<std::mutex> lock(model_mutex_);
         model_->set_system_prompt(prompt);
     }
 
+    /// Stops the worker thread and prevents additional requests from being processed.
     void stop() {
         if (!running_.load(std::memory_order_acquire)) return;
         running_.store(false, std::memory_order_release);
@@ -176,22 +258,36 @@ public:
         }
     }
 
+    /// Returns whether the background inference thread is still accepting work.
     bool is_running() const {
         return running_.load(std::memory_order_acquire);
     }
 
+    /// Returns the immutable configuration used to create the agent.
     const Config& get_config() const { return config_; }
 
+    /// Returns a snapshot of the underlying model conversation history.
     std::vector<Message> get_history() const {
         std::lock_guard<std::mutex> lock(model_mutex_);
         return model_->get_history();
     }
 
+    /// Clears the underlying model conversation history.
     void clear_history() {
         std::lock_guard<std::mutex> lock(model_mutex_);
         model_->clear_history();
     }
 
+    /**
+     * @brief Registers a strongly typed tool and refreshes grammar constraints.
+     *
+     * @tparam Func Callable type to register.
+     * @param name Public tool name.
+     * @param description Human-readable description for prompts and schemas.
+     * @param param_names Parameter names in callable argument order.
+     * @param func Callable implementation.
+     * @return Empty success when registered, or the underlying registry error.
+     */
     template<typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                        const std::vector<std::string>& param_names, Func func) {
@@ -202,10 +298,20 @@ public:
         return result;
     }
 
+    /// Returns the number of tools currently registered with the agent.
     size_t tool_count() const {
         return tool_registry_.size();
     }
 
+    /**
+     * @brief Builds a system prompt that advertises the currently registered tools.
+     *
+     * When grammar-based tool calling is active the prompt describes the
+     * sentinel-tagged format; otherwise it falls back to plain JSON instructions.
+     *
+     * @param base_prompt Base system prompt to extend.
+     * @return Prompt text augmented with tool usage instructions and schemas.
+     */
     std::string build_tool_system_prompt(const std::string& base_prompt) const {
         auto schemas = tool_registry_.get_all_schemas();
         if (schemas.empty()) return base_prompt;
@@ -237,6 +343,12 @@ public:
     }
 
 private:
+    /**
+     * @brief Constructs a running agent around an initialized model.
+     *
+     * @param config Immutable runtime configuration.
+     * @param model Initialized model instance owned by the agent.
+     */
     Agent(const Config& config, std::unique_ptr<core::Model> model)
         : config_(config)
         , model_(std::move(model))
@@ -246,6 +358,7 @@ private:
         inference_thread_ = std::thread([this]() { inference_loop(); });
     }
 
+    /// Main worker loop that drains queued requests until the agent stops.
     void inference_loop() {
         while (running_.load(std::memory_order_acquire)) {
             auto request_opt = request_queue_.pop();
@@ -302,6 +415,12 @@ private:
         }
     }
 
+    /**
+     * @brief Processes one request, including any tool-call iterations.
+     *
+     * @param request Request envelope to process.
+     * @return Final assistant response or an error encountered during processing.
+     */
     Expected<Response> process_request(const Request& request) {
         std::lock_guard<std::mutex> lock(model_mutex_);
 
@@ -523,11 +642,17 @@ private:
         });
     }
 
+    /**
+     * @brief Removes a request's cancellation token after processing completes.
+     *
+     * @param id Request identifier to clean up.
+     */
     void cleanup_cancel_token(RequestId id) {
         std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
         cancel_tokens_.erase(id);
     }
 
+    /// Rebuilds the model's tool grammar from the currently registered tool schemas.
     void update_tool_grammar() {
         std::lock_guard<std::mutex> lock(model_mutex_);
         auto schemas = tool_registry_.get_all_schemas();

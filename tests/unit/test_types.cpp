@@ -1,3 +1,8 @@
+/**
+ * @file test_types.cpp
+ * @brief Unit tests for shared core value types and validation helpers.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/core/types.hpp"
 
@@ -242,10 +247,6 @@ TEST(ConfigTest, EqualityToolLimits) {
     c2.max_tool_iterations = 10;
     EXPECT_NE(c1, c2);
 }
-
-// ============================================================================
-// Role Sequence Validation
-// ============================================================================
 
 TEST(RoleValidationTest, EmptyHistoryAcceptsUser) {
     std::vector<zoo::Message> history;

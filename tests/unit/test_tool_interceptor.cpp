@@ -1,3 +1,8 @@
+/**
+ * @file test_tool_interceptor.cpp
+ * @brief Unit tests for streamed tool-call interception behavior.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/tools/interceptor.hpp"
 #include <string>
@@ -6,7 +11,7 @@
 using zoo::TokenAction;
 using zoo::tools::ToolCallInterceptor;
 
-// Helper: simulate token-by-token generation through the interceptor
+/// Simulates token streaming through a `ToolCallInterceptor`.
 static ToolCallInterceptor::Result simulate_tokens(
     const std::vector<std::string>& tokens,
     std::string* streamed_output = nullptr
@@ -28,10 +33,6 @@ static ToolCallInterceptor::Result simulate_tokens(
 
     return interceptor.finalize();
 }
-
-// ============================================================================
-// Basic detection
-// ============================================================================
 
 TEST(ToolCallInterceptorTest, DetectsToolCallAndStopsGeneration) {
     std::vector<std::string> tokens = {

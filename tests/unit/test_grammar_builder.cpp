@@ -1,3 +1,8 @@
+/**
+ * @file test_grammar_builder.cpp
+ * @brief Unit tests for grammar generation from registered tool schemas.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/tools/grammar.hpp"
 #include "zoo/tools/registry.hpp"
@@ -8,6 +13,7 @@ static double scale(double x, double factor) { return x * factor; }
 static bool negate(bool val) { return !val; }
 static std::string get_time() { return "now"; }
 
+/// Shared fixture that exposes a registry for grammar construction tests.
 class GrammarBuilderTest : public ::testing::Test {
 protected:
     zoo::tools::ToolRegistry registry;

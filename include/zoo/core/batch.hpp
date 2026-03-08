@@ -1,3 +1,8 @@
+/**
+ * @file batch.hpp
+ * @brief Helpers for chunking prompt prefill work into llama.cpp decode batches.
+ */
+
 #pragma once
 
 #include <vector>
@@ -5,21 +10,29 @@
 
 namespace zoo::core {
 
-/// Describes one chunk of tokens to be decoded as a batch.
+/**
+ * @brief Describes one contiguous token range to decode as a batch.
+ */
 struct BatchChunk {
-    int offset;      // Start index into the token array
-    int count;       // Number of tokens in this chunk
-    bool emit_logits; // Whether the last token should emit logits
+    int offset; ///< Zero-based start index into the prompt token array.
+    int count; ///< Number of tokens included in the chunk.
+    bool emit_logits; ///< Whether the final token in the chunk should request logits.
 
+    /// Compares two chunk plans for equality.
     bool operator==(const BatchChunk& other) const = default;
 };
 
-/// Compute a chunked prefill plan for a prompt of `total_tokens` tokens,
-/// given a maximum batch size of `n_batch`. Only the final token of the
-/// final chunk has emit_logits=true; all others are false.
-///
-/// Preconditions: total_tokens > 0, n_batch > 0
-/// Returns empty vector if preconditions are violated.
+/**
+ * @brief Splits a prompt into decode batches that fit within `n_batch`.
+ *
+ * Only the last token of the final chunk emits logits; earlier chunks are used
+ * purely for KV-cache prefill.
+ *
+ * @param total_tokens Total number of prompt tokens to prefill.
+ * @param n_batch Maximum number of tokens the backend may decode per batch.
+ * @return A sequence of chunk descriptors, or an empty vector when either input
+ *         is non-positive.
+ */
 [[nodiscard]] inline std::vector<BatchChunk> compute_prefill_chunks(
     int total_tokens, int n_batch
 ) {
