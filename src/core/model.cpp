@@ -404,6 +404,13 @@ Expected<Response> Model::generate(
 Expected<Model::GenerationResult> Model::generate_from_history(
     std::optional<TokenCallback> on_token
 ) {
+    // Reset lazy grammar sampler so the trigger state is fresh for each
+    // generation pass. Without this, the grammar stays "triggered" after
+    // a tool call and constrains the follow-up natural language response.
+    if (grammar_active_) {
+        rebuild_sampler_with_grammar();
+    }
+
     auto prompt_result = format_prompt();
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
