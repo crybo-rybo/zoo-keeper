@@ -22,7 +22,7 @@ Configured via `config.sampling`:
 |-------|------|---------|-------------|
 | `temperature` | `float` | `0.7` | Sampling temperature. 0.0 = deterministic, higher = more random |
 | `top_p` | `float` | `0.9` | Nucleus sampling threshold (0.0-1.0) |
-| `top_k` | `int` | `40` | Top-K sampling limit. 0 = disabled |
+| `top_k` | `int` | `40` | Top-K sampling limit. Must be >= 1 |
 | `repeat_penalty` | `float` | `1.1` | Penalty for repeating tokens. 1.0 = no penalty |
 | `repeat_last_n` | `int` | `64` | Number of tokens to consider for repeat penalty |
 | `seed` | `int` | `-1` | Random seed. -1 = random seed per request |
@@ -31,7 +31,7 @@ Configured via `config.sampling`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_tokens` | `int` | `-1` | Maximum tokens to generate per response. -1 = unlimited, must be positive or -1 |
+| `max_tokens` | `int` | `-1` | Maximum tokens to generate per response. -1 uses a safety cap of `context_size` |
 | `stop_sequences` | `vector<string>` | empty | Additional stop strings to halt generation |
 
 ### System Prompt
@@ -46,7 +46,14 @@ The system prompt can also be set/updated after creation via `agent->set_system_
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `request_queue_capacity` | `size_t` | `0` | Maximum queued requests. 0 = unlimited |
+| `request_queue_capacity` | `size_t` | `64` | Maximum queued requests. Set to `0` to allow an unbounded queue |
+
+### Tool Loop Controls
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_tool_iterations` | `int` | `5` | Maximum detect/execute/respond iterations for a single request |
+| `max_tool_retries` | `int` | `2` | Maximum validation retries for malformed tool calls |
 
 ### Callbacks
 
@@ -89,7 +96,16 @@ auto agent = std::move(*zoo::Agent::create(config));
 
 - `model_path` is not empty
 - `context_size` > 0
-- `max_tokens` is positive or -1 (unlimited)
+- `max_tokens` is positive or -1
+- `sampling.temperature` >= 0.0
+- `sampling.top_p` is in `[0.0, 1.0]`
+- `sampling.top_k` >= 1
+- `sampling.repeat_penalty` >= 0.0
+- `sampling.repeat_last_n` >= 0
+- `max_tool_iterations` >= 1
+- `max_tool_retries` >= 0
+
+When `max_tokens = -1`, generation is still bounded by `context_size` as a production safety limit.
 
 Invalid configs produce an `Error` with the appropriate `ErrorCode` (100-series).
 

@@ -4,6 +4,17 @@
 **Version:** 0.2.0
 **Auditor:** Claude (Opus 4.6)
 
+## Re-evaluation (2026-03-08)
+
+The P1 section of this audit is now stale relative to the current tree on `main`.
+
+- P1-5 is already implemented in [include/zoo/core/types.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/core/types.hpp).
+- P1-6 is already implemented in [src/core/model.cpp](/Users/conorrybacki/Programs/zoo-keeper/src/core/model.cpp).
+- P1-7 is already implemented in [include/zoo/core/types.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/core/types.hpp), but [docs/configuration.md](/Users/conorrybacki/Programs/zoo-keeper/docs/configuration.md) had not been updated.
+- P1-8 is already implemented as optional stderr logging in [include/zoo/internal/log.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/internal/log.hpp) and wired from [CMakeLists.txt](/Users/conorrybacki/Programs/zoo-keeper/CMakeLists.txt).
+- P1-9 is already implemented in [include/zoo/core/types.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/core/types.hpp) and [include/zoo/agent.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/agent.hpp).
+- P1-10 is already partially implemented via [CHANGELOG.md](/Users/conorrybacki/Programs/zoo-keeper/CHANGELOG.md) and generated version constants in [include/zoo/version.hpp.in](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/version.hpp.in). Release tagging remains process work outside this repository change.
+
 ---
 
 ## P0 — Critical (Must fix before any production use)

@@ -83,7 +83,7 @@ The generated site is written to `build/docs/doxygen/html/index.html`. GitHub Ac
 
 ## Testing
 
-54 unit tests (pure logic) using GoogleTest:
+131 unit tests using GoogleTest:
 
 ```bash
 ctest --test-dir build --output-on-failure
