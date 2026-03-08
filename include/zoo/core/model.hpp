@@ -62,7 +62,7 @@ public:
     void clear_history();
 
     // Grammar-constrained tool calling
-    void set_tool_grammar(const std::string& grammar_str);
+    bool set_tool_grammar(const std::string& grammar_str);
     void clear_tool_grammar();
     bool has_tool_grammar() const { return grammar_active_; }
 
@@ -88,7 +88,7 @@ private:
 
     static void initialize_global();
     llama_sampler* create_sampler_chain();
-    void rebuild_sampler_with_grammar();
+    bool rebuild_sampler_with_grammar();
     size_t find_stop_sequence(const std::string& text,
                               const std::vector<std::string>& stop_sequences) const;
     std::vector<llama_chat_message> build_llama_messages() const;

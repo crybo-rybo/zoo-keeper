@@ -501,9 +501,9 @@ int Model::estimate_tokens(const std::string& text) const {
 // Tool Grammar
 // ============================================================================
 
-void Model::set_tool_grammar(const std::string& grammar_str) {
+bool Model::set_tool_grammar(const std::string& grammar_str) {
     tool_grammar_str_ = grammar_str;
-    rebuild_sampler_with_grammar();
+    return rebuild_sampler_with_grammar();
 }
 
 void Model::clear_tool_grammar() {
@@ -515,13 +515,11 @@ void Model::clear_tool_grammar() {
     sampler_ = create_sampler_chain();
 }
 
-void Model::rebuild_sampler_with_grammar() {
-    if (sampler_) { llama_sampler_free(sampler_); }
-
+bool Model::rebuild_sampler_with_grammar() {
     auto chain_params = llama_sampler_chain_default_params();
     chain_params.no_perf = false;
     llama_sampler* chain = llama_sampler_chain_init(chain_params);
-    if (!chain) return;
+    if (!chain) return false;
 
     const auto& sp = config_.sampling;
     if (sp.repeat_penalty != 1.0f) {
@@ -548,9 +546,11 @@ void Model::rebuild_sampler_with_grammar() {
         trigger_patterns, 1,
         nullptr, 0
     );
-    if (grammar_sampler) {
-        llama_sampler_chain_add(chain, grammar_sampler);
+    if (!grammar_sampler) {
+        llama_sampler_free(chain);
+        return false;
     }
+    llama_sampler_chain_add(chain, grammar_sampler);
 
     uint32_t seed = (sp.seed < 0) ? static_cast<uint32_t>(time(nullptr)) : static_cast<uint32_t>(sp.seed);
     if (auto* d = llama_sampler_init_dist(seed)) {
@@ -559,8 +559,11 @@ void Model::rebuild_sampler_with_grammar() {
         llama_sampler_chain_add(chain, g);
     }
 
+    // Only replace the old sampler after the new one is fully built
+    if (sampler_) { llama_sampler_free(sampler_); }
     sampler_ = chain;
     grammar_active_ = true;
+    return true;
 }
 
 // ============================================================================

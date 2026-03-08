@@ -534,9 +534,10 @@ private:
         auto grammar = tools::GrammarBuilder::build(schemas);
         if (grammar.empty()) {
             model_->clear_tool_grammar();
-        } else {
-            model_->set_tool_grammar(grammar);
+        } else if (model_->set_tool_grammar(grammar)) {
             ZOO_LOG("info", "tool grammar updated (%zu tools)", tool_registry_.size());
+        } else {
+            ZOO_LOG("warn", "grammar sampler init failed, falling back to unconstrained generation");
         }
     }
 
