@@ -4,17 +4,6 @@
 **Version:** 0.2.0
 **Auditor:** Claude (Opus 4.6)
 
-## Re-evaluation (2026-03-08)
-
-The P1 section of this audit is now stale relative to the current tree on `main`.
-
-- P1-5 is already implemented in [include/zoo/core/types.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/core/types.hpp).
-- P1-6 is already implemented in [src/core/model.cpp](/Users/conorrybacki/Programs/zoo-keeper/src/core/model.cpp).
-- P1-7 is already implemented in [include/zoo/core/types.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/core/types.hpp), but [docs/configuration.md](/Users/conorrybacki/Programs/zoo-keeper/docs/configuration.md) had not been updated.
-- P1-8 is already implemented as optional stderr logging in [include/zoo/internal/log.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/internal/log.hpp) and wired from [CMakeLists.txt](/Users/conorrybacki/Programs/zoo-keeper/CMakeLists.txt).
-- P1-9 is already implemented in [include/zoo/core/types.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/core/types.hpp) and [include/zoo/agent.hpp](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/agent.hpp).
-- P1-10 is already partially implemented via [CHANGELOG.md](/Users/conorrybacki/Programs/zoo-keeper/CHANGELOG.md) and generated version constants in [include/zoo/version.hpp.in](/Users/conorrybacki/Programs/zoo-keeper/include/zoo/version.hpp.in). Release tagging remains process work outside this repository change.
-
 ---
 
 ## P0 — Critical (Must fix before any production use)
@@ -58,63 +47,6 @@ Per CLAUDE.md: "Model/Agent are tested via integration tests." However, zero int
 **Impact:** Regressions in inference, history management, KV cache, threading, cancellation, and the tool loop will go undetected.
 
 **Fix:** Add integration test suite (can gate behind `ZOO_BUILD_INTEGRATION_TESTS` and a model fixture).
-
----
-
-## P1 — High (Should fix before production release)
-
-### 5. No sampling parameter validation
-
-`include/zoo/core/types.hpp:163-174` — `Config::validate()` checks `model_path`, `context_size`, and `max_tokens` only. `SamplingParams` is not validated at all. Invalid values silently produce broken behavior:
-
-| Parameter | Risk |
-|-----------|------|
-| `temperature < 0` | Undefined sampler behavior |
-| `top_p < 0` or `top_p > 1` | Probability math fails |
-| `top_k = 0` | Empty candidate set, crash or hang |
-| `repeat_penalty < 0` | Nonsensical penalties |
-
-**Fix:** Add validation in `Config::validate()` for all sampling parameters.
-
-### 6. Inference loop has no timeout or maximum token safeguard
-
-`src/core/model.cpp:195` — The autoregressive `while (true)` loop only breaks on EOG token, stop sequence, user callback stop, max_tokens, or context exhaustion. With `max_tokens = -1` (the default), a model that never emits EOG will generate until context fills — potentially millions of tokens with large contexts.
-
-**Impact:** Runaway generation consumes unbounded CPU time with no cancellation path from the Model layer.
-
-**Fix:** Add an absolute `max_generation_tokens` safety limit (e.g., `context_size`) even when `max_tokens = -1`.
-
-### 7. Unbounded request queue by default
-
-`include/zoo/core/types.hpp:159` — `request_queue_capacity = 0` means unbounded. Under load, memory grows without limit.
-
-**Impact:** OOM under sustained high request rates.
-
-**Fix:** Default to a reasonable bound (e.g., 64 or 128) and document the `0 = unlimited` behavior.
-
-### 8. No logging or observability
-
-The entire library produces zero diagnostic output. There is no optional logging, no metrics export, and no way to observe internal state (KV cache utilization, queue depth, tool retry counts, inference timing) without instrumenting user code.
-
-**Impact:** Production debugging is extremely difficult. Users have no visibility into why requests are slow, failing, or producing unexpected output.
-
-**Fix:** Add optional structured logging (e.g., callback-based or spdlog). At minimum, log errors and tool loop iterations.
-
-### 9. `max_tool_iterations` is hardcoded
-
-`include/zoo/agent.hpp:288` — `constexpr int max_tool_iterations = 5`. This is not configurable via `Config`. Similarly, `ErrorRecovery` max retries is hardcoded to 2 (`tools/validation.hpp`).
-
-**Impact:** Users cannot tune the agentic loop to their use case. Some tasks legitimately need more iterations; some safety-critical contexts need fewer.
-
-**Fix:** Add `max_tool_iterations` and `max_tool_retries` to `Config`.
-
-### 10. No CHANGELOG or release process
-
-Version is 0.2.0 with no CHANGELOG, no git tags, no GitHub releases, and no version constants exposed in C++ headers. Breaking changes (KV cache default, batch API refactor, interceptor addition) are undocumented for downstream consumers.
-
-**Impact:** Consumers have no way to know what changed between versions or whether an upgrade is safe.
-
-**Fix:** Create `CHANGELOG.md`, tag releases, and generate a `version.hpp` at configure time.
 
 ---
 
@@ -211,10 +143,6 @@ Only CMake `find_package` integration (and that's broken, see P0-1). No `.pc` fi
 
 `README.md` credits llama.cpp and nlohmann/json but not GoogleTest. No `LICENSES/` directory with third-party license copies.
 
-### 26. README claims "54 passing tests" — actual count is 92
-
-README is stale. Test count has grown but documentation was not updated.
-
 ---
 
 ## Summary
@@ -222,19 +150,14 @@ README is stale. Test count has grown but documentation was not updated.
 | Priority | Count | Description |
 |----------|-------|-------------|
 | **P0 — Critical** | 4 | Broken install, crash bugs, zero integration tests |
-| **P1 — High** | 6 | Missing validation, no safeguards, no observability |
 | **P2 — Medium** | 8 | Defaults, tooling, CI gaps |
-| **P3 — Low** | 8 | Documentation, polish, attribution |
-| **Total** | **26** | |
+| **P3 — Low** | 7 | Documentation, polish, attribution |
+| **Total** | **19** | |
 
 ### Recommended fix order
 
 1. P0-1: Fix CMake export targets (blocks all downstream users)
 2. P0-2: Add exception safety to inference thread (crash bug)
 3. P0-3: Guard against null chat template (crash bug)
-4. P1-5: Validate sampling parameters (silent corruption)
-5. P0-4: Add integration tests (confidence gate)
-6. P1-6: Add inference timeout safeguard
-7. P1-7: Bound the request queue
-8. P1-8: Add basic logging
-9. Everything else in priority order
+4. P0-4: Add integration tests (confidence gate)
+5. Everything else in priority order
