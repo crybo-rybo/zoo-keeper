@@ -6,6 +6,7 @@
 #include "tools/parser.hpp"
 #include "tools/validation.hpp"
 #include "tools/interceptor.hpp"
+#include "internal/log.hpp"
 #include <thread>
 #include <future>
 #include <memory>
@@ -234,6 +235,7 @@ private:
             // Check per-request cancellation
             if (request_opt->cancelled &&
                 request_opt->cancelled->load(std::memory_order_acquire)) {
+                ZOO_LOG("info", "request %lu cancelled before processing", (unsigned long)request_opt->id);
                 if (promise) {
                     promise->set_value(std::unexpected(Error{
                         ErrorCode::RequestCancelled, "Request cancelled"
@@ -243,8 +245,22 @@ private:
                 continue;
             }
 
-            // Process request (all model access under lock)
-            Expected<Response> result = process_request(*request_opt);
+            Expected<Response> result;
+            try {
+                result = process_request(*request_opt);
+            } catch (const std::exception& e) {
+                ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
+                result = std::unexpected(Error{
+                    ErrorCode::InferenceFailed,
+                    std::string("Unhandled exception: ") + e.what()
+                });
+            } catch (...) {
+                ZOO_LOG("error", "unknown exception in inference thread");
+                result = std::unexpected(Error{
+                    ErrorCode::InferenceFailed,
+                    "Unknown exception in inference thread"
+                });
+            }
 
             cleanup_cancel_token(request_opt->id);
 
@@ -283,10 +299,12 @@ private:
         int total_prompt_tokens = 0;
         std::vector<Message> tool_call_history;
 
-        tools::ErrorRecovery error_recovery;
+        tools::ErrorRecovery error_recovery(config_.max_tool_retries);
         int iteration = 0;
-        constexpr int max_tool_iterations = 5;
+        const int max_tool_iterations = config_.max_tool_iterations;
         const bool has_tools = tool_registry_.size() > 0;
+
+        ZOO_LOG("debug", "processing request %lu (tools=%d)", (unsigned long)request.id, has_tools);
 
         while (iteration < max_tool_iterations) {
             ++iteration;
@@ -366,12 +384,16 @@ private:
                 auto validation_error = error_recovery.validate_args(tc, tool_registry_);
                 if (!validation_error.empty()) {
                     if (!error_recovery.can_retry(tc.name)) {
+                        ZOO_LOG("error", "tool retries exhausted for '%s': %s", tc.name.c_str(), validation_error.c_str());
                         return std::unexpected(Error{
                             ErrorCode::ToolRetriesExhausted,
                             "Tool retries exhausted for '" + tc.name + "': " + validation_error
                         });
                     }
                     error_recovery.record_retry(tc.name);
+                    ZOO_LOG("warn", "tool '%s' validation failed (retry %d/%d): %s",
+                        tc.name.c_str(), error_recovery.get_retry_count(tc.name),
+                        config_.max_tool_retries, validation_error.c_str());
 
                     std::string error_content = "Error: " + validation_error;
                     model_->add_message(Message::tool(
@@ -382,6 +404,7 @@ private:
                 }
 
                 // Execute tool
+                ZOO_LOG("info", "invoking tool '%s' (iteration %d)", tc.name.c_str(), iteration);
                 auto invoke_result = tool_registry_.invoke(tc.name, tc.arguments);
                 std::string tool_result_str;
                 if (invoke_result) {
@@ -438,6 +461,7 @@ private:
             return response;
         }
 
+        ZOO_LOG("error", "tool loop iteration limit reached (%d)", max_tool_iterations);
         return std::unexpected(Error{
             ErrorCode::ToolLoopLimitReached,
             "Tool loop iteration limit reached (" +

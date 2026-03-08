@@ -46,6 +46,7 @@ cmake -B build -DZOO_ENABLE_COVERAGE=ON && cmake --build build && ctest --test-d
 | `ZOO_BUILD_EXAMPLES` | Build examples | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
+| `ZOO_ENABLE_LOGGING` | Debug logging to stderr | OFF |
 
 ## Architecture — Three Clean Layers
 

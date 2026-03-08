@@ -63,6 +63,7 @@ enum class ErrorCode {
     InvalidConfig = 100,
     InvalidModelPath = 101,
     InvalidContextSize = 102,
+    InvalidSamplingParams = 103,
 
     // Backend errors (200-299)
     BackendInitFailed = 200,
@@ -124,6 +125,30 @@ struct SamplingParams {
     int repeat_last_n = 64;
     int seed = -1;
 
+    Expected<void> validate() const {
+        if (temperature < 0.0f) {
+            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
+                "temperature must be >= 0.0 (got " + std::to_string(temperature) + ")"});
+        }
+        if (top_p < 0.0f || top_p > 1.0f) {
+            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
+                "top_p must be in [0.0, 1.0] (got " + std::to_string(top_p) + ")"});
+        }
+        if (top_k < 1) {
+            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
+                "top_k must be >= 1 (got " + std::to_string(top_k) + ")"});
+        }
+        if (repeat_penalty < 0.0f) {
+            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
+                "repeat_penalty must be >= 0.0 (got " + std::to_string(repeat_penalty) + ")"});
+        }
+        if (repeat_last_n < 0) {
+            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
+                "repeat_last_n must be >= 0 (got " + std::to_string(repeat_last_n) + ")"});
+        }
+        return {};
+    }
+
     bool operator==(const SamplingParams& other) const = default;
 };
 
@@ -156,7 +181,10 @@ struct Config {
 
     std::optional<std::string> system_prompt;
 
-    size_t request_queue_capacity = 0;
+    size_t request_queue_capacity = 64;
+
+    int max_tool_iterations = 5;
+    int max_tool_retries = 2;
 
     std::optional<TokenCallback> on_token;
 
@@ -169,6 +197,17 @@ struct Config {
         }
         if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
             return std::unexpected(Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
+        }
+        if (auto result = sampling.validate(); !result) {
+            return result;
+        }
+        if (max_tool_iterations < 1) {
+            return std::unexpected(Error{ErrorCode::InvalidConfig,
+                "max_tool_iterations must be >= 1 (got " + std::to_string(max_tool_iterations) + ")"});
+        }
+        if (max_tool_retries < 0) {
+            return std::unexpected(Error{ErrorCode::InvalidConfig,
+                "max_tool_retries must be >= 0 (got " + std::to_string(max_tool_retries) + ")"});
         }
         return {};
     }
@@ -183,7 +222,9 @@ struct Config {
                max_tokens == other.max_tokens &&
                stop_sequences == other.stop_sequences &&
                system_prompt == other.system_prompt &&
-               request_queue_capacity == other.request_queue_capacity;
+               request_queue_capacity == other.request_queue_capacity &&
+               max_tool_iterations == other.max_tool_iterations &&
+               max_tool_retries == other.max_tool_retries;
     }
 };
 

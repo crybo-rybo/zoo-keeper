@@ -86,6 +86,15 @@ static DemoConfig load_config(const std::string& path) {
     if (j.contains("tools")) {
         dc.tools_enabled = j["tools"].get<bool>();
     }
+    if (j.contains("max_tool_iterations")) {
+        dc.zoo.max_tool_iterations = j["max_tool_iterations"].get<int>();
+    }
+    if (j.contains("max_tool_retries")) {
+        dc.zoo.max_tool_retries = j["max_tool_retries"].get<int>();
+    }
+    if (j.contains("request_queue_capacity")) {
+        dc.zoo.request_queue_capacity = j["request_queue_capacity"].get<size_t>();
+    }
 
     if (j.contains("sampling")) {
         auto& s = j["sampling"];

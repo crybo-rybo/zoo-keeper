@@ -154,7 +154,8 @@ Expected<std::string> Model::run_inference(
     const std::optional<TokenCallback>& on_token
 ) {
     std::string generated_text;
-    generated_text.reserve(max_tokens > 0 ? static_cast<size_t>(max_tokens) * 8 : 4096);
+    const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
+    generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_));
@@ -218,7 +219,7 @@ Expected<std::string> Model::run_inference(
             if (action == TokenAction::Stop) break;
         }
 
-        if (max_tokens > 0 && token_count >= max_tokens) break;
+        if (token_count >= effective_max) break;
 
         if (current_pos >= context_size_) break;
 
