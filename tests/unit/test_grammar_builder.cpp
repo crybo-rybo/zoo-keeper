@@ -80,9 +80,9 @@ TEST_F(GrammarBuilderTest, ZeroArityToolHasNoArgsRule) {
     registry.register_tool("get_time", "Get time", {}, get_time);
     auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
 
-    EXPECT_NE(grammar.find("tool-get_time ::="), std::string::npos);
-    // Should NOT have a get_time-args rule
-    EXPECT_EQ(grammar.find("get_time-args ::="), std::string::npos);
+    EXPECT_NE(grammar.find("tool-get-time ::="), std::string::npos);
+    // Should NOT have a get-time-args rule
+    EXPECT_EQ(grammar.find("get-time-args ::="), std::string::npos);
 }
 
 TEST_F(GrammarBuilderTest, ContainsPrimitiveRules) {

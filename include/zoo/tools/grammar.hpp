@@ -34,10 +34,10 @@ public:
                 "\",\" ws \"\\\"arguments\\\"\" ws \":\" ws \"{\" ws ";
 
             if (params.contains("required") && !params["required"].empty()) {
-                grammar += safe + "-args";
+                grammar += safe + "-args ws ";
             }
 
-            grammar += " ws \"}\" ws \"}\"\n";
+            grammar += "\"}\" ws \"}\"\n";
 
             // Args rule
             if (params.contains("required") && !params["required"].empty()) {
@@ -63,7 +63,7 @@ private:
     static std::string sanitize(const std::string& name) {
         std::string result;
         for (char c : name) {
-            result += (c == '_' || std::isalnum(static_cast<unsigned char>(c))) ? c : '-';
+            result += std::isalnum(static_cast<unsigned char>(c)) ? c : '-';
         }
         return result;
     }
