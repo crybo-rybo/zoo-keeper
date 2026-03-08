@@ -21,6 +21,7 @@ ctest --test-dir build
 | `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
+| `ZOO_ENABLE_LOGGING` | Emit runtime diagnostic logs to stderr | OFF |
 
 ## Platform-Specific Setup
 
