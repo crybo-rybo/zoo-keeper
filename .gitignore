@@ -3,4 +3,3 @@
 .claude/**
 build/**
 tests/cmake_test_discovery_*
-include/zoo/version.hpp

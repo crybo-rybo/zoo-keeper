@@ -27,11 +27,10 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Coverage.cmake)
 
-# Generate version header. Placed alongside source headers so relative
-# includes from zoo.hpp ("version.hpp") resolve correctly.
+# Generate version header into the build tree.
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/zoo/version.hpp.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/zoo/version.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp
     @ONLY
 )
 
@@ -39,6 +38,7 @@ configure_file(
 add_library(zoo INTERFACE)
 target_include_directories(zoo INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(zoo INTERFACE cxx_std_23)
@@ -84,7 +84,7 @@ install(TARGETS zoo_core
 install(DIRECTORY include/ DESTINATION include
     PATTERN "*.in" EXCLUDE
 )
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/zoo/version.hpp
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp
     DESTINATION include/zoo
 )
 
