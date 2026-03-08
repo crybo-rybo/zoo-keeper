@@ -85,6 +85,9 @@ Expected<void> Model::initialize() {
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    // Use 8-bit KV cache to reduce memory footprint vs the upstream F16 default.
+    ctx_params.type_k = GGML_TYPE_Q8_0;
+    ctx_params.type_v = GGML_TYPE_Q8_0;
 
     ctx_ = llama_init_from_model(llama_model_, ctx_params);
     if (!ctx_) {
