@@ -8,6 +8,9 @@
     "system_prompt": "You are a helpful assistant with access to tools.",
     "stop_sequences": [],
     "tools": true,
+    "max_tool_iterations": 5,
+    "max_tool_retries": 2,
+    "request_queue_capacity": 64,
     "sampling": {
         "temperature": 0.7,
         "top_p": 0.9,

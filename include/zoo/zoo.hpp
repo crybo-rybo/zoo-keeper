@@ -1,5 +1,8 @@
 #pragma once
 
+// Version
+#include "version.hpp"
+
 // Core types and model
 #include "core/types.hpp"
 #include "core/model.hpp"

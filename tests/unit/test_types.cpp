@@ -81,6 +81,81 @@ TEST(SamplingParamsTest, Equality) {
     EXPECT_NE(p1, p2);
 }
 
+TEST(SamplingParamsTest, ValidateDefaults) {
+    zoo::SamplingParams params;
+    EXPECT_TRUE(params.validate().has_value());
+}
+
+TEST(SamplingParamsTest, ValidateNegativeTemperature) {
+    zoo::SamplingParams params;
+    params.temperature = -0.1f;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(SamplingParamsTest, ValidateZeroTemperature) {
+    zoo::SamplingParams params;
+    params.temperature = 0.0f;
+    EXPECT_TRUE(params.validate().has_value());
+}
+
+TEST(SamplingParamsTest, ValidateTopPBelowZero) {
+    zoo::SamplingParams params;
+    params.top_p = -0.1f;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(SamplingParamsTest, ValidateTopPAboveOne) {
+    zoo::SamplingParams params;
+    params.top_p = 1.1f;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(SamplingParamsTest, ValidateTopPBoundary) {
+    zoo::SamplingParams params;
+    params.top_p = 0.0f;
+    EXPECT_TRUE(params.validate().has_value());
+    params.top_p = 1.0f;
+    EXPECT_TRUE(params.validate().has_value());
+}
+
+TEST(SamplingParamsTest, ValidateTopKZero) {
+    zoo::SamplingParams params;
+    params.top_k = 0;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(SamplingParamsTest, ValidateTopKNegative) {
+    zoo::SamplingParams params;
+    params.top_k = -1;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(SamplingParamsTest, ValidateNegativeRepeatPenalty) {
+    zoo::SamplingParams params;
+    params.repeat_penalty = -1.0f;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(SamplingParamsTest, ValidateNegativeRepeatLastN) {
+    zoo::SamplingParams params;
+    params.repeat_last_n = -1;
+    auto result = params.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
 TEST(ConfigTest, ValidationSuccess) {
     zoo::Config config;
     config.model_path = "/path/to/model.gguf";
@@ -112,12 +187,59 @@ TEST(ConfigTest, ValidationInvalidMaxTokens) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
 }
 
+TEST(ConfigTest, ValidationRejectsBadSampling) {
+    zoo::Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.sampling.temperature = -1.0f;
+    auto result = config.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+}
+
+TEST(ConfigTest, ValidationRejectsZeroToolIterations) {
+    zoo::Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.max_tool_iterations = 0;
+    auto result = config.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(ConfigTest, ValidationRejectsNegativeToolRetries) {
+    zoo::Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.max_tool_retries = -1;
+    auto result = config.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(ConfigTest, DefaultQueueCapacity) {
+    zoo::Config config;
+    EXPECT_EQ(config.request_queue_capacity, 64u);
+}
+
+TEST(ConfigTest, DefaultToolLimits) {
+    zoo::Config config;
+    EXPECT_EQ(config.max_tool_iterations, 5);
+    EXPECT_EQ(config.max_tool_retries, 2);
+}
+
 TEST(ConfigTest, Equality) {
     zoo::Config c1, c2;
     c1.model_path = "/path/to/model.gguf";
     c2.model_path = "/path/to/model.gguf";
     EXPECT_EQ(c1, c2);
     c2.context_size = 4096;
+    EXPECT_NE(c1, c2);
+}
+
+TEST(ConfigTest, EqualityToolLimits) {
+    zoo::Config c1, c2;
+    c1.model_path = "/path/to/model.gguf";
+    c2.model_path = "/path/to/model.gguf";
+    EXPECT_EQ(c1, c2);
+    c2.max_tool_iterations = 10;
     EXPECT_NE(c1, c2);
 }
 
