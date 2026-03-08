@@ -2,8 +2,32 @@
 
 include(CMakeFindDependencyMacro)
 
-find_dependency(nlohmann_json 3.11)
+find_dependency(llama CONFIG)
 
-include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperTargets.cmake")
+set_and_check(ZooKeeper_INCLUDE_DIR "@PACKAGE_ZOOKEEPER_INCLUDE_INSTALL_DIR@")
+set_and_check(ZooKeeper_LIB_DIR "@PACKAGE_ZOOKEEPER_LIB_INSTALL_DIR@")
+
+find_library(ZooKeeper_CORE_LIBRARY zoo_core
+    REQUIRED
+    HINTS ${ZooKeeper_LIB_DIR}
+    NO_CMAKE_FIND_ROOT_PATH
+)
+
+if(NOT TARGET ZooKeeper::zoo)
+    add_library(ZooKeeper::zoo INTERFACE IMPORTED)
+    set_target_properties(ZooKeeper::zoo PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${ZooKeeper_INCLUDE_DIR}"
+        INTERFACE_COMPILE_FEATURES cxx_std_23
+    )
+endif()
+
+if(NOT TARGET ZooKeeper::zoo_core)
+    add_library(ZooKeeper::zoo_core STATIC IMPORTED)
+    set_target_properties(ZooKeeper::zoo_core PROPERTIES
+        IMPORTED_LINK_INTERFACE_LANGUAGES "CXX"
+        IMPORTED_LOCATION "${ZooKeeper_CORE_LIBRARY}"
+        INTERFACE_LINK_LIBRARIES "ZooKeeper::zoo;llama"
+    )
+endif()
 
 check_required_components(ZooKeeper)

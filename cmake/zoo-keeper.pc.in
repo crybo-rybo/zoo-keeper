@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: Zoo-Keeper
+Description: C++23 agentic wrapper around llama.cpp
+Version: @PROJECT_VERSION@
+Requires.private: llama
+Libs: -L${libdir} -lzoo_core
+Cflags: -I${includedir}
