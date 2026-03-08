@@ -17,6 +17,7 @@ else()
     option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" OFF)
 endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
+option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
 
 # Include dependencies
 include(cmake/FetchDependencies.cmake)
@@ -42,6 +43,10 @@ target_include_directories(zoo INTERFACE
 )
 target_compile_features(zoo INTERFACE cxx_std_23)
 target_link_libraries(zoo INTERFACE nlohmann_json::nlohmann_json)
+
+if(ZOO_ENABLE_LOGGING)
+    target_compile_definitions(zoo INTERFACE ZOO_LOGGING_ENABLED)
+endif()
 
 # Core library (Model + llama.cpp)
 add_library(zoo_core STATIC src/core/model.cpp)

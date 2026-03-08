@@ -11,8 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SamplingParams::validate()` — validates temperature, top_p, top_k, repeat_penalty, repeat_last_n
 - `Config::max_tool_iterations` — configurable tool loop iteration limit (default: 5)
 - `Config::max_tool_retries` — configurable per-tool retry limit (default: 2)
-- `Config::on_log` — optional `LogCallback` for structured observability
-- `LogLevel` enum (Debug, Info, Warn, Error) and `LogCallback` type
+- `ZOO_ENABLE_LOGGING` CMake option — enables `[zoo:level]` diagnostic output to stderr
 - `zoo/version.hpp` — compile-time version constants (`VERSION_MAJOR`, `VERSION_MINOR`, `VERSION_PATCH`, `VERSION_STRING`)
 - `CHANGELOG.md`
 - Inference safety cap: generation is bounded by `context_size` when `max_tokens = -1`

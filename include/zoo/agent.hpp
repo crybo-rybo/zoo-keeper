@@ -6,6 +6,7 @@
 #include "tools/parser.hpp"
 #include "tools/validation.hpp"
 #include "tools/interceptor.hpp"
+#include "internal/log.hpp"
 #include <thread>
 #include <future>
 #include <memory>
@@ -224,12 +225,6 @@ private:
         inference_thread_ = std::thread([this]() { inference_loop(); });
     }
 
-    void log(LogLevel level, std::string_view message) const {
-        if (config_.on_log) {
-            (*config_.on_log)(level, message);
-        }
-    }
-
     void inference_loop() {
         while (running_.load(std::memory_order_acquire)) {
             auto request_opt = request_queue_.pop();
@@ -240,7 +235,7 @@ private:
             // Check per-request cancellation
             if (request_opt->cancelled &&
                 request_opt->cancelled->load(std::memory_order_acquire)) {
-                log(LogLevel::Info, "Request " + std::to_string(request_opt->id) + " cancelled before processing");
+                ZOO_LOG("info", "request %lu cancelled before processing", (unsigned long)request_opt->id);
                 if (promise) {
                     promise->set_value(std::unexpected(Error{
                         ErrorCode::RequestCancelled, "Request cancelled"
@@ -254,13 +249,13 @@ private:
             try {
                 result = process_request(*request_opt);
             } catch (const std::exception& e) {
-                log(LogLevel::Error, std::string("Unhandled exception in inference: ") + e.what());
+                ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
                 result = std::unexpected(Error{
                     ErrorCode::InferenceFailed,
                     std::string("Unhandled exception: ") + e.what()
                 });
             } catch (...) {
-                log(LogLevel::Error, "Unknown exception in inference thread");
+                ZOO_LOG("error", "unknown exception in inference thread");
                 result = std::unexpected(Error{
                     ErrorCode::InferenceFailed,
                     "Unknown exception in inference thread"
@@ -309,8 +304,7 @@ private:
         const int max_tool_iterations = config_.max_tool_iterations;
         const bool has_tools = tool_registry_.size() > 0;
 
-        log(LogLevel::Debug, "Processing request " + std::to_string(request.id)
-            + " (tools=" + std::to_string(has_tools) + ")");
+        ZOO_LOG("debug", "processing request %lu (tools=%d)", (unsigned long)request.id, has_tools);
 
         while (iteration < max_tool_iterations) {
             ++iteration;
@@ -390,16 +384,16 @@ private:
                 auto validation_error = error_recovery.validate_args(tc, tool_registry_);
                 if (!validation_error.empty()) {
                     if (!error_recovery.can_retry(tc.name)) {
-                        log(LogLevel::Error, "Tool retries exhausted for '" + tc.name + "': " + validation_error);
+                        ZOO_LOG("error", "tool retries exhausted for '%s': %s", tc.name.c_str(), validation_error.c_str());
                         return std::unexpected(Error{
                             ErrorCode::ToolRetriesExhausted,
                             "Tool retries exhausted for '" + tc.name + "': " + validation_error
                         });
                     }
                     error_recovery.record_retry(tc.name);
-                    log(LogLevel::Warn, "Tool '" + tc.name + "' validation failed (retry "
-                        + std::to_string(error_recovery.get_retry_count(tc.name))
-                        + "/" + std::to_string(config_.max_tool_retries) + "): " + validation_error);
+                    ZOO_LOG("warn", "tool '%s' validation failed (retry %d/%d): %s",
+                        tc.name.c_str(), error_recovery.get_retry_count(tc.name),
+                        config_.max_tool_retries, validation_error.c_str());
 
                     std::string error_content = "Error: " + validation_error;
                     model_->add_message(Message::tool(
@@ -410,7 +404,7 @@ private:
                 }
 
                 // Execute tool
-                log(LogLevel::Info, "Invoking tool '" + tc.name + "' (iteration " + std::to_string(iteration) + ")");
+                ZOO_LOG("info", "invoking tool '%s' (iteration %d)", tc.name.c_str(), iteration);
                 auto invoke_result = tool_registry_.invoke(tc.name, tc.arguments);
                 std::string tool_result_str;
                 if (invoke_result) {
@@ -467,7 +461,7 @@ private:
             return response;
         }
 
-        log(LogLevel::Error, "Tool loop iteration limit reached (" + std::to_string(max_tool_iterations) + ")");
+        ZOO_LOG("error", "tool loop iteration limit reached (%d)", max_tool_iterations);
         return std::unexpected(Error{
             ErrorCode::ToolLoopLimitReached,
             "Tool loop iteration limit reached (" +

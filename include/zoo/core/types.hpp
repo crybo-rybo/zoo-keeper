@@ -164,19 +164,6 @@ enum class TokenAction {
 using TokenCallback = std::function<TokenAction(std::string_view)>;
 
 // ============================================================================
-// Logging
-// ============================================================================
-
-enum class LogLevel {
-    Debug,
-    Info,
-    Warn,
-    Error
-};
-
-using LogCallback = std::function<void(LogLevel, std::string_view)>;
-
-// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -200,7 +187,6 @@ struct Config {
     int max_tool_retries = 2;
 
     std::optional<TokenCallback> on_token;
-    std::optional<LogCallback> on_log;
 
     Expected<void> validate() const {
         if (model_path.empty()) {
