@@ -64,6 +64,7 @@ public:
     // Grammar-constrained tool calling
     void set_tool_grammar(const std::string& grammar_str);
     void clear_tool_grammar();
+    bool has_tool_grammar() const { return grammar_active_; }
 
     // Context info
     int context_size() const;

@@ -210,7 +210,7 @@ public:
         auto schemas = tool_registry_.get_all_schemas();
         if (schemas.empty()) return base_prompt;
 
-        if (grammar_active_) {
+        if (model_->has_tool_grammar()) {
             // Sentinel-based instructions — grammar constrains the output format
             return base_prompt
                 + "\n\nYou have access to tools. When you need to use a tool, wrap the "
@@ -324,7 +324,7 @@ private:
         int iteration = 0;
         const int max_tool_iterations = config_.max_tool_iterations;
         const bool has_tools = tool_registry_.size() > 0;
-        const bool use_grammar_path = has_tools && grammar_active_;
+        const bool use_grammar_path = has_tools && model_->has_tool_grammar();
 
         ZOO_LOG("debug", "processing request %lu (tools=%d, grammar=%d)",
             (unsigned long)request.id, has_tools, use_grammar_path);
@@ -534,10 +534,8 @@ private:
         auto grammar = tools::GrammarBuilder::build(schemas);
         if (grammar.empty()) {
             model_->clear_tool_grammar();
-            grammar_active_ = false;
         } else {
             model_->set_tool_grammar(grammar);
-            grammar_active_ = true;
             ZOO_LOG("info", "tool grammar updated (%zu tools)", tool_registry_.size());
         }
     }
@@ -547,7 +545,6 @@ private:
     mutable std::mutex model_mutex_;
     tools::ToolRegistry tool_registry_;
     RequestQueue request_queue_;
-    bool grammar_active_ = false;
 
     std::thread inference_thread_;
     std::atomic<bool> running_;
