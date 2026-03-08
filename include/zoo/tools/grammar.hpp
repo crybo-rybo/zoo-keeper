@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace zoo::tools {
@@ -10,6 +11,13 @@ class GrammarBuilder {
 public:
     static std::string build(const nlohmann::json& tool_schemas) {
         if (!tool_schemas.is_array() || tool_schemas.empty()) return {};
+
+        // Reject tool name collisions after sanitization
+        std::unordered_set<std::string> seen_names;
+        for (const auto& schema : tool_schemas) {
+            auto safe = sanitize(schema["function"]["name"].get<std::string>());
+            if (!seen_names.insert(safe).second) return {};
+        }
 
         std::string grammar;
         grammar += "root ::= \"<tool_call>\" ws tool-call ws \"</tool_call>\"\n";
