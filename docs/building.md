@@ -18,6 +18,7 @@ ctest --test-dir build
 | `ZOO_ENABLE_CUDA` | CUDA acceleration | OFF |
 | `ZOO_BUILD_TESTS` | Build test suite | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
+| `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
 
@@ -71,6 +72,8 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 | [llama.cpp](https://github.com/ggerganov/llama.cpp) | pinned | Git submodule | Core inference engine |
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.11+ | CMake FetchContent | JSON parsing |
 | [GoogleTest](https://github.com/google/googletest) | 1.14+ | CMake FetchContent | Tests only |
+| [Doxygen](https://www.doxygen.nl/) | host tool | System package | Required only when `ZOO_BUILD_DOCS=ON` |
+| [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
 All FetchContent dependencies are downloaded automatically during CMake configuration.
 
@@ -104,6 +107,19 @@ cmake -B build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build
 ```
+
+## API Reference
+
+Install `doxygen` locally before enabling docs. `graphviz` is optional, but if `dot` is available Doxygen will emit diagrams in the generated HTML.
+
+```bash
+cmake -B build -DZOO_BUILD_DOCS=ON
+cmake --build build --target zoo_docs
+```
+
+The generated site is written to `build/docs/doxygen/html/index.html`, with XML output in `build/docs/doxygen/xml`.
+
+GitHub Actions also builds the Doxygen site on every push and pull request, uploads the generated output as a workflow artifact, and deploys the latest `main` build to GitHub Pages.
 
 ## Using Zoo-Keeper in Your Project
 
