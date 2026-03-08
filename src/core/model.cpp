@@ -157,6 +157,7 @@ Expected<std::string> Model::run_inference(
     const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
+    bool in_tool_call = false;
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_));
     const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) + 1;
@@ -206,6 +207,18 @@ Expected<std::string> Model::run_inference(
         generated_text.append(buff, static_cast<size_t>(n));
         ++token_count;
 
+        // Sentinel detection: stop streaming to callback when <tool_call> appears
+        if (grammar_active_ && !in_tool_call) {
+            if (generated_text.find("<tool_call>") != std::string::npos) {
+                in_tool_call = true;
+            }
+        }
+
+        // Stop generation when sentinel closing tag is complete
+        if (in_tool_call && generated_text.ends_with("</tool_call>")) {
+            break;
+        }
+
         if (!stop_sequences.empty()) {
             size_t match_len = find_stop_sequence(generated_text, stop_sequences);
             if (match_len > 0) {
@@ -214,7 +227,8 @@ Expected<std::string> Model::run_inference(
             }
         }
 
-        if (on_token) {
+        // Only stream to user callback when not inside a tool call
+        if (on_token && !in_tool_call) {
             TokenAction action = (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
             if (action == TokenAction::Stop) break;
         }
@@ -413,7 +427,10 @@ Expected<Model::GenerationResult> Model::generate_from_history(
         return std::unexpected(text_result.error());
     }
 
-    return GenerationResult{std::move(*text_result), prompt_tokens};
+    bool tool_detected = grammar_active_ &&
+        (text_result->find("<tool_call>") != std::string::npos);
+
+    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
 }
 
 // ============================================================================
@@ -471,6 +488,72 @@ int Model::estimate_tokens(const std::string& text) const {
         if (n > 0) return n;
     }
     return std::max(1, static_cast<int>(text.length() / 4));
+}
+
+// ============================================================================
+// Tool Grammar
+// ============================================================================
+
+void Model::set_tool_grammar(const std::string& grammar_str) {
+    tool_grammar_str_ = grammar_str;
+    rebuild_sampler_with_grammar();
+}
+
+void Model::clear_tool_grammar() {
+    if (!grammar_active_) return;
+    tool_grammar_str_.clear();
+    grammar_active_ = false;
+
+    if (sampler_) { llama_sampler_free(sampler_); }
+    sampler_ = create_sampler_chain();
+}
+
+void Model::rebuild_sampler_with_grammar() {
+    if (sampler_) { llama_sampler_free(sampler_); }
+
+    auto chain_params = llama_sampler_chain_default_params();
+    chain_params.no_perf = false;
+    llama_sampler* chain = llama_sampler_chain_init(chain_params);
+    if (!chain) return;
+
+    const auto& sp = config_.sampling;
+    if (sp.repeat_penalty != 1.0f) {
+        if (auto* p = llama_sampler_init_penalties(sp.repeat_last_n, sp.repeat_penalty, 0.0f, 0.0f))
+            llama_sampler_chain_add(chain, p);
+    }
+    if (sp.top_k > 0) {
+        if (auto* p = llama_sampler_init_top_k(sp.top_k)) llama_sampler_chain_add(chain, p);
+    }
+    if (sp.top_p < 1.0f) {
+        if (auto* p = llama_sampler_init_top_p(sp.top_p, 1)) llama_sampler_chain_add(chain, p);
+    }
+    if (sp.temperature > 0.0f) {
+        if (auto* p = llama_sampler_init_temp(sp.temperature)) llama_sampler_chain_add(chain, p);
+    }
+
+    // Lazy grammar sampler — activates when "<tool_call>" appears in output
+    const char* trigger = "<tool_call>";
+    const char* trigger_patterns[] = { trigger };
+    auto* grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
+        vocab_,
+        tool_grammar_str_.c_str(),
+        "root",
+        trigger_patterns, 1,
+        nullptr, 0
+    );
+    if (grammar_sampler) {
+        llama_sampler_chain_add(chain, grammar_sampler);
+    }
+
+    uint32_t seed = (sp.seed < 0) ? static_cast<uint32_t>(time(nullptr)) : static_cast<uint32_t>(sp.seed);
+    if (auto* d = llama_sampler_init_dist(seed)) {
+        llama_sampler_chain_add(chain, d);
+    } else if (auto* g = llama_sampler_init_greedy()) {
+        llama_sampler_chain_add(chain, g);
+    }
+
+    sampler_ = chain;
+    grammar_active_ = true;
 }
 
 // ============================================================================

@@ -44,6 +44,7 @@ public:
     struct GenerationResult {
         std::string text;
         int prompt_tokens = 0;
+        bool tool_call_detected = false;
     };
 
     // Generate from current history state (low-level: used by Agent for tool loop)
@@ -59,6 +60,10 @@ public:
     Expected<void> add_message(const Message& message);
     std::vector<Message> get_history() const;
     void clear_history();
+
+    // Grammar-constrained tool calling
+    void set_tool_grammar(const std::string& grammar_str);
+    void clear_tool_grammar();
 
     // Context info
     int context_size() const;
@@ -82,6 +87,7 @@ private:
 
     static void initialize_global();
     llama_sampler* create_sampler_chain();
+    void rebuild_sampler_with_grammar();
     size_t find_stop_sequence(const std::string& text,
                               const std::vector<std::string>& stop_sequences) const;
     std::vector<llama_chat_message> build_llama_messages() const;
@@ -98,6 +104,10 @@ private:
 
     int context_size_ = 0;
     const char* tmpl_ = nullptr;
+
+    // Tool grammar state
+    std::string tool_grammar_str_;
+    bool grammar_active_ = false;
 
     // Incremental prompt state
     int prev_len_ = 0;
