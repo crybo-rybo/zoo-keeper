@@ -27,7 +27,7 @@ cmake -B build -DZOO_BUILD_EXAMPLES=ON
 cmake --build build -j$(nproc)
 ```
 
-See [building.md](building.md) for platform-specific setup (Metal, CUDA) and advanced options.
+See [building.md](building.md) for platform-specific setup (Metal, CUDA), integration tests, and package-install usage.
 
 ## Your First Agent
 
@@ -41,6 +41,7 @@ int main() {
     config.model_path = "models/llama-3-8b.gguf";
     config.context_size = 8192;
     config.max_tokens = 512;
+    config.n_gpu_layers = 0; // opt in to GPU offload explicitly
 
     // 2. Create the agent
     auto result = zoo::Agent::create(config);

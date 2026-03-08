@@ -22,6 +22,7 @@ else()
 endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
 option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
+set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")
 
 # Include dependencies
 include(cmake/FetchDependencies.cmake)
@@ -130,6 +131,25 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )
+
+set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo_core -llama -lggml -lggml-base -lggml-cpu")
+if(TARGET ggml-blas)
+    string(APPEND ZOO_PKGCONFIG_LIBS " -lggml-blas")
+endif()
+if(TARGET ggml-metal)
+    string(APPEND ZOO_PKGCONFIG_LIBS " -lggml-metal")
+endif()
+if(UNIX)
+    string(APPEND ZOO_PKGCONFIG_LIBS " -lm")
+endif()
+if(APPLE)
+    if(TARGET ggml-blas)
+        string(APPEND ZOO_PKGCONFIG_LIBS " -framework Accelerate")
+    endif()
+    if(TARGET ggml-metal)
+        string(APPEND ZOO_PKGCONFIG_LIBS " -framework Foundation -framework Metal -framework MetalKit")
+    endif()
+endif()
 
 configure_file(
     cmake/zoo-keeper.pc.in
