@@ -1,3 +1,8 @@
+/**
+ * @file test_tool_registry.cpp
+ * @brief Unit tests for tool registration, schema generation, and invocation.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/tools/registry.hpp"
 #include "fixtures/tool_definitions.hpp"
@@ -5,6 +10,7 @@
 using json = nlohmann::json;
 using namespace zoo::testing::tools;
 
+/// Shared fixture that provides a fresh tool registry for each test.
 class ToolRegistryTest : public ::testing::Test {
 protected:
     zoo::tools::ToolRegistry registry;

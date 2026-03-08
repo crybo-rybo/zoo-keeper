@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Options
 option(ZOO_BUILD_TESTS "Build test suite" OFF)
 option(ZOO_BUILD_EXAMPLES "Build examples" OFF)
+option(ZOO_BUILD_DOCS "Build API documentation with Doxygen" OFF)
 option(ZOO_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 option(ZOO_ENABLE_SANITIZERS "Enable ASan/TSan/UBSan" OFF)
 if(APPLE)
@@ -71,6 +72,11 @@ endif()
 # Examples
 if(ZOO_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+# Documentation
+if(ZOO_BUILD_DOCS)
+    include(cmake/Doxygen.cmake)
 endif()
 
 # Install rules

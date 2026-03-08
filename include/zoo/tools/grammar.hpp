@@ -1,3 +1,8 @@
+/**
+ * @file grammar.hpp
+ * @brief Grammar generation helpers for constrained tool calling.
+ */
+
 #pragma once
 
 #include <nlohmann/json.hpp>
@@ -7,8 +12,18 @@
 
 namespace zoo::tools {
 
+/**
+ * @brief Builds a GBNF grammar that constrains output to registered tool calls.
+ */
 class GrammarBuilder {
 public:
+    /**
+     * @brief Builds a grammar from the registry's tool schemas.
+     *
+     * @param tool_schemas Array returned by `ToolRegistry::get_all_schemas()`.
+     * @return A GBNF grammar rooted at `root`, or an empty string when the
+     *         schemas are invalid or cannot be represented safely.
+     */
     static std::string build(const nlohmann::json& tool_schemas) {
         if (!tool_schemas.is_array() || tool_schemas.empty()) return {};
 
@@ -68,6 +83,7 @@ public:
     }
 
 private:
+    /// Converts tool names into grammar-safe rule identifiers.
     static std::string sanitize(const std::string& name) {
         std::string result;
         for (char c : name) {
@@ -76,6 +92,7 @@ private:
         return result;
     }
 
+    /// Maps a JSON Schema primitive type to the corresponding grammar rule name.
     static std::string type_rule(const std::string& json_type) {
         if (json_type == "integer") return "integer";
         if (json_type == "number") return "number";
@@ -84,6 +101,7 @@ private:
         return "string";
     }
 
+    /// Returns the shared primitive grammar rules appended to every generated grammar.
     static std::string primitive_rules() {
         return
             "integer ::= \"-\"? [0-9]+\n"

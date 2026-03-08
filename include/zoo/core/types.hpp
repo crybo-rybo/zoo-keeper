@@ -1,3 +1,8 @@
+/**
+ * @file types.hpp
+ * @brief Core value types shared across the zoo-keeper model, tools, and agent layers.
+ */
+
 #pragma once
 
 #include <string>
@@ -9,17 +14,22 @@
 
 namespace zoo {
 
-// ============================================================================
-// Message Types
-// ============================================================================
-
+/**
+ * @brief Enumerates the conversation roles supported by the runtime.
+ */
 enum class Role {
-    System,
-    User,
-    Assistant,
-    Tool
+    System, ///< Instructional message that primes the assistant.
+    User, ///< End-user input awaiting a response.
+    Assistant, ///< Assistant-authored response content.
+    Tool ///< Structured tool result associated with a prior tool call.
 };
 
+/**
+ * @brief Returns the lowercase role label expected by llama.cpp chat templates.
+ *
+ * @param role Role to stringify.
+ * @return Stable lowercase role name, or `"unknown"` for unexpected values.
+ */
 [[nodiscard]] inline const char* role_to_string(Role role) {
     switch (role) {
         case Role::System: return "system";
@@ -30,77 +40,120 @@ enum class Role {
     return "unknown";
 }
 
+/**
+ * @brief Represents one message in the conversation history.
+ */
 struct Message {
-    Role role;
-    std::string content;
-    std::optional<std::string> tool_call_id;
+    Role role; ///< Speaker role associated with the message.
+    std::string content; ///< Raw message content passed to the model.
+    std::optional<std::string> tool_call_id; ///< Tool call correlation identifier for tool responses.
 
+    /**
+     * @brief Creates a system message.
+     *
+     * @param content Instructional content to prepend to the conversation.
+     * @return A message tagged with `Role::System`.
+     */
     static Message system(std::string content) {
         return Message{Role::System, std::move(content), std::nullopt};
     }
 
+    /**
+     * @brief Creates a user message.
+     *
+     * @param content User-authored content.
+     * @return A message tagged with `Role::User`.
+     */
     static Message user(std::string content) {
         return Message{Role::User, std::move(content), std::nullopt};
     }
 
+    /**
+     * @brief Creates an assistant message.
+     *
+     * @param content Assistant-authored content.
+     * @return A message tagged with `Role::Assistant`.
+     */
     static Message assistant(std::string content) {
         return Message{Role::Assistant, std::move(content), std::nullopt};
     }
 
+    /**
+     * @brief Creates a tool response message.
+     *
+     * @param content Serialized tool output.
+     * @param tool_call_id Identifier of the originating tool call.
+     * @return A message tagged with `Role::Tool`.
+     */
     static Message tool(std::string content, std::string tool_call_id) {
         return Message{Role::Tool, std::move(content), std::move(tool_call_id)};
     }
 
+    /// Compares two messages including role, content, and tool call correlation.
     bool operator==(const Message& other) const = default;
 };
 
-// ============================================================================
-// Error Types
-// ============================================================================
-
+/**
+ * @brief Categorizes runtime failures surfaced by zoo-keeper.
+ */
 enum class ErrorCode {
     // Configuration errors (100-199)
-    InvalidConfig = 100,
-    InvalidModelPath = 101,
-    InvalidContextSize = 102,
-    InvalidSamplingParams = 103,
+    InvalidConfig = 100, ///< Generic configuration validation failure.
+    InvalidModelPath = 101, ///< Missing or invalid model path.
+    InvalidContextSize = 102, ///< Invalid context window configuration.
+    InvalidSamplingParams = 103, ///< Invalid sampling configuration.
 
     // Backend errors (200-299)
-    BackendInitFailed = 200,
-    ModelLoadFailed = 201,
-    ContextCreationFailed = 202,
-    InferenceFailed = 203,
-    TokenizationFailed = 204,
+    BackendInitFailed = 200, ///< llama.cpp backend initialization failed.
+    ModelLoadFailed = 201, ///< Model weights could not be loaded.
+    ContextCreationFailed = 202, ///< llama.cpp context creation failed.
+    InferenceFailed = 203, ///< Decode or generation failed.
+    TokenizationFailed = 204, ///< Text could not be tokenized.
 
     // Engine errors (300-399)
-    ContextWindowExceeded = 300,
-    InvalidMessageSequence = 301,
-    TemplateRenderFailed = 302,
+    ContextWindowExceeded = 300, ///< Prompt or generation exceeded available context.
+    InvalidMessageSequence = 301, ///< Conversation roles violate sequencing rules.
+    TemplateRenderFailed = 302, ///< Chat template rendering failed.
 
     // Runtime errors (400-499)
-    AgentNotRunning = 400,
-    RequestCancelled = 401,
-    RequestTimeout = 402,
-    QueueFull = 403,
+    AgentNotRunning = 400, ///< A request targeted an agent that is not accepting work.
+    RequestCancelled = 401, ///< The caller cancelled the request before completion.
+    RequestTimeout = 402, ///< The request exceeded its allowed runtime.
+    QueueFull = 403, ///< The request queue could not accept another item.
 
     // Tool errors (500-599)
-    ToolNotFound = 500,
-    ToolExecutionFailed = 501,
-    InvalidToolSignature = 502,
-    ToolRetriesExhausted = 503,
-    ToolLoopLimitReached = 504,
+    ToolNotFound = 500, ///< A referenced tool name is not registered.
+    ToolExecutionFailed = 501, ///< A tool handler threw or returned an execution failure.
+    InvalidToolSignature = 502, ///< Registered tool metadata does not match its callable signature.
+    ToolRetriesExhausted = 503, ///< Validation retries for a tool call were exhausted.
+    ToolLoopLimitReached = 504, ///< The agent exceeded its tool-iteration budget.
 
-    Unknown = 999
+    Unknown = 999 ///< Fallback code for uncategorized failures.
 };
 
+/**
+ * @brief Rich error payload returned by fallible zoo-keeper operations.
+ */
 struct Error {
-    ErrorCode code;
-    std::string message;
-    std::optional<std::string> context;
+    ErrorCode code; ///< Machine-readable error category.
+    std::string message; ///< Human-readable error summary.
+    std::optional<std::string> context; ///< Optional contextual detail for diagnostics.
 
+    /**
+     * @brief Constructs an error payload.
+     *
+     * @param code Error category.
+     * @param message Human-readable description of the failure.
+     * @param context Optional additional diagnostic context.
+     */
     Error(ErrorCode code, std::string message, std::optional<std::string> context = std::nullopt)
         : code(code), message(std::move(message)), context(std::move(context)) {}
 
+    /**
+     * @brief Formats the error as a single log-friendly string.
+     *
+     * @return String containing the numeric code, message, and optional context.
+     */
     std::string to_string() const {
         std::string result = "[" + std::to_string(static_cast<int>(code)) + "] " + message;
         if (context.has_value()) {
@@ -110,21 +163,29 @@ struct Error {
     }
 };
 
+/**
+ * @brief Convenience alias for operations that either return `T` or a `zoo::Error`.
+ */
 template<typename T>
 using Expected = std::expected<T, Error>;
 
-// ============================================================================
-// Sampling Configuration
-// ============================================================================
-
+/**
+ * @brief Sampling parameters used to configure text generation.
+ */
 struct SamplingParams {
-    float temperature = 0.7f;
-    float top_p = 0.9f;
-    int top_k = 40;
-    float repeat_penalty = 1.1f;
-    int repeat_last_n = 64;
-    int seed = -1;
+    float temperature = 0.7f; ///< Softmax temperature. `0.0f` behaves greedily.
+    float top_p = 0.9f; ///< Nucleus sampling probability cutoff in `[0.0, 1.0]`.
+    int top_k = 40; ///< Limits candidate selection to the top-k tokens.
+    float repeat_penalty = 1.1f; ///< Penalty applied to recently seen tokens.
+    int repeat_last_n = 64; ///< Number of trailing tokens considered for repetition penalty.
+    int seed = -1; ///< RNG seed. Negative values delegate seeding to the current time.
 
+    /**
+     * @brief Validates the sampling configuration.
+     *
+     * @return Empty success on valid parameters, or an `InvalidSamplingParams`
+     *         error describing the first invalid field.
+     */
     Expected<void> validate() const {
         if (temperature < 0.0f) {
             return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
@@ -149,45 +210,53 @@ struct SamplingParams {
         return {};
     }
 
+    /// Compares two sampling configurations field-by-field.
     bool operator==(const SamplingParams& other) const = default;
 };
 
-// ============================================================================
-// Token Callback Types
-// ============================================================================
-
+/**
+ * @brief Controls whether token streaming should continue.
+ */
 enum class TokenAction {
-    Continue,
-    Stop
+    Continue, ///< Continue decoding and streaming tokens.
+    Stop ///< Stop generation after the current token callback.
 };
 
+/**
+ * @brief Callback invoked for streamed token fragments.
+ */
 using TokenCallback = std::function<TokenAction(std::string_view)>;
 
-// ============================================================================
-// Configuration
-// ============================================================================
-
+/**
+ * @brief Runtime configuration used to load a model and create an agent.
+ */
 struct Config {
-    std::string model_path;
-    int context_size = 8192;
-    int n_gpu_layers = -1;
-    bool use_mmap = true;
-    bool use_mlock = false;
+    std::string model_path; ///< Filesystem path to the GGUF model.
+    int context_size = 8192; ///< Requested context window size in tokens.
+    int n_gpu_layers = -1; ///< Number of layers to offload to GPU, or `-1` for backend default.
+    bool use_mmap = true; ///< Whether to memory-map the model file.
+    bool use_mlock = false; ///< Whether to lock model pages in memory.
 
-    SamplingParams sampling;
+    SamplingParams sampling; ///< Sampling behavior for generation.
 
-    int max_tokens = -1;
-    std::vector<std::string> stop_sequences;
+    int max_tokens = -1; ///< Maximum number of generated tokens, or `-1` for no explicit cap.
+    std::vector<std::string> stop_sequences; ///< User-defined stop sequences applied during generation.
 
-    std::optional<std::string> system_prompt;
+    std::optional<std::string> system_prompt; ///< Optional system prompt inserted at the start of history.
 
-    size_t request_queue_capacity = 64;
+    size_t request_queue_capacity = 64; ///< Maximum number of pending requests accepted by `Agent`.
 
-    int max_tool_iterations = 5;
-    int max_tool_retries = 2;
+    int max_tool_iterations = 5; ///< Maximum detect/execute/respond iterations per request.
+    int max_tool_retries = 2; ///< Maximum validation retries for malformed tool calls.
 
-    std::optional<TokenCallback> on_token;
+    std::optional<TokenCallback> on_token; ///< Optional default token callback used by direct model generation.
 
+    /**
+     * @brief Validates the configuration before model initialization.
+     *
+     * @return Empty success on valid configuration, or the first encountered
+     *         validation error.
+     */
     Expected<void> validate() const {
         if (model_path.empty()) {
             return std::unexpected(Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
@@ -212,6 +281,12 @@ struct Config {
         return {};
     }
 
+    /**
+     * @brief Compares two configurations, excluding transient callbacks.
+     *
+     * The `on_token` callback is intentionally omitted because function objects
+     * are not meaningfully comparable.
+     */
     bool operator==(const Config& other) const {
         return model_path == other.model_path &&
                context_size == other.context_size &&
@@ -228,45 +303,61 @@ struct Config {
     }
 };
 
-// ============================================================================
-// Response Types
-// ============================================================================
-
+/**
+ * @brief Token accounting for a completed generation.
+ */
 struct TokenUsage {
-    int prompt_tokens = 0;
-    int completion_tokens = 0;
-    int total_tokens = 0;
+    int prompt_tokens = 0; ///< Tokens consumed by the rendered prompt.
+    int completion_tokens = 0; ///< Tokens emitted during generation.
+    int total_tokens = 0; ///< Sum of prompt and completion tokens.
 
+    /// Compares two token-usage snapshots.
     bool operator==(const TokenUsage& other) const = default;
 };
 
+/**
+ * @brief Timing and throughput metrics captured for a response.
+ */
 struct Metrics {
-    std::chrono::milliseconds latency_ms{0};
-    std::chrono::milliseconds time_to_first_token_ms{0};
-    double tokens_per_second = 0.0;
+    std::chrono::milliseconds latency_ms{0}; ///< End-to-end request latency.
+    std::chrono::milliseconds time_to_first_token_ms{0}; ///< Delay until the first streamed token.
+    double tokens_per_second = 0.0; ///< Throughput measured after the first token arrives.
 
+    /// Compares two metric snapshots.
     bool operator==(const Metrics& other) const = default;
 };
 
+/**
+ * @brief Final response returned by model or agent generation.
+ */
 struct Response {
-    std::string text;
-    TokenUsage usage;
-    Metrics metrics;
-    std::vector<Message> tool_calls;
+    std::string text; ///< Assistant-visible response text.
+    TokenUsage usage; ///< Prompt and completion token usage.
+    Metrics metrics; ///< Latency and throughput data.
+    std::vector<Message> tool_calls; ///< Tool result messages produced during the request, if any.
 
+    /// Compares two responses field-by-field.
     bool operator==(const Response& other) const = default;
 };
 
-// ============================================================================
-// Request Types
-// ============================================================================
-
+/**
+ * @brief Monotonic identifier assigned to queued agent requests.
+ */
 using RequestId = uint64_t;
 
-// ============================================================================
-// Conversation Validation (pure logic, no model dependency)
-// ============================================================================
-
+/**
+ * @brief Validates whether a new message role can be appended to `messages`.
+ *
+ * Rules enforced today:
+ * - a tool response cannot be the first message,
+ * - system messages are only allowed at the start of history,
+ * - non-tool roles may not repeat consecutively.
+ *
+ * @param messages Existing conversation history.
+ * @param role Role to validate as the next appended message.
+ * @return Empty success when the role may be appended, otherwise an
+ *         `InvalidMessageSequence` error.
+ */
 [[nodiscard]] inline Expected<void> validate_role_sequence(
     const std::vector<Message>& messages, Role role
 ) {

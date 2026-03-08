@@ -1,3 +1,8 @@
+/**
+ * @file test_tool_parser.cpp
+ * @brief Unit tests for heuristic and JSON-based tool-call parsing.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/tools/parser.hpp"
 #include "fixtures/sample_responses.hpp"

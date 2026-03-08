@@ -70,6 +70,16 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 | [Configuration](docs/configuration.md) | Config fields, sampling params, generation limits |
 | [Examples](docs/examples.md) | Streaming, tools, error handling, cancellation, metrics |
 | [Building](docs/building.md) | CMake options, platform setup, sanitizers, coverage |
+| [API Reference](docs/building.md#api-reference) | Generate Doxygen HTML locally, download CI artifacts, or browse the published Pages site |
+
+Generate the API reference locally with:
+
+```bash
+cmake -B build -DZOO_BUILD_DOCS=ON
+cmake --build build --target zoo_docs
+```
+
+The generated site is written to `build/docs/doxygen/html/index.html`. GitHub Actions also builds and uploads the documentation on every push and deploys the latest `main` version to GitHub Pages.
 
 ## Testing
 

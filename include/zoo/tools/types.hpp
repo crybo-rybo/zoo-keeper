@@ -1,3 +1,8 @@
+/**
+ * @file types.hpp
+ * @brief Shared tool-calling value types and handler aliases.
+ */
+
 #pragma once
 
 #include <zoo/core/types.hpp>
@@ -9,24 +14,34 @@
 
 namespace zoo::tools {
 
-// Tool call extracted from model output
+/**
+ * @brief Structured tool call extracted from model output.
+ */
 struct ToolCall {
-    std::string id;
-    std::string name;
-    nlohmann::json arguments;
+    std::string id; ///< Unique identifier for correlating tool responses.
+    std::string name; ///< Registered tool name to invoke.
+    nlohmann::json arguments; ///< JSON arguments supplied by the model.
 
+    /// Compares two tool calls field-by-field.
     bool operator==(const ToolCall& other) const = default;
 };
 
-// Callable type for tool execution
+/**
+ * @brief Signature of a tool handler stored in the registry.
+ *
+ * Handlers receive the JSON argument object and return either a JSON payload or
+ * a `zoo::Error`.
+ */
 using ToolHandler = std::function<Expected<nlohmann::json>(const nlohmann::json&)>;
 
-// Metadata and handler for a registered tool
+/**
+ * @brief Metadata and executable handler for a registered tool.
+ */
 struct ToolEntry {
-    std::string name;
-    std::string description;
-    nlohmann::json parameters_schema;
-    ToolHandler handler;
+    std::string name; ///< Public tool name presented to the model.
+    std::string description; ///< Human-readable tool description for prompts and schemas.
+    nlohmann::json parameters_schema; ///< JSON Schema describing accepted arguments.
+    ToolHandler handler; ///< Callable invoked when the tool is executed.
 };
 
 } // namespace zoo::tools

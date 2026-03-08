@@ -1,3 +1,8 @@
+/**
+ * @file test_sentinel_parser.cpp
+ * @brief Unit tests for sentinel-delimited tool-call parsing.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/tools/parser.hpp"
 

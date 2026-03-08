@@ -1,3 +1,8 @@
+/**
+ * @file parser.hpp
+ * @brief Parsers that recover tool calls from unconstrained or sentinel-delimited output.
+ */
+
 #pragma once
 
 #include "types.hpp"
@@ -8,13 +13,28 @@
 
 namespace zoo::tools {
 
+/**
+ * @brief Extracts tool calls from model output.
+ *
+ * The parser supports both heuristic brace-based extraction and explicit
+ * `<tool_call>...</tool_call>` sentinel tags used by grammar-constrained mode.
+ */
 class ToolCallParser {
 public:
+    /**
+     * @brief Result of attempting to parse a tool call from model output.
+     */
     struct ParseResult {
-        std::optional<ToolCall> tool_call;
-        std::string text_before;
+        std::optional<ToolCall> tool_call; ///< Parsed tool call when one is detected.
+        std::string text_before; ///< Text that appears before the parsed tool call, or the original output on failure.
     };
 
+    /**
+     * @brief Extracts the first JSON object shaped like a tool call.
+     *
+     * @param output Raw model output that may contain visible text and JSON.
+     * @return Parsed tool call plus the text that precedes it.
+     */
     static ParseResult parse(const std::string& output) {
         ParseResult result;
 
@@ -47,6 +67,12 @@ public:
         return result;
     }
 
+    /**
+     * @brief Extracts a tool call wrapped in `<tool_call>` sentinel tags.
+     *
+     * @param output Raw model output that may contain visible text and one sentinel-wrapped tool call.
+     * @return Parsed tool call plus the text that precedes the opening tag.
+     */
     static ParseResult parse_sentinel(const std::string& output) {
         ParseResult result;
 
@@ -95,6 +121,7 @@ public:
     }
 
 private:
+    /// Finds the matching closing brace for the JSON object that starts at `start`.
     static size_t find_json_object_end(const std::string& text, size_t start) {
         if (start >= text.size() || text[start] != '{') return std::string::npos;
 
@@ -121,6 +148,7 @@ private:
         return std::string::npos;
     }
 
+    /// Generates a stable fallback tool-call identifier when the model omits one.
     static std::string generate_id() {
         static std::atomic<int> counter{0};
         return "call_" + std::to_string(counter.fetch_add(1, std::memory_order_relaxed) + 1);

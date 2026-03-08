@@ -1,3 +1,8 @@
+/**
+ * @file test_batch.cpp
+ * @brief Unit tests for prompt prefill chunk planning.
+ */
+
 #include <gtest/gtest.h>
 #include "zoo/core/batch.hpp"
 
