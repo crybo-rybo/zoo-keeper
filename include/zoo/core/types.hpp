@@ -30,7 +30,7 @@ enum class Role {
  * @param role Role to stringify.
  * @return Stable lowercase role name, or `"unknown"` for unexpected values.
  */
-[[nodiscard]] inline const char* role_to_string(Role role) {
+[[nodiscard]] inline const char* role_to_string(Role role) noexcept {
     switch (role) {
         case Role::System: return "system";
         case Role::User: return "user";
@@ -228,12 +228,17 @@ enum class TokenAction {
 using TokenCallback = std::function<TokenAction(std::string_view)>;
 
 /**
+ * @brief Callback queried by generation loops to decide whether work should stop.
+ */
+using CancellationCallback = std::function<bool()>;
+
+/**
  * @brief Runtime configuration used to load a model and create an agent.
  */
 struct Config {
     std::string model_path; ///< Filesystem path to the GGUF model.
     int context_size = 8192; ///< Requested context window size in tokens.
-    int n_gpu_layers = -1; ///< Number of layers to offload to GPU, or `-1` for backend default.
+    int n_gpu_layers = 0; ///< Number of layers to offload to GPU. Defaults to CPU-only for portability.
     bool use_mmap = true; ///< Whether to memory-map the model file.
     bool use_mlock = false; ///< Whether to lock model pages in memory.
 
@@ -243,6 +248,7 @@ struct Config {
     std::vector<std::string> stop_sequences; ///< User-defined stop sequences applied during generation.
 
     std::optional<std::string> system_prompt; ///< Optional system prompt inserted at the start of history.
+    size_t max_history_messages = 64; ///< Maximum number of non-system history messages retained.
 
     size_t request_queue_capacity = 64; ///< Maximum number of pending requests accepted by `Agent`.
 
@@ -266,6 +272,10 @@ struct Config {
         }
         if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
             return std::unexpected(Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
+        }
+        if (max_history_messages == 0) {
+            return std::unexpected(Error{ErrorCode::InvalidConfig,
+                "max_history_messages must be >= 1"});
         }
         if (auto result = sampling.validate(); !result) {
             return result;
@@ -297,6 +307,7 @@ struct Config {
                max_tokens == other.max_tokens &&
                stop_sequences == other.stop_sequences &&
                system_prompt == other.system_prompt &&
+               max_history_messages == other.max_history_messages &&
                request_queue_capacity == other.request_queue_capacity &&
                max_tool_iterations == other.max_tool_iterations &&
                max_tool_retries == other.max_tool_retries;

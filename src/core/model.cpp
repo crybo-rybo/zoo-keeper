@@ -7,9 +7,12 @@
 #include "zoo/core/batch.hpp"
 #include <llama.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
-#include <mutex>
+#include <cstdint>
 #include <ctime>
+#include <mutex>
+#include <random>
 
 namespace zoo::core {
 
@@ -18,6 +21,48 @@ namespace zoo::core {
 // ============================================================================
 
 static std::once_flag g_init_flag;
+
+namespace {
+
+uint32_t make_sampler_seed(int configured_seed) {
+    if (configured_seed >= 0) {
+        return static_cast<uint32_t>(configured_seed);
+    }
+
+    static std::atomic<uint64_t> counter{0};
+
+    uint64_t seed = static_cast<uint64_t>(
+        std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    seed ^= counter.fetch_add(0x9e3779b97f4a7c15ull, std::memory_order_relaxed);
+
+    std::random_device rd;
+    seed ^= (static_cast<uint64_t>(rd()) << 32);
+    seed ^= static_cast<uint64_t>(rd());
+
+    return static_cast<uint32_t>(seed ^ (seed >> 32));
+}
+
+Expected<TokenAction> invoke_token_callback(
+    const TokenCallback& callback,
+    std::string_view token
+) {
+    try {
+        return callback(token);
+    } catch (const std::exception& e) {
+        return std::unexpected(Error{
+            ErrorCode::InferenceFailed,
+            "Token callback threw an exception",
+            e.what()
+        });
+    } catch (...) {
+        return std::unexpected(Error{
+            ErrorCode::InferenceFailed,
+            "Token callback threw an unknown exception"
+        });
+    }
+}
+
+} // namespace
 
 void Model::initialize_global() {
     std::call_once(g_init_flag, []() {
@@ -120,8 +165,16 @@ Expected<void> Model::initialize() {
     }
 
     tmpl_ = llama_model_chat_template(llama_model_, nullptr);
-    formatted_.resize(context_size_ * 4);
+    formatted_.clear();
     prev_len_ = 0;
+
+    if (!tmpl_) {
+        return std::unexpected(Error{
+            ErrorCode::TemplateRenderFailed,
+            "Model has no chat template"
+        });
+    }
+
     return {};
 }
 
@@ -156,7 +209,8 @@ Expected<std::vector<int>> Model::tokenize(const std::string& text) {
 Expected<std::string> Model::run_inference(
     const std::vector<int>& prompt_tokens, int max_tokens,
     const std::vector<std::string>& stop_sequences,
-    const std::optional<TokenCallback>& on_token
+    const std::optional<TokenCallback>& on_token,
+    const CancellationCallback& should_cancel
 ) {
     std::string generated_text;
     const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
@@ -172,6 +226,13 @@ Expected<std::string> Model::run_inference(
         static_cast<int>(prompt_tokens.size()), n_batch);
 
     for (const auto& chunk : chunks) {
+        if (should_cancel && should_cancel()) {
+            return std::unexpected(Error{
+                ErrorCode::RequestCancelled,
+                "Request cancelled during prompt prefill"
+            });
+        }
+
         int n_ctx_used = base_pos + chunk.offset + chunk.count;
         if (n_ctx_used > context_size_) {
             return std::unexpected(Error{ErrorCode::ContextWindowExceeded,
@@ -200,6 +261,13 @@ Expected<std::string> Model::run_inference(
     llama_token new_token;
 
     while (true) {
+        if (should_cancel && should_cancel()) {
+            return std::unexpected(Error{
+                ErrorCode::RequestCancelled,
+                "Request cancelled during generation"
+            });
+        }
+
         new_token = llama_sampler_sample(sampler_, ctx_, -1);
         if (llama_vocab_is_eog(vocab_, new_token)) break;
 
@@ -234,8 +302,12 @@ Expected<std::string> Model::run_inference(
 
         // Only stream to user callback when not inside a tool call
         if (on_token && !in_tool_call) {
-            TokenAction action = (*on_token)(std::string_view(buff, static_cast<size_t>(n)));
-            if (action == TokenAction::Stop) break;
+            auto action = invoke_token_callback(
+                *on_token, std::string_view(buff, static_cast<size_t>(n)));
+            if (!action) {
+                return std::unexpected(action.error());
+            }
+            if (*action == TokenAction::Stop) break;
         }
 
         if (token_count >= effective_max) break;
@@ -278,14 +350,23 @@ std::vector<llama_chat_message> Model::build_llama_messages() const {
 Expected<std::string> Model::format_prompt() {
     auto llama_msgs = build_llama_messages();
     int new_len = llama_chat_apply_template(
-        tmpl_, llama_msgs.data(), llama_msgs.size(), true, formatted_.data(), formatted_.size());
+        tmpl_, llama_msgs.data(), llama_msgs.size(), true, nullptr, 0);
 
-    if (new_len > static_cast<int>(formatted_.size())) {
-        formatted_.resize(new_len);
-        new_len = llama_chat_apply_template(
-            tmpl_, llama_msgs.data(), llama_msgs.size(), true, formatted_.data(), formatted_.size());
+    if (new_len < 0) {
+        return std::unexpected(Error{ErrorCode::TemplateRenderFailed,
+            "llama_chat_apply_template failed"});
     }
 
+    if (new_len == 0) {
+        return std::string{};
+    }
+
+    if (new_len > static_cast<int>(formatted_.size())) {
+        formatted_.resize(static_cast<size_t>(new_len));
+    }
+
+    new_len = llama_chat_apply_template(
+        tmpl_, llama_msgs.data(), llama_msgs.size(), true, formatted_.data(), formatted_.size());
     if (new_len < 0) {
         return std::unexpected(Error{ErrorCode::TemplateRenderFailed,
             "llama_chat_apply_template failed"});
@@ -320,7 +401,8 @@ void Model::clear_kv_cache() {
 
 Expected<Response> Model::generate(
     const std::string& user_message,
-    std::optional<TokenCallback> on_token
+    std::optional<TokenCallback> on_token,
+    CancellationCallback should_cancel
 ) {
     auto start_time = std::chrono::steady_clock::now();
 
@@ -333,14 +415,16 @@ Expected<Response> Model::generate(
     bool first_token_received = false;
     int completion_tokens = 0;
 
+    const std::optional<TokenCallback> effective_callback = on_token ? std::move(on_token) : config_.on_token;
+
     auto wrapped_callback = [&](std::string_view token) -> TokenAction {
         if (!first_token_received) {
             first_token_time = std::chrono::steady_clock::now();
             first_token_received = true;
         }
         ++completion_tokens;
-        if (on_token) {
-            return (*on_token)(token);
+        if (effective_callback) {
+            return (*effective_callback)(token);
         }
         return TokenAction::Continue;
     };
@@ -363,7 +447,8 @@ Expected<Response> Model::generate(
         *tokens_result,
         config_.max_tokens,
         config_.stop_sequences,
-        std::optional<TokenCallback>(wrapped_callback)
+        std::optional<TokenCallback>(wrapped_callback),
+        should_cancel
     );
 
     if (!generate_result) {
@@ -407,7 +492,8 @@ Expected<Response> Model::generate(
 // ============================================================================
 
 Expected<Model::GenerationResult> Model::generate_from_history(
-    std::optional<TokenCallback> on_token
+    std::optional<TokenCallback> on_token,
+    CancellationCallback should_cancel
 ) {
     // Reset lazy grammar sampler so the trigger state is fresh for each
     // generation pass. Without this, the grammar stays "triggered" after
@@ -432,7 +518,8 @@ Expected<Model::GenerationResult> Model::generate_from_history(
         *tokens_result,
         config_.max_tokens,
         config_.stop_sequences,
-        on_token
+        on_token,
+        should_cancel
     );
 
     if (!text_result) {
@@ -470,6 +557,7 @@ Expected<void> Model::add_message(const Message& message) {
 
     messages_.push_back(message);
     estimated_tokens_ += estimate_tokens(message.content) + kTemplateOverheadPerMessage;
+    trim_history_to_fit();
     return {};
 }
 
@@ -487,9 +575,9 @@ void Model::clear_history() {
 // Context Info
 // ============================================================================
 
-int Model::context_size() const { return config_.context_size; }
-int Model::estimated_tokens() const { return estimated_tokens_; }
-bool Model::is_context_exceeded() const { return estimated_tokens_ > config_.context_size; }
+int Model::context_size() const noexcept { return config_.context_size; }
+int Model::estimated_tokens() const noexcept { return estimated_tokens_; }
+bool Model::is_context_exceeded() const noexcept { return estimated_tokens_ > config_.context_size; }
 
 int Model::estimate_tokens(const std::string& text) const {
     // If llama.cpp is initialized, use real tokenization
@@ -511,7 +599,7 @@ bool Model::set_tool_grammar(const std::string& grammar_str) {
     return rebuild_sampler_with_grammar();
 }
 
-void Model::clear_tool_grammar() {
+void Model::clear_tool_grammar() noexcept {
     if (!grammar_active_) return;
     tool_grammar_str_.clear();
     grammar_active_ = false;
@@ -557,7 +645,7 @@ bool Model::rebuild_sampler_with_grammar() {
     }
     llama_sampler_chain_add(chain, grammar_sampler);
 
-    uint32_t seed = (sp.seed < 0) ? static_cast<uint32_t>(time(nullptr)) : static_cast<uint32_t>(sp.seed);
+    uint32_t seed = make_sampler_seed(sp.seed);
     if (auto* d = llama_sampler_init_dist(seed)) {
         llama_sampler_chain_add(chain, d);
     } else if (auto* g = llama_sampler_init_greedy()) {
@@ -596,7 +684,7 @@ llama_sampler* Model::create_sampler_chain() {
         if (auto* p = llama_sampler_init_temp(sp.temperature)) llama_sampler_chain_add(chain, p);
     }
 
-    uint32_t seed = (sp.seed < 0) ? static_cast<uint32_t>(time(nullptr)) : static_cast<uint32_t>(sp.seed);
+    uint32_t seed = make_sampler_seed(sp.seed);
     if (auto* d = llama_sampler_init_dist(seed)) {
         llama_sampler_chain_add(chain, d);
     } else if (auto* g = llama_sampler_init_greedy()) {
@@ -621,6 +709,38 @@ size_t Model::find_stop_sequence(
         }
     }
     return 0;
+}
+
+void Model::trim_history_to_fit() {
+    const size_t system_offset =
+        (!messages_.empty() && messages_.front().role == Role::System) ? 1u : 0u;
+    const size_t max_messages = config_.max_history_messages;
+
+    if (messages_.size() <= system_offset + max_messages) {
+        return;
+    }
+
+    size_t erase_end = messages_.size() - max_messages;
+    if (erase_end < system_offset) {
+        erase_end = system_offset;
+    }
+
+    while (erase_end < messages_.size() && messages_[erase_end].role != Role::User) {
+        ++erase_end;
+    }
+
+    if (erase_end <= system_offset) {
+        return;
+    }
+
+    for (size_t index = system_offset; index < erase_end; ++index) {
+        estimated_tokens_ -= estimate_tokens(messages_[index].content) + kTemplateOverheadPerMessage;
+    }
+
+    messages_.erase(
+        messages_.begin() + static_cast<std::ptrdiff_t>(system_offset),
+        messages_.begin() + static_cast<std::ptrdiff_t>(erase_end));
+    clear_kv_cache();
 }
 
 } // namespace zoo::core

@@ -61,7 +61,8 @@ public:
      */
     Expected<Response> generate(
         const std::string& user_message,
-        std::optional<TokenCallback> on_token = std::nullopt
+        std::optional<TokenCallback> on_token = std::nullopt,
+        CancellationCallback should_cancel = {}
     );
 
     /**
@@ -83,7 +84,8 @@ public:
      * @return Raw generation output plus prompt-token count and tool-call signal.
      */
     Expected<GenerationResult> generate_from_history(
-        std::optional<TokenCallback> on_token = std::nullopt
+        std::optional<TokenCallback> on_token = std::nullopt,
+        CancellationCallback should_cancel = {}
     );
 
     /**
@@ -116,18 +118,18 @@ public:
      */
     bool set_tool_grammar(const std::string& grammar_str);
     /// Disables grammar-constrained tool calling and restores the default sampler chain.
-    void clear_tool_grammar();
+    void clear_tool_grammar() noexcept;
     /// Returns whether tool grammar constraints are currently active.
-    bool has_tool_grammar() const { return grammar_active_; }
+    bool has_tool_grammar() const noexcept { return grammar_active_; }
 
     /// Returns the configured context window size.
-    int context_size() const;
+    int context_size() const noexcept;
     /// Returns the running estimate of tokens stored in conversation history.
-    int estimated_tokens() const;
+    int estimated_tokens() const noexcept;
     /// Returns whether the estimated history size exceeds the configured context window.
-    bool is_context_exceeded() const;
+    bool is_context_exceeded() const noexcept;
     /// Returns the immutable configuration used to construct the model.
-    const Config& config() const { return config_; }
+    const Config& config() const noexcept { return config_; }
 
 private:
     /// Constructs an uninitialized model wrapper. Call `initialize()` before use.
@@ -155,7 +157,8 @@ private:
         const std::vector<int>& prompt_tokens,
         int max_tokens,
         const std::vector<std::string>& stop_sequences,
-        const std::optional<TokenCallback>& on_token = std::nullopt
+        const std::optional<TokenCallback>& on_token = std::nullopt,
+        const CancellationCallback& should_cancel = {}
     );
     /// Renders the current conversation history through the active chat template.
     Expected<std::string> format_prompt();
@@ -175,6 +178,8 @@ private:
     std::vector<llama_chat_message> build_llama_messages() const;
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
+    /// Trims the oldest retained conversation state to the configured history budget.
+    void trim_history_to_fit();
 
     // Config
     Config config_;

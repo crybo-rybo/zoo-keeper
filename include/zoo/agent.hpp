@@ -113,12 +113,12 @@ private:
 /**
  * @brief Handle returned by `Agent::chat()` for request tracking and result retrieval.
  */
-struct RequestHandle {
+    struct RequestHandle {
     RequestId id; ///< Request identifier accepted by the agent.
     std::future<Expected<Response>> future; ///< Future resolved with the final response or error.
 
     /// Creates an empty handle with an invalid request id.
-    RequestHandle() : id(0) {}
+    RequestHandle() noexcept : id(0) {}
     /**
      * @brief Creates a handle bound to a live request future.
      *
@@ -128,9 +128,9 @@ struct RequestHandle {
     RequestHandle(RequestId id, std::future<Expected<Response>> future)
         : id(id), future(std::move(future)) {}
     /// Moves ownership of the result future.
-    RequestHandle(RequestHandle&&) = default;
+    RequestHandle(RequestHandle&&) noexcept = default;
     /// Moves ownership of the result future.
-    RequestHandle& operator=(RequestHandle&&) = default;
+    RequestHandle& operator=(RequestHandle&&) noexcept = default;
     /// Request handles are non-copyable because `std::future` is move-only.
     RequestHandle(const RequestHandle&) = delete;
     /// Request handles are non-copyable because `std::future` is move-only.
@@ -259,12 +259,12 @@ public:
     }
 
     /// Returns whether the background inference thread is still accepting work.
-    bool is_running() const {
+    bool is_running() const noexcept {
         return running_.load(std::memory_order_acquire);
     }
 
     /// Returns the immutable configuration used to create the agent.
-    const Config& get_config() const { return config_; }
+    const Config& get_config() const noexcept { return config_; }
 
     /// Returns a snapshot of the underlying model conversation history.
     std::vector<Message> get_history() const {
@@ -299,7 +299,7 @@ public:
     }
 
     /// Returns the number of tools currently registered with the agent.
-    size_t tool_count() const {
+    size_t tool_count() const noexcept {
         return tool_registry_.size();
     }
 
@@ -360,58 +360,66 @@ private:
 
     /// Main worker loop that drains queued requests until the agent stops.
     void inference_loop() {
-        while (running_.load(std::memory_order_acquire)) {
-            auto request_opt = request_queue_.pop();
-            if (!request_opt) break;
+        try {
+            while (running_.load(std::memory_order_acquire)) {
+                auto request_opt = request_queue_.pop();
+                if (!request_opt) break;
 
-            auto promise = request_opt->promise;
+                auto promise = request_opt->promise;
 
-            // Check per-request cancellation
-            if (request_opt->cancelled &&
-                request_opt->cancelled->load(std::memory_order_acquire)) {
-                ZOO_LOG("info", "request %lu cancelled before processing", (unsigned long)request_opt->id);
-                if (promise) {
-                    promise->set_value(std::unexpected(Error{
-                        ErrorCode::RequestCancelled, "Request cancelled"
-                    }));
+                // Check per-request cancellation
+                if (request_opt->cancelled &&
+                    request_opt->cancelled->load(std::memory_order_acquire)) {
+                    ZOO_LOG("info", "request %lu cancelled before processing", (unsigned long)request_opt->id);
+                    if (promise) {
+                        promise->set_value(std::unexpected(Error{
+                            ErrorCode::RequestCancelled, "Request cancelled"
+                        }));
+                    }
+                    cleanup_cancel_token(request_opt->id);
+                    continue;
                 }
+
+                Expected<Response> result;
+                try {
+                    result = process_request(*request_opt);
+                } catch (const std::exception& e) {
+                    ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
+                    result = std::unexpected(Error{
+                        ErrorCode::InferenceFailed,
+                        std::string("Unhandled exception: ") + e.what()
+                    });
+                } catch (...) {
+                    ZOO_LOG("error", "unknown exception in inference thread");
+                    result = std::unexpected(Error{
+                        ErrorCode::InferenceFailed,
+                        "Unknown exception in inference thread"
+                    });
+                }
+
                 cleanup_cancel_token(request_opt->id);
-                continue;
+
+                if (promise) {
+                    promise->set_value(std::move(result));
+                }
             }
 
-            Expected<Response> result;
-            try {
-                result = process_request(*request_opt);
-            } catch (const std::exception& e) {
-                ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
-                result = std::unexpected(Error{
-                    ErrorCode::InferenceFailed,
-                    std::string("Unhandled exception: ") + e.what()
-                });
-            } catch (...) {
-                ZOO_LOG("error", "unknown exception in inference thread");
-                result = std::unexpected(Error{
-                    ErrorCode::InferenceFailed,
-                    "Unknown exception in inference thread"
-                });
-            }
-
-            cleanup_cancel_token(request_opt->id);
-
-            if (promise) {
-                promise->set_value(std::move(result));
-            }
-        }
-
-        // Drain remaining requests
-        while (auto remaining = request_queue_.pop()) {
-            if (remaining->promise) {
-                remaining->promise->set_value(std::unexpected(Error{
-                    ErrorCode::AgentNotRunning,
-                    "Agent stopped before request could be processed"
-                }));
-            }
-            cleanup_cancel_token(remaining->id);
+            fail_pending_requests(Error{
+                ErrorCode::AgentNotRunning,
+                "Agent stopped before request could be processed"
+            });
+        } catch (const std::exception& e) {
+            ZOO_LOG("error", "fatal exception escaped inference thread: %s", e.what());
+            fail_pending_requests(Error{
+                ErrorCode::InferenceFailed,
+                std::string("Inference thread terminated unexpectedly: ") + e.what()
+            });
+        } catch (...) {
+            ZOO_LOG("error", "fatal unknown exception escaped inference thread");
+            fail_pending_requests(Error{
+                ErrorCode::InferenceFailed,
+                "Inference thread terminated unexpectedly"
+            });
         }
     }
 
@@ -513,7 +521,13 @@ private:
                 );
             }
 
-            auto generated = model_->generate_from_history(std::move(callback));
+            auto generated = model_->generate_from_history(
+                std::move(callback),
+                [&request]() {
+                    return request.cancelled &&
+                        request.cancelled->load(std::memory_order_acquire);
+                }
+            );
 
             if (!generated) {
                 return std::unexpected(generated.error());
@@ -650,6 +664,19 @@ private:
     void cleanup_cancel_token(RequestId id) {
         std::lock_guard<std::mutex> lock(cancel_tokens_mutex_);
         cancel_tokens_.erase(id);
+    }
+
+    /// Resolves every queued request with the supplied terminal error.
+    void fail_pending_requests(const Error& error) {
+        running_.store(false, std::memory_order_release);
+        request_queue_.shutdown();
+
+        while (auto remaining = request_queue_.pop()) {
+            if (remaining->promise) {
+                remaining->promise->set_value(std::unexpected(error));
+            }
+            cleanup_cancel_token(remaining->id);
+        }
     }
 
     /// Rebuilds the model's tool grammar from the currently registered tool schemas.

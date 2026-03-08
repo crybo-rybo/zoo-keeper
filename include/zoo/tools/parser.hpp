@@ -7,9 +7,9 @@
 
 #include "types.hpp"
 #include <nlohmann/json.hpp>
-#include <atomic>
 #include <string>
 #include <optional>
+#include <string_view>
 
 namespace zoo::tools {
 
@@ -51,7 +51,8 @@ public:
                         ToolCall tc;
                         tc.name = j["name"].get<std::string>();
                         tc.arguments = std::move(j["arguments"]);
-                        tc.id = j.value("id", generate_id());
+                        tc.id = j.value("id", generate_id(std::string_view(output).substr(
+                            pos, end_pos - pos + 1)));
 
                         result.tool_call = std::move(tc);
                         result.text_before = output.substr(0, pos);
@@ -107,7 +108,7 @@ public:
                 ToolCall tc;
                 tc.name = j["name"].get<std::string>();
                 tc.arguments = std::move(j["arguments"]);
-                tc.id = j.value("id", generate_id());
+                tc.id = j.value("id", generate_id(json_str));
                 result.tool_call = std::move(tc);
                 result.text_before = output.substr(0, open_pos);
                 return result;
@@ -149,9 +150,16 @@ private:
     }
 
     /// Generates a stable fallback tool-call identifier when the model omits one.
-    static std::string generate_id() {
-        static std::atomic<int> counter{0};
-        return "call_" + std::to_string(counter.fetch_add(1, std::memory_order_relaxed) + 1);
+    static std::string generate_id(std::string_view text) {
+        constexpr uint64_t kOffsetBasis = 14695981039346656037ull;
+        constexpr uint64_t kPrime = 1099511628211ull;
+
+        uint64_t hash = kOffsetBasis;
+        for (unsigned char c : text) {
+            hash ^= c;
+            hash *= kPrime;
+        }
+        return "call_" + std::to_string(hash);
     }
 };
 
