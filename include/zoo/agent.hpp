@@ -154,16 +154,15 @@ class Agent {
         }
 
         auto captured_names = param_names;
-        tools::ToolHandler handler =
-            [f = std::move(func), names = std::move(captured_names)](
-                const nlohmann::json& args) -> Expected<nlohmann::json> {
+        tools::ToolHandler handler = [f = std::move(func), names = std::move(captured_names)](
+                                         const nlohmann::json& args) -> Expected<nlohmann::json> {
             try {
                 if constexpr (traits::arity == 0) {
                     auto result = f();
                     return tools::detail::wrap_result(std::move(result));
                 } else {
-                    auto result = tools::detail::invoke_with_json<decltype(f), args_tuple>(
-                        f, args, names);
+                    auto result =
+                        tools::detail::invoke_with_json<decltype(f), args_tuple>(f, args, names);
                     return tools::detail::wrap_result(std::move(result));
                 }
             } catch (const nlohmann::json::exception& e) {

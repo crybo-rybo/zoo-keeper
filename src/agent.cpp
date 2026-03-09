@@ -227,9 +227,9 @@ struct Agent::Impl {
                     result = process_request(*request_opt);
                 } catch (const std::exception& e) {
                     ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
-                    result = std::unexpected(
-                        Error{ErrorCode::InferenceFailed,
-                              std::string("Unhandled exception: ") + e.what()});
+                    result =
+                        std::unexpected(Error{ErrorCode::InferenceFailed,
+                                              std::string("Unhandled exception: ") + e.what()});
                 } catch (...) {
                     ZOO_LOG("error", "unknown exception in inference thread");
                     result = std::unexpected(
@@ -243,8 +243,8 @@ struct Agent::Impl {
                 }
             }
 
-            fail_pending_requests(
-                Error{ErrorCode::AgentNotRunning, "Agent stopped before request could be processed"});
+            fail_pending_requests(Error{ErrorCode::AgentNotRunning,
+                                        "Agent stopped before request could be processed"});
         } catch (const std::exception& e) {
             ZOO_LOG("error", "fatal exception escaped inference thread: %s", e.what());
             fail_pending_requests(
@@ -359,7 +359,8 @@ struct Agent::Impl {
             if (detected_tool_call.has_value()) {
                 const auto& tc = *detected_tool_call;
 
-                model->add_message(Message::assistant(use_grammar_path ? generated->text : response_text));
+                model->add_message(
+                    Message::assistant(use_grammar_path ? generated->text : response_text));
                 model->finalize_response();
 
                 if (!use_grammar_path) {
@@ -378,8 +379,8 @@ struct Agent::Impl {
                                 config.max_tool_retries, validation_error.c_str());
 
                         std::string error_content = "Error: " + validation_error;
-                        model->add_message(
-                            Message::tool(error_content + "\nPlease correct the arguments.", tc.id));
+                        model->add_message(Message::tool(
+                            error_content + "\nPlease correct the arguments.", tc.id));
                         tool_call_history.push_back(Message::tool(std::move(error_content), tc.id));
                         continue;
                     }
@@ -441,9 +442,8 @@ struct Agent::Impl {
 
         ZOO_LOG("error", "tool loop iteration limit reached (%d)", max_tool_iterations);
         return std::unexpected(
-            Error{ErrorCode::ToolLoopLimitReached,
-                  "Tool loop iteration limit reached (" + std::to_string(max_tool_iterations) +
-                      ")"});
+            Error{ErrorCode::ToolLoopLimitReached, "Tool loop iteration limit reached (" +
+                                                       std::to_string(max_tool_iterations) + ")"});
     }
 
     void cleanup_cancel_token(RequestId id) {
@@ -506,9 +506,8 @@ Agent::Agent(Config config, std::unique_ptr<Impl> impl)
 
 Agent::~Agent() = default;
 
-RequestHandle
-Agent::chat(Message message,
-            std::optional<std::function<void(std::string_view)>> callback) {
+RequestHandle Agent::chat(Message message,
+                          std::optional<std::function<void(std::string_view)>> callback) {
     return impl_->chat(std::move(message), std::move(callback));
 }
 
