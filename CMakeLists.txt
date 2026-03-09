@@ -135,7 +135,7 @@ install(FILES
 )
 
 
-set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo_core -llama -lggml -lggml-base -lggml-cpu")
+set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo -llama -lggml -lggml-base -lggml-cpu")
 if(TARGET ggml-blas)
     string(APPEND ZOO_PKGCONFIG_LIBS " -lggml-blas")
 endif()
