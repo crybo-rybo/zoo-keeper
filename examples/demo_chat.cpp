@@ -30,14 +30,14 @@
 
 #include <zoo/zoo.hpp>
 
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <csignal>
 #include <atomic>
 #include <chrono>
-#include <iomanip>
+#include <csignal>
 #include <ctime>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <string>
 
 static std::atomic<bool> g_interrupted{false};
 
@@ -45,9 +45,15 @@ static std::atomic<bool> g_interrupted{false};
 // Example Tools
 // ============================================================================
 
-static int calculate_add(int a, int b) { return a + b; }
-static int calculate_subtract(int a, int b) { return a - b; }
-static double calculate_multiply(double a, double b) { return a * b; }
+static int calculate_add(int a, int b) {
+    return a + b;
+}
+static int calculate_subtract(int a, int b) {
+    return a - b;
+}
+static double calculate_multiply(double a, double b) {
+    return a * b;
+}
 
 static std::string get_current_time() {
     auto now = std::time(nullptr);
@@ -79,12 +85,18 @@ static DemoConfig load_config(const std::string& path) {
     DemoConfig dc;
 
     dc.zoo.model_path = j.at("model_path").get<std::string>();
-    if (j.contains("context_size"))    dc.zoo.context_size    = j["context_size"].get<int>();
-    if (j.contains("max_tokens"))      dc.zoo.max_tokens      = j["max_tokens"].get<int>();
-    if (j.contains("n_gpu_layers"))    dc.zoo.n_gpu_layers    = j["n_gpu_layers"].get<int>();
-    if (j.contains("use_mmap"))        dc.zoo.use_mmap        = j["use_mmap"].get<bool>();
-    if (j.contains("use_mlock"))       dc.zoo.use_mlock       = j["use_mlock"].get<bool>();
-    if (j.contains("system_prompt"))   dc.zoo.system_prompt   = j["system_prompt"].get<std::string>();
+    if (j.contains("context_size"))
+        dc.zoo.context_size = j["context_size"].get<int>();
+    if (j.contains("max_tokens"))
+        dc.zoo.max_tokens = j["max_tokens"].get<int>();
+    if (j.contains("n_gpu_layers"))
+        dc.zoo.n_gpu_layers = j["n_gpu_layers"].get<int>();
+    if (j.contains("use_mmap"))
+        dc.zoo.use_mmap = j["use_mmap"].get<bool>();
+    if (j.contains("use_mlock"))
+        dc.zoo.use_mlock = j["use_mlock"].get<bool>();
+    if (j.contains("system_prompt"))
+        dc.zoo.system_prompt = j["system_prompt"].get<std::string>();
     if (j.contains("stop_sequences")) {
         dc.zoo.stop_sequences = j["stop_sequences"].get<std::vector<std::string>>();
     }
@@ -103,12 +115,18 @@ static DemoConfig load_config(const std::string& path) {
 
     if (j.contains("sampling")) {
         auto& s = j["sampling"];
-        if (s.contains("temperature"))    dc.zoo.sampling.temperature    = s["temperature"].get<float>();
-        if (s.contains("top_p"))          dc.zoo.sampling.top_p          = s["top_p"].get<float>();
-        if (s.contains("top_k"))          dc.zoo.sampling.top_k          = s["top_k"].get<int>();
-        if (s.contains("repeat_penalty")) dc.zoo.sampling.repeat_penalty = s["repeat_penalty"].get<float>();
-        if (s.contains("repeat_last_n"))  dc.zoo.sampling.repeat_last_n  = s["repeat_last_n"].get<int>();
-        if (s.contains("seed"))           dc.zoo.sampling.seed           = s["seed"].get<int>();
+        if (s.contains("temperature"))
+            dc.zoo.sampling.temperature = s["temperature"].get<float>();
+        if (s.contains("top_p"))
+            dc.zoo.sampling.top_p = s["top_p"].get<float>();
+        if (s.contains("top_k"))
+            dc.zoo.sampling.top_k = s["top_k"].get<int>();
+        if (s.contains("repeat_penalty"))
+            dc.zoo.sampling.repeat_penalty = s["repeat_penalty"].get<float>();
+        if (s.contains("repeat_last_n"))
+            dc.zoo.sampling.repeat_last_n = s["repeat_last_n"].get<int>();
+        if (s.contains("seed"))
+            dc.zoo.sampling.seed = s["seed"].get<int>();
     }
 
     return dc;
@@ -127,13 +145,12 @@ static void print_separator() {
 static void print_metrics(const zoo::Metrics& metrics, const zoo::TokenUsage& usage) {
     std::cout << "\n";
     print_separator();
-    std::cout << "  Tokens: " << usage.prompt_tokens << " prompt + "
-              << usage.completion_tokens << " completion = "
-              << usage.total_tokens << " total\n";
+    std::cout << "  Tokens: " << usage.prompt_tokens << " prompt + " << usage.completion_tokens
+              << " completion = " << usage.total_tokens << " total\n";
     std::cout << "  Latency: " << metrics.latency_ms.count() << " ms\n";
     std::cout << "  TTFT: " << metrics.time_to_first_token_ms.count() << " ms\n";
-    std::cout << "  Speed: " << std::fixed << std::setprecision(1)
-              << metrics.tokens_per_second << " tok/s\n";
+    std::cout << "  Speed: " << std::fixed << std::setprecision(1) << metrics.tokens_per_second
+              << " tok/s\n";
     print_separator();
 }
 
@@ -145,7 +162,9 @@ static void print_welcome(const DemoConfig& dc) {
     print_separator();
     std::cout << "  Model: " << dc.zoo.model_path << "\n";
     std::cout << "  Context: " << dc.zoo.context_size << " tokens\n";
-    std::cout << "  Max tokens: " << (dc.zoo.max_tokens == -1 ? "unlimited" : std::to_string(dc.zoo.max_tokens)) << "\n";
+    std::cout << "  Max tokens: "
+              << (dc.zoo.max_tokens == -1 ? "unlimited" : std::to_string(dc.zoo.max_tokens))
+              << "\n";
     std::cout << "  Temperature: " << dc.zoo.sampling.temperature << "\n";
     std::cout << "  GPU layers: " << dc.zoo.n_gpu_layers << "\n";
     std::cout << "  System: " << dc.zoo.system_prompt.value_or("(none)") << "\n";
@@ -214,9 +233,12 @@ int main(int argc, char** argv) {
     // Register example tools
     if (dc.tools_enabled) {
         (void)agent->register_tool("add", "Add two integers", {"a", "b"}, calculate_add);
-        (void)agent->register_tool("subtract", "Subtract two integers", {"a", "b"}, calculate_subtract);
-        (void)agent->register_tool("multiply", "Multiply two numbers", {"a", "b"}, calculate_multiply);
-        (void)agent->register_tool("get_time", "Get the current date and time", {}, get_current_time);
+        (void)agent->register_tool("subtract", "Subtract two integers", {"a", "b"},
+                                   calculate_subtract);
+        (void)agent->register_tool("multiply", "Multiply two numbers", {"a", "b"},
+                                   calculate_multiply);
+        (void)agent->register_tool("get_time", "Get the current date and time", {},
+                                   get_current_time);
 
         auto base_prompt = dc.zoo.system_prompt.value_or("You are a helpful AI assistant.");
         agent->set_system_prompt(agent->build_tool_system_prompt(base_prompt));
@@ -230,15 +252,18 @@ int main(int argc, char** argv) {
         std::cout << "You: ";
         std::cout.flush();
 
-        if (!std::getline(std::cin, line)) break;
+        if (!std::getline(std::cin, line))
+            break;
 
         // Trim
         auto start = line.find_first_not_of(" \t\n\r");
-        if (start == std::string::npos) continue;
+        if (start == std::string::npos)
+            continue;
         line = line.substr(start, line.find_last_not_of(" \t\n\r") - start + 1);
 
         // Commands
-        if (line == "/quit" || line == "/exit") break;
+        if (line == "/quit" || line == "/exit")
+            break;
         if (line == "/clear") {
             agent->clear_history();
             std::cout << "History cleared.\n\n";
@@ -256,13 +281,12 @@ int main(int argc, char** argv) {
         std::cout.flush();
         g_interrupted.store(false, std::memory_order_release);
 
-        auto handle = agent->chat(
-            zoo::Message::user(line),
-            [](std::string_view token) { std::cout << token << std::flush; }
-        );
+        auto handle = agent->chat(zoo::Message::user(line),
+                                  [](std::string_view token) { std::cout << token << std::flush; });
 
         // Poll for Ctrl+C during generation
-        while (handle.future.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout) {
+        while (handle.future.wait_for(std::chrono::milliseconds(100)) ==
+               std::future_status::timeout) {
             if (g_interrupted.load(std::memory_order_acquire)) {
                 agent->cancel(handle.id);
                 break;

@@ -3,19 +3,29 @@
  * @brief Unit tests for grammar generation from registered tool schemas.
  */
 
-#include <gtest/gtest.h>
 #include "zoo/tools/grammar.hpp"
 #include "zoo/tools/registry.hpp"
+#include <gtest/gtest.h>
 
-static int add(int a, int b) { return a + b; }
-static std::string greet(std::string name) { return "Hi " + name; }
-static double scale(double x, double factor) { return x * factor; }
-static bool negate(bool val) { return !val; }
-static std::string get_time() { return "now"; }
+static int add(int a, int b) {
+    return a + b;
+}
+static std::string greet(std::string name) {
+    return "Hi " + name;
+}
+static double scale(double x, double factor) {
+    return x * factor;
+}
+static bool negate(bool val) {
+    return !val;
+}
+static std::string get_time() {
+    return "now";
+}
 
 /// Shared fixture that exposes a registry for grammar construction tests.
 class GrammarBuilderTest : public ::testing::Test {
-protected:
+  protected:
     zoo::tools::ToolRegistry registry;
 };
 

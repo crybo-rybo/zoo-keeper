@@ -6,15 +6,15 @@
 #pragma once
 
 #include "types.hpp"
-#include <nlohmann/json.hpp>
 #include <functional>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <shared_mutex>
 #include <string>
-#include <unordered_map>
-#include <vector>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 namespace zoo::tools {
 
@@ -23,47 +23,51 @@ namespace detail {
 /**
  * @brief Maps supported C++ parameter types to JSON Schema primitive names.
  */
-template<typename T>
-struct json_type_name;
+template <typename T> struct json_type_name;
 
-template<> struct json_type_name<int> { static constexpr const char* type = "integer"; };
-template<> struct json_type_name<float> { static constexpr const char* type = "number"; };
-template<> struct json_type_name<double> { static constexpr const char* type = "number"; };
-template<> struct json_type_name<bool> { static constexpr const char* type = "boolean"; };
-template<> struct json_type_name<std::string> { static constexpr const char* type = "string"; };
+template <> struct json_type_name<int> {
+    static constexpr const char* type = "integer";
+};
+template <> struct json_type_name<float> {
+    static constexpr const char* type = "number";
+};
+template <> struct json_type_name<double> {
+    static constexpr const char* type = "number";
+};
+template <> struct json_type_name<bool> {
+    static constexpr const char* type = "boolean";
+};
+template <> struct json_type_name<std::string> {
+    static constexpr const char* type = "string";
+};
 
 /**
  * @brief Extracts callable signature information for tool registration.
  */
-template<typename T>
-struct function_traits;
+template <typename T> struct function_traits;
 
-template<typename R, typename... Args>
-struct function_traits<R(*)(Args...)> {
+template <typename R, typename... Args> struct function_traits<R (*)(Args...)> {
     using return_type = R;
     using args_tuple = std::tuple<std::decay_t<Args>...>;
     static constexpr size_t arity = sizeof...(Args);
 };
 
-template<typename C, typename R, typename... Args>
-struct function_traits<R(C::*)(Args...) const> {
+template <typename C, typename R, typename... Args>
+struct function_traits<R (C::*)(Args...) const> {
     using return_type = R;
     using args_tuple = std::tuple<std::decay_t<Args>...>;
     static constexpr size_t arity = sizeof...(Args);
 };
 
-template<typename C, typename R, typename... Args>
-struct function_traits<R(C::*)(Args...)> {
+template <typename C, typename R, typename... Args> struct function_traits<R (C::*)(Args...)> {
     using return_type = R;
     using args_tuple = std::tuple<std::decay_t<Args>...>;
     static constexpr size_t arity = sizeof...(Args);
 };
 
-template<typename T>
-struct function_traits : function_traits<decltype(&T::operator())> {};
+template <typename T> struct function_traits : function_traits<decltype(&T::operator())> {};
 
-template<typename R, typename... Args>
-struct function_traits<std::function<R(Args...)>> {
+template <typename R, typename... Args> struct function_traits<std::function<R(Args...)>> {
     using return_type = R;
     using args_tuple = std::tuple<std::decay_t<Args>...>;
     static constexpr size_t arity = sizeof...(Args);
@@ -75,18 +79,16 @@ struct function_traits<std::function<R(Args...)>> {
  * @param param_names Parameter names in declaration order.
  * @return JSON Schema object containing `properties` and `required`.
  */
-template<typename Tuple, size_t... Is>
-nlohmann::json build_properties_impl(const std::vector<std::string>& param_names, std::index_sequence<Is...>) {
+template <typename Tuple, size_t... Is>
+nlohmann::json build_properties_impl(const std::vector<std::string>& param_names,
+                                     std::index_sequence<Is...>) {
     nlohmann::json properties = nlohmann::json::object();
     nlohmann::json required = nlohmann::json::array();
-    ((properties[param_names[Is]] = nlohmann::json{
-        {"type", json_type_name<std::tuple_element_t<Is, Tuple>>::type}
-    }, required.push_back(param_names[Is])), ...);
-    return nlohmann::json{
-        {"type", "object"},
-        {"properties", properties},
-        {"required", required}
-    };
+    ((properties[param_names[Is]] =
+          nlohmann::json{{"type", json_type_name<std::tuple_element_t<Is, Tuple>>::type}},
+      required.push_back(param_names[Is])),
+     ...);
+    return nlohmann::json{{"type", "object"}, {"properties", properties}, {"required", required}};
 }
 
 /**
@@ -95,7 +97,7 @@ nlohmann::json build_properties_impl(const std::vector<std::string>& param_names
  * @param param_names Parameter names in declaration order.
  * @return JSON Schema object describing the callable's argument object.
  */
-template<typename Tuple>
+template <typename Tuple>
 nlohmann::json build_properties(const std::vector<std::string>& param_names) {
     constexpr size_t N = std::tuple_size_v<Tuple>;
     return build_properties_impl<Tuple>(param_names, std::make_index_sequence<N>{});
@@ -108,8 +110,7 @@ nlohmann::json build_properties(const std::vector<std::string>& param_names) {
  * @param name Name of the field to extract.
  * @return Converted C++ value of type `T`.
  */
-template<typename T>
-T extract_arg(const nlohmann::json& args, const std::string& name) {
+template <typename T> T extract_arg(const nlohmann::json& args, const std::string& name) {
     return args.at(name).get<T>();
 }
 
@@ -121,7 +122,7 @@ T extract_arg(const nlohmann::json& args, const std::string& name) {
  * @param param_names Parameter names in declaration order.
  * @return Result returned by `func`.
  */
-template<typename Func, typename Tuple, size_t... Is>
+template <typename Func, typename Tuple, size_t... Is>
 auto invoke_with_json_impl(const Func& func, const nlohmann::json& args,
                            const std::vector<std::string>& param_names,
                            std::index_sequence<Is...>) {
@@ -136,12 +137,12 @@ auto invoke_with_json_impl(const Func& func, const nlohmann::json& args,
  * @param param_names Parameter names in declaration order.
  * @return Result returned by `func`.
  */
-template<typename Func, typename Tuple>
+template <typename Func, typename Tuple>
 auto invoke_with_json(const Func& func, const nlohmann::json& args,
                       const std::vector<std::string>& param_names) {
     constexpr size_t N = std::tuple_size_v<Tuple>;
-    return invoke_with_json_impl<Func, Tuple>(
-        func, args, param_names, std::make_index_sequence<N>{});
+    return invoke_with_json_impl<Func, Tuple>(func, args, param_names,
+                                              std::make_index_sequence<N>{});
 }
 
 /**
@@ -150,8 +151,7 @@ auto invoke_with_json(const Func& func, const nlohmann::json& args,
  * @param value Tool return value to serialize.
  * @return JSON object containing the serialized result.
  */
-template<typename T>
-nlohmann::json wrap_result(T&& value) {
+template <typename T> nlohmann::json wrap_result(T&& value) {
     return nlohmann::json{{"result", std::forward<T>(value)}};
 }
 
@@ -165,7 +165,7 @@ nlohmann::json wrap_result(T&& value) {
  * registered handlers.
  */
 class ToolRegistry {
-public:
+  public:
     /**
      * @brief Registers a strongly typed callable as a tool.
      *
@@ -181,9 +181,9 @@ public:
      *         `InvalidToolSignature` error when `param_names` does not match the
      *         callable arity.
      */
-    template<typename Func>
+    template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
-                       const std::vector<std::string>& param_names, Func func) {
+                                 const std::vector<std::string>& param_names, Func func) {
         using traits = detail::function_traits<Func>;
         using args_tuple = typename traits::args_tuple;
 
@@ -191,43 +191,35 @@ public:
             return std::unexpected(Error{
                 ErrorCode::InvalidToolSignature,
                 "Parameter name count (" + std::to_string(param_names.size()) +
-                ") does not match function arity (" + std::to_string(traits::arity) + ")"
-            });
+                    ") does not match function arity (" + std::to_string(traits::arity) + ")"});
         }
 
         nlohmann::json schema;
         if constexpr (traits::arity == 0) {
-            schema = nlohmann::json{
-                {"type", "object"},
-                {"properties", nlohmann::json::object()},
-                {"required", nlohmann::json::array()}
-            };
+            schema = nlohmann::json{{"type", "object"},
+                                    {"properties", nlohmann::json::object()},
+                                    {"required", nlohmann::json::array()}};
         } else {
             schema = detail::build_properties<args_tuple>(param_names);
         }
 
         auto captured_names = param_names;
         ToolHandler handler = [f = std::move(func), names = std::move(captured_names)](
-            const nlohmann::json& args) -> Expected<nlohmann::json> {
+                                  const nlohmann::json& args) -> Expected<nlohmann::json> {
             try {
                 if constexpr (traits::arity == 0) {
                     auto result = f();
                     return detail::wrap_result(std::move(result));
                 } else {
-                    auto result = detail::invoke_with_json<decltype(f), args_tuple>(
-                        f, args, names);
+                    auto result = detail::invoke_with_json<decltype(f), args_tuple>(f, args, names);
                     return detail::wrap_result(std::move(result));
                 }
             } catch (const nlohmann::json::exception& e) {
-                return std::unexpected(Error{
-                    ErrorCode::ToolExecutionFailed,
-                    std::string("JSON argument error: ") + e.what()
-                });
+                return std::unexpected(Error{ErrorCode::ToolExecutionFailed,
+                                             std::string("JSON argument error: ") + e.what()});
             } catch (const std::exception& e) {
-                return std::unexpected(Error{
-                    ErrorCode::ToolExecutionFailed,
-                    std::string("Tool execution failed: ") + e.what()
-                });
+                return std::unexpected(Error{ErrorCode::ToolExecutionFailed,
+                                             std::string("Tool execution failed: ") + e.what()});
             }
         };
 
@@ -248,7 +240,8 @@ public:
     void register_tool(const std::string& name, const std::string& description,
                        nlohmann::json schema, ToolHandler handler) {
         std::unique_lock lock(mutex_);
-        tools_.insert_or_assign(name, ToolEntry{name, description, std::move(schema), std::move(handler)});
+        tools_.insert_or_assign(
+            name, ToolEntry{name, description, std::move(schema), std::move(handler)});
     }
 
     /**
@@ -273,10 +266,7 @@ public:
         std::shared_lock lock(mutex_);
         auto it = tools_.find(name);
         if (it == tools_.end()) {
-            return std::unexpected(Error{
-                ErrorCode::ToolNotFound,
-                "Tool not found: " + name
-            });
+            return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
         }
         return it->second.handler(args);
     }
@@ -346,17 +336,14 @@ public:
         return tools_.size();
     }
 
-private:
+  private:
     /// Converts a registry entry into the schema shape consumed by prompts and grammar generation.
     static nlohmann::json build_schema_json(const ToolEntry& entry) {
-        return nlohmann::json{
-            {"type", "function"},
-            {"function", {
-                {"name", entry.name},
-                {"description", entry.description},
-                {"parameters", entry.parameters_schema}
-            }}
-        };
+        return nlohmann::json{{"type", "function"},
+                              {"function",
+                               {{"name", entry.name},
+                                {"description", entry.description},
+                                {"parameters", entry.parameters_schema}}}};
     }
 
     std::unordered_map<std::string, ToolEntry> tools_;

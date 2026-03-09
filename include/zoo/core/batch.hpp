@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include <vector>
 #include <algorithm>
+#include <vector>
 
 namespace zoo::core {
 
@@ -14,8 +14,8 @@ namespace zoo::core {
  * @brief Describes one contiguous token range to decode as a batch.
  */
 struct BatchChunk {
-    int offset; ///< Zero-based start index into the prompt token array.
-    int count; ///< Number of tokens included in the chunk.
+    int offset;       ///< Zero-based start index into the prompt token array.
+    int count;        ///< Number of tokens included in the chunk.
     bool emit_logits; ///< Whether the final token in the chunk should request logits.
 
     /// Compares two chunk plans for equality.
@@ -33,10 +33,9 @@ struct BatchChunk {
  * @return A sequence of chunk descriptors, or an empty vector when either input
  *         is non-positive.
  */
-[[nodiscard]] inline std::vector<BatchChunk> compute_prefill_chunks(
-    int total_tokens, int n_batch
-) {
-    if (total_tokens <= 0 || n_batch <= 0) return {};
+[[nodiscard]] inline std::vector<BatchChunk> compute_prefill_chunks(int total_tokens, int n_batch) {
+    if (total_tokens <= 0 || n_batch <= 0)
+        return {};
 
     std::vector<BatchChunk> chunks;
     int offset = 0;

@@ -5,13 +5,13 @@
 
 #pragma once
 
-#include "types.hpp"
 #include "parser.hpp"
-#include <zoo/core/types.hpp>
+#include "types.hpp"
+#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <optional>
-#include <functional>
+#include <zoo/core/types.hpp>
 
 namespace zoo::tools {
 
@@ -23,14 +23,14 @@ namespace zoo::tools {
  * has been fully observed.
  */
 class ToolCallInterceptor {
-public:
+  public:
     /**
      * @brief Final state produced after a streaming pass completes.
      */
     struct Result {
         std::optional<ToolCall> tool_call; ///< Parsed tool call when one was detected.
-        std::string visible_text; ///< User-visible text with tool-call JSON removed.
-        std::string full_text; ///< Full generated text including any buffered JSON.
+        std::string visible_text;          ///< User-visible text with tool-call JSON removed.
+        std::string full_text;             ///< Full generated text including any buffered JSON.
     };
 
     /**
@@ -39,10 +39,8 @@ public:
      * @param user_callback Optional callback that receives only visible text.
      */
     explicit ToolCallInterceptor(
-        std::optional<std::function<void(std::string_view)>> user_callback = std::nullopt
-    )
-        : user_callback_(std::move(user_callback))
-    {}
+        std::optional<std::function<void(std::string_view)>> user_callback = std::nullopt)
+        : user_callback_(std::move(user_callback)) {}
 
     /// Moving is disabled because callbacks returned by `make_callback()` capture `this`.
     ToolCallInterceptor(ToolCallInterceptor&&) = delete;
@@ -98,7 +96,7 @@ public:
         return result;
     }
 
-private:
+  private:
     enum class State { Normal, Buffering };
 
     /// Dispatches token handling based on whether JSON buffering is active.

@@ -1,6 +1,6 @@
 # Zoo-Keeper
 
-[![Tests](https://img.shields.io/badge/tests-54%20passing-success)]() [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-135%20passing-success)]() [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 A C++23 library built on [llama.cpp](https://github.com/ggerganov/llama.cpp) that wraps and harnesses local LLMs for agentic behavior. Zoo-Keeper handles model loading, inference, conversation management, type-safe tool calling, and an async agentic loop -- so you can focus on your application.
 
@@ -55,7 +55,7 @@ Zoo-Keeper uses a three-layer design with strict dependency direction:
 ```
 Layer 3: zoo::Agent        -- async orchestration, request queue, agentic tool loop
 Layer 2: zoo::tools        -- tool registry, parser, validation (no llama.cpp dependency)
-Layer 1: zoo::core         -- synchronous llama.cpp wrapper (Model, IBackend)
+Layer 1: zoo::core         -- synchronous llama.cpp wrapper (Model)
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full design.
@@ -83,16 +83,19 @@ The generated site is written to `build/docs/doxygen/html/index.html`. GitHub Ac
 
 ## Testing
 
-54 unit tests (pure logic) using GoogleTest:
+135 unit tests plus 4 integration tests for the concrete Model/Agent layers:
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
+Configure with `-DZOO_BUILD_INTEGRATION_TESTS=ON` and optionally set `ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf` to enable the live generation smoke tests.
+
 ## Acknowledgments
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
 - [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann
+- [GoogleTest](https://github.com/google/googletest) by Google
 
 ## License
 

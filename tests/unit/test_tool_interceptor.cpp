@@ -3,8 +3,8 @@
  * @brief Unit tests for streamed tool-call interception behavior.
  */
 
-#include <gtest/gtest.h>
 #include "zoo/tools/interceptor.hpp"
+#include <gtest/gtest.h>
 #include <string>
 #include <vector>
 
@@ -12,10 +12,8 @@ using zoo::TokenAction;
 using zoo::tools::ToolCallInterceptor;
 
 /// Simulates token streaming through a `ToolCallInterceptor`.
-static ToolCallInterceptor::Result simulate_tokens(
-    const std::vector<std::string>& tokens,
-    std::string* streamed_output = nullptr
-) {
+static ToolCallInterceptor::Result simulate_tokens(const std::vector<std::string>& tokens,
+                                                   std::string* streamed_output = nullptr) {
     std::optional<std::function<void(std::string_view)>> user_cb;
     if (streamed_output) {
         user_cb = [streamed_output](std::string_view sv) {
@@ -28,7 +26,8 @@ static ToolCallInterceptor::Result simulate_tokens(
 
     for (const auto& token : tokens) {
         TokenAction action = callback(token);
-        if (action == TokenAction::Stop) break;
+        if (action == TokenAction::Stop)
+            break;
     }
 
     return interceptor.finalize();
@@ -43,7 +42,7 @@ TEST(ToolCallInterceptorTest, DetectsToolCallAndStopsGeneration) {
         " {\"a\": 3,",
         " \"b\": 4}",
         "}",
-        " Here is the result..."  // should never be reached
+        " Here is the result..." // should never be reached
     };
 
     std::string streamed;
@@ -60,10 +59,7 @@ TEST(ToolCallInterceptorTest, DetectsToolCallAndStopsGeneration) {
 }
 
 TEST(ToolCallInterceptorTest, NoToolCallPassesThrough) {
-    std::vector<std::string> tokens = {
-        "The capital of France",
-        " is Paris."
-    };
+    std::vector<std::string> tokens = {"The capital of France", " is Paris."};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -74,10 +70,8 @@ TEST(ToolCallInterceptorTest, NoToolCallPassesThrough) {
 }
 
 TEST(ToolCallInterceptorTest, ToolCallOnlyNoPrefix) {
-    std::vector<std::string> tokens = {
-        "{\"name\": \"greet\",",
-        " \"arguments\": {\"name\": \"Alice\"}}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"greet\",",
+                                       " \"arguments\": {\"name\": \"Alice\"}}"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -94,12 +88,8 @@ TEST(ToolCallInterceptorTest, ToolCallOnlyNoPrefix) {
 // ============================================================================
 
 TEST(ToolCallInterceptorTest, NonToolJsonPassesThrough) {
-    std::vector<std::string> tokens = {
-        "Here is data: ",
-        "{\"key\": \"value\",",
-        " \"count\": 42}",
-        " and more text."
-    };
+    std::vector<std::string> tokens = {"Here is data: ", "{\"key\": \"value\",", " \"count\": 42}",
+                                       " and more text."};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -109,11 +99,8 @@ TEST(ToolCallInterceptorTest, NonToolJsonPassesThrough) {
 }
 
 TEST(ToolCallInterceptorTest, NonToolJsonFollowedByToolCall) {
-    std::vector<std::string> tokens = {
-        "Data: {\"x\": 1}",
-        " Now calling: ",
-        "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}"
-    };
+    std::vector<std::string> tokens = {"Data: {\"x\": 1}", " Now calling: ",
+                                       "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -177,8 +164,7 @@ TEST(ToolCallInterceptorTest, SingleCharacterTokens) {
 
 TEST(ToolCallInterceptorTest, EntireOutputInOneToken) {
     std::vector<std::string> tokens = {
-        "Hello! {\"name\": \"greet\", \"arguments\": {\"name\": \"Bob\"}}"
-    };
+        "Hello! {\"name\": \"greet\", \"arguments\": {\"name\": \"Bob\"}}"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -194,10 +180,7 @@ TEST(ToolCallInterceptorTest, EntireOutputInOneToken) {
 
 TEST(ToolCallInterceptorTest, IncompleteToolCallAtEOS) {
     // Model stops generating mid-JSON (hit EOS or max tokens)
-    std::vector<std::string> tokens = {
-        "Here: ",
-        "{\"name\": \"add\", \"arg"
-    };
+    std::vector<std::string> tokens = {"Here: ", "{\"name\": \"add\", \"arg"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -209,9 +192,7 @@ TEST(ToolCallInterceptorTest, IncompleteToolCallAtEOS) {
 
 TEST(ToolCallInterceptorTest, CompleteToolCallAtEOS) {
     // Model generates a complete tool call and then EOS (no Stop needed)
-    std::vector<std::string> tokens = {
-        "{\"name\": \"test\", \"arguments\": {}}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"test\", \"arguments\": {}}"};
 
     auto result = simulate_tokens(tokens);
 
@@ -224,27 +205,23 @@ TEST(ToolCallInterceptorTest, CompleteToolCallAtEOS) {
 // ============================================================================
 
 TEST(ToolCallInterceptorTest, FullTextIncludesEverything) {
-    std::vector<std::string> tokens = {
-        "Prefix ",
-        "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}"
-    };
+    std::vector<std::string> tokens = {"Prefix ",
+                                       "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}"};
 
     auto result = simulate_tokens(tokens);
 
     ASSERT_TRUE(result.tool_call.has_value());
-    EXPECT_EQ(result.full_text,
-        "Prefix {\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}");
+    EXPECT_EQ(result.full_text, "Prefix {\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}");
 }
 
 TEST(ToolCallInterceptorTest, NoCallbackStillWorks) {
-    std::vector<std::string> tokens = {
-        "{\"name\": \"test\", \"arguments\": {}}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"test\", \"arguments\": {}}"};
 
     // No user callback — should still detect tool call
     ToolCallInterceptor interceptor;
     auto callback = interceptor.make_callback();
-    for (const auto& t : tokens) callback(t);
+    for (const auto& t : tokens)
+        callback(t);
     auto result = interceptor.finalize();
 
     ASSERT_TRUE(result.tool_call.has_value());
@@ -257,8 +234,7 @@ TEST(ToolCallInterceptorTest, NoCallbackStillWorks) {
 
 TEST(ToolCallInterceptorTest, PreservesToolCallId) {
     std::vector<std::string> tokens = {
-        "{\"name\": \"search\", \"id\": \"call_42\", \"arguments\": {\"q\": \"test\"}}"
-    };
+        "{\"name\": \"search\", \"id\": \"call_42\", \"arguments\": {\"q\": \"test\"}}"};
 
     auto result = simulate_tokens(tokens);
 
@@ -272,11 +248,8 @@ TEST(ToolCallInterceptorTest, PreservesToolCallId) {
 // ============================================================================
 
 TEST(ToolCallInterceptorTest, MultipleJsonBeforeToolCall) {
-    std::vector<std::string> tokens = {
-        "{\"info\": 1} ",
-        "{\"info\": 2} ",
-        "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}"
-    };
+    std::vector<std::string> tokens = {"{\"info\": 1} ", "{\"info\": 2} ",
+                                       "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -299,10 +272,7 @@ TEST(ToolCallInterceptorTest, EmptyInput) {
 
 TEST(ToolCallInterceptorTest, FullTextMatchesVisibleTextWhenNoToolCall) {
     // When there is no tool call, full_text should equal visible_text exactly
-    std::vector<std::string> tokens = {
-        "The answer is ",
-        "42."
-    };
+    std::vector<std::string> tokens = {"The answer is ", "42."};
 
     auto result = simulate_tokens(tokens);
 
@@ -316,10 +286,8 @@ TEST(ToolCallInterceptorTest, FullTextMatchesVisibleTextWhenNoToolCall) {
 // ============================================================================
 
 TEST(ToolCallInterceptorTest, ToolCallWithBooleanArguments) {
-    std::vector<std::string> tokens = {
-        "{\"name\": \"set_flag\",",
-        " \"arguments\": {\"enabled\": true, \"verbose\": false}}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"set_flag\",",
+                                       " \"arguments\": {\"enabled\": true, \"verbose\": false}}"};
 
     auto result = simulate_tokens(tokens);
 
@@ -330,10 +298,8 @@ TEST(ToolCallInterceptorTest, ToolCallWithBooleanArguments) {
 }
 
 TEST(ToolCallInterceptorTest, ToolCallWithNullArgument) {
-    std::vector<std::string> tokens = {
-        "{\"name\": \"process\",",
-        " \"arguments\": {\"value\": null, \"label\": \"test\"}}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"process\",",
+                                       " \"arguments\": {\"value\": null, \"label\": \"test\"}}"};
 
     auto result = simulate_tokens(tokens);
 
@@ -344,10 +310,8 @@ TEST(ToolCallInterceptorTest, ToolCallWithNullArgument) {
 }
 
 TEST(ToolCallInterceptorTest, ToolCallWithNestedObjectArguments) {
-    std::vector<std::string> tokens = {
-        "{\"name\": \"create\",",
-        " \"arguments\": {\"config\": {\"x\": 1, \"y\": 2}}}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"create\",",
+                                       " \"arguments\": {\"config\": {\"x\": 1, \"y\": 2}}}"};
 
     auto result = simulate_tokens(tokens);
 
@@ -366,8 +330,7 @@ TEST(ToolCallInterceptorTest, NonToolJsonAndToolCallInSingleToken) {
     // This exercises the process_normal(token.substr(i+1)) recursion after
     // flushing the non-tool JSON.
     std::vector<std::string> tokens = {
-        "{\"x\": 1}{\"name\": \"add\", \"arguments\": {\"a\": 5, \"b\": 6}}"
-    };
+        "{\"x\": 1}{\"name\": \"add\", \"arguments\": {\"a\": 5, \"b\": 6}}"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -388,10 +351,7 @@ TEST(ToolCallInterceptorTest, NonToolJsonAndToolCallInSingleToken) {
 TEST(ToolCallInterceptorTest, WhitespaceOnlyPrefixBeforeToolCall) {
     // Some models emit a newline before tool call JSON — verify the newline
     // is treated as visible text and the tool call is still detected.
-    std::vector<std::string> tokens = {
-        "\n",
-        "{\"name\": \"ping\", \"arguments\": {}}"
-    };
+    std::vector<std::string> tokens = {"\n", "{\"name\": \"ping\", \"arguments\": {}}"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -409,10 +369,8 @@ TEST(ToolCallInterceptorTest, WhitespaceOnlyPrefixBeforeToolCall) {
 TEST(ToolCallInterceptorTest, ClosingBraceInSeparateToken) {
     // The final '}' of the tool call arrives as a separate single-character
     // token, distinct from the rest of the JSON body.
-    std::vector<std::string> tokens = {
-        "{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}",
-        "}"
-    };
+    std::vector<std::string> tokens = {"{\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}",
+                                       "}"};
 
     auto result = simulate_tokens(tokens);
 
@@ -429,11 +387,7 @@ TEST(ToolCallInterceptorTest, ClosingBraceInSeparateToken) {
 
 TEST(ToolCallInterceptorTest, EmptyJsonObjectPassesThroughAsText) {
     // {} has no "name" or "arguments" — should be flushed as plain text
-    std::vector<std::string> tokens = {
-        "Result: ",
-        "{}",
-        " done."
-    };
+    std::vector<std::string> tokens = {"Result: ", "{}", " done."};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -452,7 +406,7 @@ TEST(ToolCallInterceptorTest, TokensAfterStopAreIgnored) {
     // that the caller might feed in should not affect the result.
     std::vector<std::string> all_tokens = {
         "{\"name\": \"first\", \"arguments\": {}}",
-        "{\"name\": \"second\", \"arguments\": {}}"  // should never be processed
+        "{\"name\": \"second\", \"arguments\": {}}" // should never be processed
     };
 
     // simulate_tokens already breaks on Stop, but let's also verify via
@@ -480,11 +434,7 @@ TEST(ToolCallInterceptorTest, TokensAfterStopAreIgnored) {
 TEST(ToolCallInterceptorTest, FullTextIncludesNonToolJson) {
     // full_text should be the raw concatenation of all tokens regardless of
     // whether the content is a tool call or plain JSON
-    std::vector<std::string> tokens = {
-        "Prefix ",
-        "{\"info\": 99}",
-        " suffix"
-    };
+    std::vector<std::string> tokens = {"Prefix ", "{\"info\": 99}", " suffix"};
 
     auto result = simulate_tokens(tokens);
 

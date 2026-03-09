@@ -3,8 +3,8 @@
  * @brief Unit tests for shared core value types and validation helpers.
  */
 
-#include <gtest/gtest.h>
 #include "zoo/core/types.hpp"
+#include <gtest/gtest.h>
 
 TEST(RoleTest, RoleToString) {
     EXPECT_STREQ(zoo::role_to_string(zoo::Role::System), "system");
@@ -219,9 +219,28 @@ TEST(ConfigTest, ValidationRejectsNegativeToolRetries) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
 }
 
+TEST(ConfigTest, ValidationRejectsZeroHistoryBudget) {
+    zoo::Config config;
+    config.model_path = "/path/to/model.gguf";
+    config.max_history_messages = 0;
+    auto result = config.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
 TEST(ConfigTest, DefaultQueueCapacity) {
     zoo::Config config;
     EXPECT_EQ(config.request_queue_capacity, 64u);
+}
+
+TEST(ConfigTest, DefaultGpuOffloadIsDisabled) {
+    zoo::Config config;
+    EXPECT_EQ(config.n_gpu_layers, 0);
+}
+
+TEST(ConfigTest, DefaultHistoryBudgetIsBounded) {
+    zoo::Config config;
+    EXPECT_EQ(config.max_history_messages, 64u);
 }
 
 TEST(ConfigTest, DefaultToolLimits) {
@@ -245,6 +264,15 @@ TEST(ConfigTest, EqualityToolLimits) {
     c2.model_path = "/path/to/model.gguf";
     EXPECT_EQ(c1, c2);
     c2.max_tool_iterations = 10;
+    EXPECT_NE(c1, c2);
+}
+
+TEST(ConfigTest, EqualityHistoryBudget) {
+    zoo::Config c1, c2;
+    c1.model_path = "/path/to/model.gguf";
+    c2.model_path = "/path/to/model.gguf";
+    EXPECT_EQ(c1, c2);
+    c2.max_history_messages = 32;
     EXPECT_NE(c1, c2);
 }
 
@@ -280,11 +308,9 @@ TEST(RoleValidationTest, ConsecutiveSameRoleFails) {
 }
 
 TEST(RoleValidationTest, ConsecutiveToolAllowed) {
-    std::vector<zoo::Message> history = {
-        zoo::Message::user("Hello"),
-        zoo::Message::assistant("I'll use tools"),
-        zoo::Message::tool("result1", "id1")
-    };
+    std::vector<zoo::Message> history = {zoo::Message::user("Hello"),
+                                         zoo::Message::assistant("I'll use tools"),
+                                         zoo::Message::tool("result1", "id1")};
     EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Tool).has_value());
 }
 

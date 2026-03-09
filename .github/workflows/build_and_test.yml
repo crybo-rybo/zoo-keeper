@@ -1,0 +1,166 @@
+name: Build and Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          mapfile -t files < <(git ls-files '*.hpp' '*.cpp' '*.h' '*.c' | grep -v '^extern/')
+          if [ ${#files[@]} -eq 0 ]; then
+            exit 0
+          fi
+          clang-format-18 --dry-run --Werror "${files[@]}"
+
+  static-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 clang-tidy-18 libc++-18-dev libc++abi-18-dev
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
+
+      - name: Run clang-tidy
+        run: |
+          mapfile -t files < <(git ls-files '*.cpp' | grep -v '^extern/' | grep -v '^tests/integration/')
+          if [ ${#files[@]} -eq 0 ]; then
+            exit 0
+          fi
+          clang-tidy-18 -p build --quiet \
+            --header-filter='^(include/zoo|src|tests|examples)/' \
+            "${files[@]}"
+
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+            cmake_extra: ""
+          - os: ubuntu-latest
+            compiler: clang
+            cmake_extra: ""
+          - os: macos-latest
+            compiler: clang
+            cmake_extra: "-DZOO_ENABLE_METAL=ON"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Clang (Ubuntu)
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
+
+      - name: Build
+        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure CMake with sanitizers
+        run: cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests under sanitizers
+        run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install coverage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+
+      - name: Configure CMake with coverage
+        run: cmake -B build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Capture coverage
+        run: |
+          lcov --capture --directory build --output-file coverage.info \
+            --ignore-errors mismatch
+          lcov --remove coverage.info '/usr/*' '*/extern/*' '*/build/_deps/*' '*/tests/*' \
+            --output-file coverage.info --ignore-errors unused
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.info
+
+      - name: Upload to Codecov
+        if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.info
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

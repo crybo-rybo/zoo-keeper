@@ -1,6 +1,23 @@
 # Examples Cookbook
 
-Complete, copy-paste code snippets for common Zoo-Keeper patterns.
+Complete, copy-paste code snippets for common Zoo-Keeper patterns, plus matching executable examples under `examples/`.
+
+## Example Executables
+
+Build all example binaries with:
+
+```bash
+cmake -B build -DZOO_BUILD_EXAMPLES=ON
+cmake --build build
+```
+
+Available programs:
+
+- `demo_chat` -- interactive CLI chat loop
+- `model_generate` -- synchronous `zoo::core::Model` usage
+- `error_handling` -- structured runtime error reporting
+- `stream_cancel` -- streaming output with cooperative cancellation
+- `custom_tool_schema` -- nested JSON arguments with a manual tool schema
 
 ## Streaming Output
 
@@ -109,6 +126,8 @@ if (!result && result.error().code == zoo::ErrorCode::RequestCancelled) {
 }
 ```
 
+The `stream_cancel` executable demonstrates the same pattern end to end with a real `Agent`.
+
 ## Metrics
 
 ```cpp
@@ -153,6 +172,8 @@ int main() {
     }
 }
 ```
+
+The `model_generate` executable is the standalone version of this pattern.
 
 ## See Also
 

@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "types.hpp"
 #include "registry.hpp"
+#include "types.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -18,15 +18,13 @@ namespace zoo::tools {
  * @brief Validates parsed tool calls against registry metadata and tracks retries.
  */
 class ErrorRecovery {
-public:
+  public:
     /**
      * @brief Creates a validator with a fixed retry budget per tool name.
      *
      * @param max_retries Maximum number of retries allowed for a malformed tool call.
      */
-    explicit ErrorRecovery(int max_retries = 2)
-        : max_retries_(max_retries)
-    {}
+    explicit ErrorRecovery(int max_retries = 2) : max_retries_(max_retries) {}
 
     /**
      * @brief Validates a tool call against the registered parameter schema.
@@ -62,8 +60,8 @@ public:
                     }
                     const auto& expected_type = type_it->get_ref<const std::string&>();
                     if (!type_matches(*arg_it, expected_type)) {
-                        return "Argument '" + key + "' has wrong type: expected " +
-                               expected_type + ", got " + json_type_name(*arg_it);
+                        return "Argument '" + key + "' has wrong type: expected " + expected_type +
+                               ", got " + json_type_name(*arg_it);
                     }
                 }
             }
@@ -80,7 +78,8 @@ public:
      */
     bool can_retry(const std::string& tool_name) const {
         auto it = retry_counts_.find(tool_name);
-        if (it == retry_counts_.end()) return true;
+        if (it == retry_counts_.end())
+            return true;
         return it->second < max_retries_;
     }
 
@@ -101,7 +100,8 @@ public:
      */
     int get_retry_count(const std::string& tool_name) const {
         auto it = retry_counts_.find(tool_name);
-        if (it == retry_counts_.end()) return 0;
+        if (it == retry_counts_.end())
+            return 0;
         return it->second;
     }
 
@@ -111,32 +111,47 @@ public:
     }
 
     /// Returns the configured maximum retry count.
-    int max_retries() const { return max_retries_; }
+    int max_retries() const {
+        return max_retries_;
+    }
 
-private:
+  private:
     int max_retries_;
     std::unordered_map<std::string, int> retry_counts_;
 
     /// Returns whether a JSON value matches the expected JSON Schema primitive type.
     static bool type_matches(const nlohmann::json& val, std::string_view expected) {
-        if (expected == "integer") return val.is_number_integer();
-        if (expected == "number") return val.is_number();
-        if (expected == "string") return val.is_string();
-        if (expected == "boolean") return val.is_boolean();
-        if (expected == "object") return val.is_object();
-        if (expected == "array") return val.is_array();
+        if (expected == "integer")
+            return val.is_number_integer();
+        if (expected == "number")
+            return val.is_number();
+        if (expected == "string")
+            return val.is_string();
+        if (expected == "boolean")
+            return val.is_boolean();
+        if (expected == "object")
+            return val.is_object();
+        if (expected == "array")
+            return val.is_array();
         return false;
     }
 
     /// Returns a stable human-readable name for a JSON value type.
     static const char* json_type_name(const nlohmann::json& val) {
-        if (val.is_null()) return "null";
-        if (val.is_boolean()) return "boolean";
-        if (val.is_number_integer()) return "integer";
-        if (val.is_number_float()) return "number";
-        if (val.is_string()) return "string";
-        if (val.is_array()) return "array";
-        if (val.is_object()) return "object";
+        if (val.is_null())
+            return "null";
+        if (val.is_boolean())
+            return "boolean";
+        if (val.is_number_integer())
+            return "integer";
+        if (val.is_number_float())
+            return "number";
+        if (val.is_string())
+            return "string";
+        if (val.is_array())
+            return "array";
+        if (val.is_object())
+            return "object";
         return "unknown";
     }
 };

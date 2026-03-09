@@ -7,8 +7,8 @@
 
 #include "types.hpp"
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 /// Forward declarations for llama.cpp runtime types owned by `zoo::core::Model`.
 struct llama_model;
@@ -27,7 +27,7 @@ namespace zoo::core {
  * thread-safe; callers that need concurrency should use `zoo::Agent`.
  */
 class Model {
-public:
+  public:
     /**
      * @brief Loads and initializes a model from the supplied configuration.
      *
@@ -57,20 +57,22 @@ public:
      *
      * @param user_message User-authored content to append before generation.
      * @param on_token Optional callback invoked for streamed token fragments.
+     * @param should_cancel Optional callback queried each decode step; returning
+     *        `true` terminates generation with a `RequestCancelled` error.
      * @return Completed assistant response or an error.
      */
-    Expected<Response> generate(
-        const std::string& user_message,
-        std::optional<TokenCallback> on_token = std::nullopt
-    );
+    Expected<Response> generate(const std::string& user_message,
+                                std::optional<TokenCallback> on_token = std::nullopt,
+                                CancellationCallback should_cancel = {});
 
     /**
      * @brief Result of a low-level generation pass started from existing history.
      */
     struct GenerationResult {
-        std::string text; ///< Raw generated text for the pass.
+        std::string text;      ///< Raw generated text for the pass.
         int prompt_tokens = 0; ///< Number of prompt tokens rendered for the pass.
-        bool tool_call_detected = false; ///< Whether sentinel-based grammar mode emitted a tool call.
+        bool tool_call_detected =
+            false; ///< Whether sentinel-based grammar mode emitted a tool call.
     };
 
     /**
@@ -80,11 +82,13 @@ public:
      * alternate between assistant generations and injected tool results.
      *
      * @param on_token Optional callback invoked for streamed token fragments.
+     * @param should_cancel Optional callback queried each decode step; returning
+     *        `true` terminates generation with a cancellation signal.
      * @return Raw generation output plus prompt-token count and tool-call signal.
      */
-    Expected<GenerationResult> generate_from_history(
-        std::optional<TokenCallback> on_token = std::nullopt
-    );
+    Expected<GenerationResult>
+    generate_from_history(std::optional<TokenCallback> on_token = std::nullopt,
+                          CancellationCallback should_cancel = {});
 
     /**
      * @brief Advances the incremental chat-template checkpoint to the current history.
@@ -94,7 +98,11 @@ public:
      */
     void finalize_response();
 
-    /// Sets or replaces the leading system prompt in the tracked conversation history.
+    /**
+     * @brief Sets or replaces the leading system prompt in the tracked conversation history.
+     *
+     * @param prompt New system prompt content.
+     */
     void set_system_prompt(const std::string& prompt);
     /**
      * @brief Appends a message to history after validating role sequencing.
@@ -116,20 +124,24 @@ public:
      */
     bool set_tool_grammar(const std::string& grammar_str);
     /// Disables grammar-constrained tool calling and restores the default sampler chain.
-    void clear_tool_grammar();
+    void clear_tool_grammar() noexcept;
     /// Returns whether tool grammar constraints are currently active.
-    bool has_tool_grammar() const { return grammar_active_; }
+    bool has_tool_grammar() const noexcept {
+        return grammar_active_;
+    }
 
     /// Returns the configured context window size.
-    int context_size() const;
+    int context_size() const noexcept;
     /// Returns the running estimate of tokens stored in conversation history.
-    int estimated_tokens() const;
+    int estimated_tokens() const noexcept;
     /// Returns whether the estimated history size exceeds the configured context window.
-    bool is_context_exceeded() const;
+    bool is_context_exceeded() const noexcept;
     /// Returns the immutable configuration used to construct the model.
-    const Config& config() const { return config_; }
+    const Config& config() const noexcept {
+        return config_;
+    }
 
-private:
+  private:
     /// Constructs an uninitialized model wrapper. Call `initialize()` before use.
     explicit Model(const Config& config);
 
@@ -151,12 +163,10 @@ private:
      * @param on_token Optional streaming callback invoked for visible token pieces.
      * @return The generated text for the pass.
      */
-    Expected<std::string> run_inference(
-        const std::vector<int>& prompt_tokens,
-        int max_tokens,
-        const std::vector<std::string>& stop_sequences,
-        const std::optional<TokenCallback>& on_token = std::nullopt
-    );
+    Expected<std::string> run_inference(const std::vector<int>& prompt_tokens, int max_tokens,
+                                        const std::vector<std::string>& stop_sequences,
+                                        const std::optional<TokenCallback>& on_token = std::nullopt,
+                                        const CancellationCallback& should_cancel = {});
     /// Renders the current conversation history through the active chat template.
     Expected<std::string> format_prompt();
     /// Clears cached KV memory and resets incremental prompt bookkeeping.
@@ -166,6 +176,10 @@ private:
     static void initialize_global();
     /// Builds the default sampler chain from the configured sampling parameters.
     llama_sampler* create_sampler_chain();
+    /// Adds penalty, top-k, top-p, and temperature samplers to an existing chain.
+    void add_sampling_stages(llama_sampler* chain) const;
+    /// Adds a distribution or greedy sampler as the final selection stage.
+    void add_dist_sampler(llama_sampler* chain) const;
     /// Rebuilds the sampler chain so a lazy grammar activates on `<tool_call>`.
     bool rebuild_sampler_with_grammar();
     /// Returns the length of a matching stop sequence suffix, or zero if none match.
@@ -175,6 +189,8 @@ private:
     std::vector<llama_chat_message> build_llama_messages() const;
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
+    /// Trims the oldest retained conversation state to the configured history budget.
+    void trim_history_to_fit();
 
     // Config
     Config config_;

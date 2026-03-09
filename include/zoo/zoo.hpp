@@ -12,15 +12,15 @@
 #include "version.hpp"
 
 // Core types and model
-#include "core/types.hpp"
 #include "core/model.hpp"
+#include "core/types.hpp"
 
 // Tool system
-#include "tools/types.hpp"
-#include "tools/registry.hpp"
-#include "tools/parser.hpp"
-#include "tools/validation.hpp"
 #include "tools/interceptor.hpp"
+#include "tools/parser.hpp"
+#include "tools/registry.hpp"
+#include "tools/types.hpp"
+#include "tools/validation.hpp"
 
 // Agent (async orchestration)
 #include "agent.hpp"

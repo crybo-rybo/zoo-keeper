@@ -36,3 +36,7 @@ gtest_discover_tests(zoo_tests
 zoo_set_warnings(zoo_tests PRIVATE)
 zoo_enable_coverage(zoo_tests)
 zoo_enable_sanitizers(zoo_tests)
+
+if(ZOO_BUILD_INTEGRATION_TESTS)
+    add_subdirectory(integration)
+endif()

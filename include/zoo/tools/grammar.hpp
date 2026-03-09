@@ -16,7 +16,7 @@ namespace zoo::tools {
  * @brief Builds a GBNF grammar that constrains output to registered tool calls.
  */
 class GrammarBuilder {
-public:
+  public:
     /**
      * @brief Builds a grammar from the registry's tool schemas.
      *
@@ -25,13 +25,15 @@ public:
      *         schemas are invalid or cannot be represented safely.
      */
     static std::string build(const nlohmann::json& tool_schemas) {
-        if (!tool_schemas.is_array() || tool_schemas.empty()) return {};
+        if (!tool_schemas.is_array() || tool_schemas.empty())
+            return {};
 
         // Reject tool name collisions after sanitization
         std::unordered_set<std::string> seen_names;
         for (const auto& schema : tool_schemas) {
             auto safe = sanitize(schema["function"]["name"].get<std::string>());
-            if (!seen_names.insert(safe).second) return {};
+            if (!seen_names.insert(safe).second)
+                return {};
         }
 
         std::string grammar;
@@ -40,7 +42,8 @@ public:
         // tool-call ::= tool-add | tool-multiply | ...
         grammar += "tool-call ::= ";
         for (size_t i = 0; i < tool_schemas.size(); ++i) {
-            if (i > 0) grammar += " | ";
+            if (i > 0)
+                grammar += " | ";
             grammar += "tool-" + sanitize(tool_schemas[i]["function"]["name"].get<std::string>());
         }
         grammar += "\n";
@@ -52,9 +55,12 @@ public:
             const std::string safe = sanitize(name);
             const auto& params = func["parameters"];
 
-            grammar += "tool-" + safe + " ::= \"{\" ws "
-                "\"\\\"name\\\"\" ws \":\" ws \"\\\"" + name + "\\\"\" ws "
-                "\",\" ws \"\\\"arguments\\\"\" ws \":\" ws \"{\" ws ";
+            grammar += "tool-" + safe +
+                       " ::= \"{\" ws "
+                       "\"\\\"name\\\"\" ws \":\" ws \"\\\"" +
+                       name +
+                       "\\\"\" ws "
+                       "\",\" ws \"\\\"arguments\\\"\" ws \":\" ws \"{\" ws ";
 
             if (params.contains("required") && !params["required"].empty()) {
                 grammar += safe + "-args ws ";
@@ -69,7 +75,8 @@ public:
                 const auto& required = params["required"];
 
                 for (size_t i = 0; i < required.size(); ++i) {
-                    if (i > 0) grammar += " ws \",\" ws ";
+                    if (i > 0)
+                        grammar += " ws \",\" ws ";
                     const std::string arg_name = required[i].get<std::string>();
                     const std::string arg_type = props[arg_name]["type"].get<std::string>();
                     grammar += "\"\\\"" + arg_name + "\\\"\" ws \":\" ws " + type_rule(arg_type);
@@ -82,7 +89,7 @@ public:
         return grammar;
     }
 
-private:
+  private:
     /// Converts tool names into grammar-safe rule identifiers.
     static std::string sanitize(const std::string& name) {
         std::string result;
@@ -94,21 +101,24 @@ private:
 
     /// Maps a JSON Schema primitive type to the corresponding grammar rule name.
     static std::string type_rule(const std::string& json_type) {
-        if (json_type == "integer") return "integer";
-        if (json_type == "number") return "number";
-        if (json_type == "string") return "string";
-        if (json_type == "boolean") return "boolean";
+        if (json_type == "integer")
+            return "integer";
+        if (json_type == "number")
+            return "number";
+        if (json_type == "string")
+            return "string";
+        if (json_type == "boolean")
+            return "boolean";
         return "string";
     }
 
     /// Returns the shared primitive grammar rules appended to every generated grammar.
     static std::string primitive_rules() {
-        return
-            "integer ::= \"-\"? [0-9]+\n"
-            "number ::= \"-\"? [0-9]+ (\".\" [0-9]+)? ([eE] [+-]? [0-9]+)?\n"
-            "string ::= \"\\\"\" [^\"\\\\]* (\"\\\\\" [^\\x00] [^\"\\\\]*)* \"\\\"\"\n"
-            "boolean ::= \"true\" | \"false\"\n"
-            "ws ::= [ \\t\\n]*\n";
+        return "integer ::= \"-\"? [0-9]+\n"
+               "number ::= \"-\"? [0-9]+ (\".\" [0-9]+)? ([eE] [+-]? [0-9]+)?\n"
+               "string ::= \"\\\"\" [^\"\\\\]* (\"\\\\\" [^\\x00] [^\"\\\\]*)* \"\\\"\"\n"
+               "boolean ::= \"true\" | \"false\"\n"
+               "ws ::= [ \\t\\n]*\n";
     }
 };
 

@@ -1,17 +1,19 @@
 cmake_minimum_required(VERSION 3.18)
 
-# Demo chat application
-add_executable(demo_chat demo_chat.cpp)
+function(zoo_add_example target source)
+    add_executable(${target} ${source})
+    target_link_libraries(${target}
+        PRIVATE
+            zoo_core
+    )
+    zoo_set_warnings(${target} PRIVATE)
+    install(TARGETS ${target}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endfunction()
 
-target_link_libraries(demo_chat
-    PRIVATE
-        zoo_core
-)
-
-# Compiler warnings
-zoo_set_warnings(demo_chat PRIVATE)
-
-# Install demo
-install(TARGETS demo_chat
-    RUNTIME DESTINATION bin
-)
+zoo_add_example(demo_chat demo_chat.cpp)
+zoo_add_example(model_generate model_generate.cpp)
+zoo_add_example(error_handling error_handling.cpp)
+zoo_add_example(stream_cancel stream_cancel.cpp)
+zoo_add_example(custom_tool_schema custom_tool_schema.cpp)
