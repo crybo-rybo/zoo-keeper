@@ -60,7 +60,7 @@ The system prompt can also be set/updated after creation via `agent->set_system_
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `on_token` | `optional<TokenCallback>` | empty | Global per-token streaming callback (returns `Continue` or `Stop`) |
+| `on_token` | `optional<TokenCallback>` | empty | Default per-token streaming callback (returns `Continue` or `Stop`). Used by `Model::generate()` when no callback is passed directly. When using `Agent::chat()`, pass the callback there instead — the per-request callback takes precedence |
 
 ## Prompt Template
 

@@ -185,8 +185,8 @@ class Model {
     /// Returns the length of a matching stop sequence suffix, or zero if none match.
     size_t find_stop_sequence(const std::string& text,
                               const std::vector<std::string>& stop_sequences) const;
-    /// Converts tracked messages into the structure expected by llama.cpp chat templates.
-    std::vector<llama_chat_message> build_llama_messages() const;
+    /// Returns cached llama.cpp chat messages, rebuilding only when history has changed.
+    const std::vector<llama_chat_message>& build_llama_messages();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
     /// Trims the oldest retained conversation state to the configured history budget.
@@ -216,6 +216,10 @@ class Model {
     std::vector<Message> messages_;
     int estimated_tokens_ = 0;
     static constexpr int kTemplateOverheadPerMessage = 8;
+
+    // Cached llama_chat_message view (rebuilt when messages_ changes)
+    std::vector<llama_chat_message> llama_msgs_cache_;
+    size_t llama_msgs_cache_size_ = 0; ///< Message count when cache was last built.
 };
 
 } // namespace zoo::core
