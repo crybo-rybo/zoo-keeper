@@ -344,17 +344,21 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
 // Prompt Formatting
 // ============================================================================
 
-std::vector<llama_chat_message> Model::build_llama_messages() const {
-    std::vector<llama_chat_message> llama_msgs;
-    llama_msgs.reserve(messages_.size());
-    for (const auto& msg : messages_) {
-        llama_msgs.push_back({role_to_string(msg.role), msg.content.c_str()});
+const std::vector<llama_chat_message>& Model::build_llama_messages() {
+    if (llama_msgs_cache_size_ == messages_.size()) {
+        return llama_msgs_cache_;
     }
-    return llama_msgs;
+    llama_msgs_cache_.clear();
+    llama_msgs_cache_.reserve(messages_.size());
+    for (const auto& msg : messages_) {
+        llama_msgs_cache_.push_back({role_to_string(msg.role), msg.content.c_str()});
+    }
+    llama_msgs_cache_size_ = messages_.size();
+    return llama_msgs_cache_;
 }
 
 Expected<std::string> Model::format_prompt() {
-    auto llama_msgs = build_llama_messages();
+    const auto& llama_msgs = build_llama_messages();
     int new_len =
         llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), true, nullptr, 0);
 
@@ -385,7 +389,7 @@ Expected<std::string> Model::format_prompt() {
 }
 
 void Model::finalize_response() {
-    auto llama_msgs = build_llama_messages();
+    const auto& llama_msgs = build_llama_messages();
     int new_prev_len =
         llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), false, nullptr, 0);
     if (new_prev_len > 0)
@@ -542,6 +546,7 @@ void Model::set_system_prompt(const std::string& prompt) {
     }
 
     estimated_tokens_ += estimate_tokens(prompt) + kTemplateOverheadPerMessage;
+    llama_msgs_cache_size_ = 0; // Invalidate — content changed even if size didn't
 }
 
 Expected<void> Model::add_message(const Message& message) {
