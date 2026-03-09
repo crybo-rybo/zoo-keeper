@@ -255,6 +255,9 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     int current_pos = base_pos + static_cast<int>(prompt_tokens.size());
     llama_token new_token;
 
+    // Pre-allocate a single-token batch and reuse it for every decode step.
+    llama_batch ar_batch = llama_batch_init(1, 0, 1);
+
     while (true) {
         if (should_cancel && should_cancel()) {
             return std::unexpected(
@@ -317,23 +320,23 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         if (current_pos >= context_size_)
             break;
 
-        // Decode the new token explicitly
-        llama_batch batch = llama_batch_init(1, 0, 1);
-        batch.token[0] = new_token;
-        batch.pos[0] = static_cast<llama_pos>(current_pos);
-        batch.n_seq_id[0] = 1;
-        batch.seq_id[0][0] = 0;
-        batch.logits[0] = true;
-        batch.n_tokens = 1;
+        // Decode the new token using the pre-allocated batch
+        ar_batch.token[0] = new_token;
+        ar_batch.pos[0] = static_cast<llama_pos>(current_pos);
+        ar_batch.n_seq_id[0] = 1;
+        ar_batch.seq_id[0][0] = 0;
+        ar_batch.logits[0] = true;
+        ar_batch.n_tokens = 1;
 
-        int rc = llama_decode(ctx_, batch);
-        llama_batch_free(batch);
+        int rc = llama_decode(ctx_, ar_batch);
         if (rc != 0) {
+            llama_batch_free(ar_batch);
             return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
         }
         ++current_pos;
     }
 
+    llama_batch_free(ar_batch);
     return generated_text;
 }
 
