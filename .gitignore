@@ -3,6 +3,7 @@
 .claude/**
 .idea/**
 build/**
+build-san/**
 cmake-build-*/
 tests/cmake_test_discovery_*
 cmake_test_discovery_*
