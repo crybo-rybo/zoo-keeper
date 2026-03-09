@@ -96,8 +96,8 @@ All callbacks (`on_token`, tool handlers) execute on the **inference thread**. T
 
 | Target | Type | Links | Description |
 |--------|------|-------|-------------|
-| `zoo` | INTERFACE | nlohmann_json | Headers only (types, tools) |
-| `zoo_core` | STATIC | zoo, llama | Model class (direct llama.cpp wrapper) |
+| `zoo` | STATIC | llama | Primary public runtime target containing the Model and Agent implementations |
+| `zoo_core` | INTERFACE | zoo | Compatibility target that forwards to `zoo` for existing consumers |
 
 ## See Also
 
