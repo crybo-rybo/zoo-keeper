@@ -10,7 +10,7 @@ All configuration is provided through the `zoo::Config` struct at Agent creation
 |-------|------|---------|-------------|
 | `model_path` | `string` | (required) | Path to GGUF model file |
 | `context_size` | `int` | `8192` | Context window size in tokens. Must be > 0 |
-| `n_gpu_layers` | `int` | `-1` | GPU layers to offload. -1 = all, 0 = CPU only |
+| `n_gpu_layers` | `int` | `0` | GPU layers to offload. Defaults to CPU-only; opt in to GPU offload explicitly |
 | `use_mmap` | `bool` | `true` | Memory-map model file for faster loading |
 | `use_mlock` | `bool` | `false` | Lock model in RAM (prevents swapping) |
 
@@ -39,6 +39,7 @@ Configured via `config.sampling`:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `system_prompt` | `optional<string>` | empty | System message prepended to all conversations |
+| `max_history_messages` | `size_t` | `64` | Maximum number of non-system messages retained before the oldest turns are trimmed |
 
 The system prompt can also be set/updated after creation via `agent->set_system_prompt()`.
 
@@ -59,11 +60,13 @@ The system prompt can also be set/updated after creation via `agent->set_system_
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `on_token` | `optional<function<void(string_view)>>` | empty | Global per-token streaming callback (runs on inference thread) |
+| `on_token` | `optional<TokenCallback>` | empty | Global per-token streaming callback (returns `Continue` or `Stop`) |
 
 ## Prompt Template
 
 Zoo-Keeper uses `llama_chat_apply_template()` to auto-detect the chat template from the model's metadata. No manual template configuration is needed -- the correct format (Llama 3, ChatML, etc.) is determined automatically from the GGUF file.
+
+If the selected GGUF does not expose a chat template, model creation now fails fast with `TemplateRenderFailed` instead of deferring the failure to first inference.
 
 ## Example: Custom Configuration
 
@@ -73,6 +76,7 @@ config.model_path = "models/custom-model.gguf";
 config.context_size = 4096;
 config.max_tokens = 256;
 config.n_gpu_layers = 32;
+config.max_history_messages = 32;
 
 // Sampling
 config.sampling.temperature = 0.8f;
@@ -102,6 +106,7 @@ auto agent = std::move(*zoo::Agent::create(config));
 - `sampling.top_k` >= 1
 - `sampling.repeat_penalty` >= 0.0
 - `sampling.repeat_last_n` >= 0
+- `max_history_messages` >= 1
 - `max_tool_iterations` >= 1
 - `max_tool_retries` >= 0
 

@@ -83,16 +83,19 @@ The generated site is written to `build/docs/doxygen/html/index.html`. GitHub Ac
 
 ## Testing
 
-131 unit tests using GoogleTest:
+135 unit tests plus 4 integration tests for the concrete Model/Agent layers:
 
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
+Configure with `-DZOO_BUILD_INTEGRATION_TESTS=ON` and optionally set `ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf` to enable the live generation smoke tests.
+
 ## Acknowledgments
 
 - [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
 - [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann
+- [GoogleTest](https://github.com/google/googletest) by Google
 
 ## License
 

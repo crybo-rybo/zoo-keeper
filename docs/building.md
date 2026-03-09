@@ -17,6 +17,7 @@ ctest --test-dir build
 | `ZOO_ENABLE_METAL` | Metal acceleration (macOS) | ON (macOS only) |
 | `ZOO_ENABLE_CUDA` | CUDA acceleration | OFF |
 | `ZOO_BUILD_TESTS` | Build test suite | OFF |
+| `ZOO_BUILD_INTEGRATION_TESTS` | Build Model/Agent integration tests | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
 | `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
@@ -62,7 +63,7 @@ cmake --build build
 |----------|----------|-----------------|
 | macOS | Clang | 16.0+ |
 | Linux | GCC | 13.0+ |
-| Linux | Clang | 16.0+ |
+| Linux | Clang | 18.0+ |
 
 C++23 support is required (`std::expected`, defaulted comparison operators).
 
@@ -91,6 +92,17 @@ ctest --test-dir build -R ModelTest
 ctest --test-dir build --output-on-failure --verbose
 ```
 
+## Integration Tests
+
+The integration target exercises the concrete `Model` and `Agent` layers. Two failure-path tests run using vendored fixtures. Optional live smoke tests run when a real GGUF path is provided.
+
+```bash
+cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON \
+    -DZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf
+cmake --build build
+ctest --test-dir build --output-on-failure -L integration
+```
+
 ## Sanitizers
 
 ```bash
@@ -108,6 +120,8 @@ cmake -B build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build
 ```
+
+GitHub Actions also captures an `lcov` report and uploads it as a workflow artifact and to Codecov on every `main` push and pull request.
 
 ## API Reference
 
@@ -150,6 +164,19 @@ add_subdirectory(extern/zoo-keeper)
 target_link_libraries(your_target PRIVATE zoo_core)
 ```
 
+### Installed CMake Package
+
+```cmake
+find_package(ZooKeeper CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE ZooKeeper::zoo_core)
+```
+
+### pkg-config
+
+```bash
+pkg-config --cflags --libs zoo-keeper
+```
+
 ## Running the Demo
 
 ```bash
@@ -157,6 +184,13 @@ cmake -B build -DZOO_BUILD_EXAMPLES=ON
 cmake --build build
 ./build/examples/demo_chat models/your-model.gguf
 ```
+
+Additional example executables are built alongside `demo_chat`:
+
+- `model_generate` -- standalone `zoo::core::Model` usage
+- `error_handling` -- practical error reporting patterns
+- `stream_cancel` -- streaming output with cooperative cancellation
+- `custom_tool_schema` -- manual JSON schema registration for nested tool arguments
 
 ## See Also
 

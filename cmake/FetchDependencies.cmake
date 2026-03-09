@@ -25,6 +25,7 @@ endif()
 
 # GoogleTest (only if building tests)
 if(ZOO_BUILD_TESTS)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
