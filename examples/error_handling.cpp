@@ -11,19 +11,19 @@ namespace {
 
 void print_error(const zoo::Error& error) {
     switch (error.code) {
-        case zoo::ErrorCode::TemplateRenderFailed:
-            std::cerr << "The selected model does not expose a chat template: "
-                      << error.message << '\n';
-            break;
-        case zoo::ErrorCode::RequestCancelled:
-            std::cerr << "The request was cancelled before completion.\n";
-            break;
-        case zoo::ErrorCode::InferenceFailed:
-            std::cerr << "Inference failed: " << error.to_string() << '\n';
-            break;
-        default:
-            std::cerr << error.to_string() << '\n';
-            break;
+    case zoo::ErrorCode::TemplateRenderFailed:
+        std::cerr << "The selected model does not expose a chat template: " << error.message
+                  << '\n';
+        break;
+    case zoo::ErrorCode::RequestCancelled:
+        std::cerr << "The request was cancelled before completion.\n";
+        break;
+    case zoo::ErrorCode::InferenceFailed:
+        std::cerr << "Inference failed: " << error.to_string() << '\n';
+        break;
+    default:
+        std::cerr << error.to_string() << '\n';
+        break;
     }
 }
 

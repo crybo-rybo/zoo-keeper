@@ -3,8 +3,8 @@
  * @brief Unit tests for shared core value types and validation helpers.
  */
 
-#include <gtest/gtest.h>
 #include "zoo/core/types.hpp"
+#include <gtest/gtest.h>
 
 TEST(RoleTest, RoleToString) {
     EXPECT_STREQ(zoo::role_to_string(zoo::Role::System), "system");
@@ -308,11 +308,9 @@ TEST(RoleValidationTest, ConsecutiveSameRoleFails) {
 }
 
 TEST(RoleValidationTest, ConsecutiveToolAllowed) {
-    std::vector<zoo::Message> history = {
-        zoo::Message::user("Hello"),
-        zoo::Message::assistant("I'll use tools"),
-        zoo::Message::tool("result1", "id1")
-    };
+    std::vector<zoo::Message> history = {zoo::Message::user("Hello"),
+                                         zoo::Message::assistant("I'll use tools"),
+                                         zoo::Message::tool("result1", "id1")};
     EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Tool).has_value());
 }
 

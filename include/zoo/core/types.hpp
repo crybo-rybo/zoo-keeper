@@ -5,12 +5,12 @@
 
 #pragma once
 
+#include <chrono>
+#include <expected>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
-#include <chrono>
-#include <optional>
-#include <functional>
-#include <expected>
 
 namespace zoo {
 
@@ -18,10 +18,10 @@ namespace zoo {
  * @brief Enumerates the conversation roles supported by the runtime.
  */
 enum class Role {
-    System, ///< Instructional message that primes the assistant.
-    User, ///< End-user input awaiting a response.
+    System,    ///< Instructional message that primes the assistant.
+    User,      ///< End-user input awaiting a response.
     Assistant, ///< Assistant-authored response content.
-    Tool ///< Structured tool result associated with a prior tool call.
+    Tool       ///< Structured tool result associated with a prior tool call.
 };
 
 /**
@@ -32,10 +32,14 @@ enum class Role {
  */
 [[nodiscard]] inline const char* role_to_string(Role role) noexcept {
     switch (role) {
-        case Role::System: return "system";
-        case Role::User: return "user";
-        case Role::Assistant: return "assistant";
-        case Role::Tool: return "tool";
+    case Role::System:
+        return "system";
+    case Role::User:
+        return "user";
+    case Role::Assistant:
+        return "assistant";
+    case Role::Tool:
+        return "tool";
     }
     return "unknown";
 }
@@ -44,9 +48,10 @@ enum class Role {
  * @brief Represents one message in the conversation history.
  */
 struct Message {
-    Role role; ///< Speaker role associated with the message.
+    Role role;           ///< Speaker role associated with the message.
     std::string content; ///< Raw message content passed to the model.
-    std::optional<std::string> tool_call_id; ///< Tool call correlation identifier for tool responses.
+    std::optional<std::string>
+        tool_call_id; ///< Tool call correlation identifier for tool responses.
 
     /**
      * @brief Creates a system message.
@@ -98,32 +103,32 @@ struct Message {
  */
 enum class ErrorCode {
     // Configuration errors (100-199)
-    InvalidConfig = 100, ///< Generic configuration validation failure.
-    InvalidModelPath = 101, ///< Missing or invalid model path.
-    InvalidContextSize = 102, ///< Invalid context window configuration.
+    InvalidConfig = 100,         ///< Generic configuration validation failure.
+    InvalidModelPath = 101,      ///< Missing or invalid model path.
+    InvalidContextSize = 102,    ///< Invalid context window configuration.
     InvalidSamplingParams = 103, ///< Invalid sampling configuration.
 
     // Backend errors (200-299)
-    BackendInitFailed = 200, ///< llama.cpp backend initialization failed.
-    ModelLoadFailed = 201, ///< Model weights could not be loaded.
+    BackendInitFailed = 200,     ///< llama.cpp backend initialization failed.
+    ModelLoadFailed = 201,       ///< Model weights could not be loaded.
     ContextCreationFailed = 202, ///< llama.cpp context creation failed.
-    InferenceFailed = 203, ///< Decode or generation failed.
-    TokenizationFailed = 204, ///< Text could not be tokenized.
+    InferenceFailed = 203,       ///< Decode or generation failed.
+    TokenizationFailed = 204,    ///< Text could not be tokenized.
 
     // Engine errors (300-399)
-    ContextWindowExceeded = 300, ///< Prompt or generation exceeded available context.
+    ContextWindowExceeded = 300,  ///< Prompt or generation exceeded available context.
     InvalidMessageSequence = 301, ///< Conversation roles violate sequencing rules.
-    TemplateRenderFailed = 302, ///< Chat template rendering failed.
+    TemplateRenderFailed = 302,   ///< Chat template rendering failed.
 
     // Runtime errors (400-499)
-    AgentNotRunning = 400, ///< A request targeted an agent that is not accepting work.
+    AgentNotRunning = 400,  ///< A request targeted an agent that is not accepting work.
     RequestCancelled = 401, ///< The caller cancelled the request before completion.
-    RequestTimeout = 402, ///< The request exceeded its allowed runtime.
-    QueueFull = 403, ///< The request queue could not accept another item.
+    RequestTimeout = 402,   ///< The request exceeded its allowed runtime.
+    QueueFull = 403,        ///< The request queue could not accept another item.
 
     // Tool errors (500-599)
-    ToolNotFound = 500, ///< A referenced tool name is not registered.
-    ToolExecutionFailed = 501, ///< A tool handler threw or returned an execution failure.
+    ToolNotFound = 500,         ///< A referenced tool name is not registered.
+    ToolExecutionFailed = 501,  ///< A tool handler threw or returned an execution failure.
     InvalidToolSignature = 502, ///< Registered tool metadata does not match its callable signature.
     ToolRetriesExhausted = 503, ///< Validation retries for a tool call were exhausted.
     ToolLoopLimitReached = 504, ///< The agent exceeded its tool-iteration budget.
@@ -135,8 +140,8 @@ enum class ErrorCode {
  * @brief Rich error payload returned by fallible zoo-keeper operations.
  */
 struct Error {
-    ErrorCode code; ///< Machine-readable error category.
-    std::string message; ///< Human-readable error summary.
+    ErrorCode code;                     ///< Machine-readable error category.
+    std::string message;                ///< Human-readable error summary.
     std::optional<std::string> context; ///< Optional contextual detail for diagnostics.
 
     /**
@@ -166,18 +171,17 @@ struct Error {
 /**
  * @brief Convenience alias for operations that either return `T` or a `zoo::Error`.
  */
-template<typename T>
-using Expected = std::expected<T, Error>;
+template <typename T> using Expected = std::expected<T, Error>;
 
 /**
  * @brief Sampling parameters used to configure text generation.
  */
 struct SamplingParams {
-    float temperature = 0.7f; ///< Softmax temperature. `0.0f` behaves greedily.
-    float top_p = 0.9f; ///< Nucleus sampling probability cutoff in `[0.0, 1.0]`.
-    int top_k = 40; ///< Limits candidate selection to the top-k tokens.
+    float temperature = 0.7f;    ///< Softmax temperature. `0.0f` behaves greedily.
+    float top_p = 0.9f;          ///< Nucleus sampling probability cutoff in `[0.0, 1.0]`.
+    int top_k = 40;              ///< Limits candidate selection to the top-k tokens.
     float repeat_penalty = 1.1f; ///< Penalty applied to recently seen tokens.
-    int repeat_last_n = 64; ///< Number of trailing tokens considered for repetition penalty.
+    int repeat_last_n = 64;      ///< Number of trailing tokens considered for repetition penalty.
     int seed = -1; ///< RNG seed. Negative values delegate seeding to the current time.
 
     /**
@@ -188,24 +192,28 @@ struct SamplingParams {
      */
     Expected<void> validate() const {
         if (temperature < 0.0f) {
-            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
-                "temperature must be >= 0.0 (got " + std::to_string(temperature) + ")"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidSamplingParams,
+                      "temperature must be >= 0.0 (got " + std::to_string(temperature) + ")"});
         }
         if (top_p < 0.0f || top_p > 1.0f) {
-            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
-                "top_p must be in [0.0, 1.0] (got " + std::to_string(top_p) + ")"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidSamplingParams,
+                      "top_p must be in [0.0, 1.0] (got " + std::to_string(top_p) + ")"});
         }
         if (top_k < 1) {
             return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
-                "top_k must be >= 1 (got " + std::to_string(top_k) + ")"});
+                                         "top_k must be >= 1 (got " + std::to_string(top_k) + ")"});
         }
         if (repeat_penalty < 0.0f) {
-            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
-                "repeat_penalty must be >= 0.0 (got " + std::to_string(repeat_penalty) + ")"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidSamplingParams, "repeat_penalty must be >= 0.0 (got " +
+                                                            std::to_string(repeat_penalty) + ")"});
         }
         if (repeat_last_n < 0) {
-            return std::unexpected(Error{ErrorCode::InvalidSamplingParams,
-                "repeat_last_n must be >= 0 (got " + std::to_string(repeat_last_n) + ")"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidSamplingParams,
+                      "repeat_last_n must be >= 0 (got " + std::to_string(repeat_last_n) + ")"});
         }
         return {};
     }
@@ -219,7 +227,7 @@ struct SamplingParams {
  */
 enum class TokenAction {
     Continue, ///< Continue decoding and streaming tokens.
-    Stop ///< Stop generation after the current token callback.
+    Stop      ///< Stop generation after the current token callback.
 };
 
 /**
@@ -236,26 +244,30 @@ using CancellationCallback = std::function<bool()>;
  * @brief Runtime configuration used to load a model and create an agent.
  */
 struct Config {
-    std::string model_path; ///< Filesystem path to the GGUF model.
+    std::string model_path;  ///< Filesystem path to the GGUF model.
     int context_size = 8192; ///< Requested context window size in tokens.
-    int n_gpu_layers = 0; ///< Number of layers to offload to GPU. Defaults to CPU-only for portability.
-    bool use_mmap = true; ///< Whether to memory-map the model file.
+    int n_gpu_layers =
+        0; ///< Number of layers to offload to GPU. Defaults to CPU-only for portability.
+    bool use_mmap = true;   ///< Whether to memory-map the model file.
     bool use_mlock = false; ///< Whether to lock model pages in memory.
 
     SamplingParams sampling; ///< Sampling behavior for generation.
 
     int max_tokens = -1; ///< Maximum number of generated tokens, or `-1` for no explicit cap.
-    std::vector<std::string> stop_sequences; ///< User-defined stop sequences applied during generation.
+    std::vector<std::string>
+        stop_sequences; ///< User-defined stop sequences applied during generation.
 
-    std::optional<std::string> system_prompt; ///< Optional system prompt inserted at the start of history.
+    std::optional<std::string>
+        system_prompt;                ///< Optional system prompt inserted at the start of history.
     size_t max_history_messages = 64; ///< Maximum number of non-system history messages retained.
 
     size_t request_queue_capacity = 64; ///< Maximum number of pending requests accepted by `Agent`.
 
     int max_tool_iterations = 5; ///< Maximum detect/execute/respond iterations per request.
-    int max_tool_retries = 2; ///< Maximum validation retries for malformed tool calls.
+    int max_tool_retries = 2;    ///< Maximum validation retries for malformed tool calls.
 
-    std::optional<TokenCallback> on_token; ///< Optional default token callback used by direct model generation.
+    std::optional<TokenCallback>
+        on_token; ///< Optional default token callback used by direct model generation.
 
     /**
      * @brief Validates the configuration before model initialization.
@@ -265,28 +277,33 @@ struct Config {
      */
     Expected<void> validate() const {
         if (model_path.empty()) {
-            return std::unexpected(Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
         }
         if (context_size <= 0) {
-            return std::unexpected(Error{ErrorCode::InvalidContextSize, "Context size must be positive"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidContextSize, "Context size must be positive"});
         }
         if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
-            return std::unexpected(Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
         }
         if (max_history_messages == 0) {
-            return std::unexpected(Error{ErrorCode::InvalidConfig,
-                "max_history_messages must be >= 1"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "max_history_messages must be >= 1"});
         }
         if (auto result = sampling.validate(); !result) {
             return result;
         }
         if (max_tool_iterations < 1) {
-            return std::unexpected(Error{ErrorCode::InvalidConfig,
-                "max_tool_iterations must be >= 1 (got " + std::to_string(max_tool_iterations) + ")"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "max_tool_iterations must be >= 1 (got " +
+                                                    std::to_string(max_tool_iterations) + ")"});
         }
         if (max_tool_retries < 0) {
-            return std::unexpected(Error{ErrorCode::InvalidConfig,
-                "max_tool_retries must be >= 0 (got " + std::to_string(max_tool_retries) + ")"});
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "max_tool_retries must be >= 0 (got " +
+                                                    std::to_string(max_tool_retries) + ")"});
         }
         return {};
     }
@@ -298,14 +315,10 @@ struct Config {
      * are not meaningfully comparable.
      */
     bool operator==(const Config& other) const {
-        return model_path == other.model_path &&
-               context_size == other.context_size &&
-               n_gpu_layers == other.n_gpu_layers &&
-               use_mmap == other.use_mmap &&
-               use_mlock == other.use_mlock &&
-               sampling == other.sampling &&
-               max_tokens == other.max_tokens &&
-               stop_sequences == other.stop_sequences &&
+        return model_path == other.model_path && context_size == other.context_size &&
+               n_gpu_layers == other.n_gpu_layers && use_mmap == other.use_mmap &&
+               use_mlock == other.use_mlock && sampling == other.sampling &&
+               max_tokens == other.max_tokens && stop_sequences == other.stop_sequences &&
                system_prompt == other.system_prompt &&
                max_history_messages == other.max_history_messages &&
                request_queue_capacity == other.request_queue_capacity &&
@@ -318,9 +331,9 @@ struct Config {
  * @brief Token accounting for a completed generation.
  */
 struct TokenUsage {
-    int prompt_tokens = 0; ///< Tokens consumed by the rendered prompt.
+    int prompt_tokens = 0;     ///< Tokens consumed by the rendered prompt.
     int completion_tokens = 0; ///< Tokens emitted during generation.
-    int total_tokens = 0; ///< Sum of prompt and completion tokens.
+    int total_tokens = 0;      ///< Sum of prompt and completion tokens.
 
     /// Compares two token-usage snapshots.
     bool operator==(const TokenUsage& other) const = default;
@@ -330,7 +343,7 @@ struct TokenUsage {
  * @brief Timing and throughput metrics captured for a response.
  */
 struct Metrics {
-    std::chrono::milliseconds latency_ms{0}; ///< End-to-end request latency.
+    std::chrono::milliseconds latency_ms{0};             ///< End-to-end request latency.
     std::chrono::milliseconds time_to_first_token_ms{0}; ///< Delay until the first streamed token.
     double tokens_per_second = 0.0; ///< Throughput measured after the first token arrives.
 
@@ -342,9 +355,9 @@ struct Metrics {
  * @brief Final response returned by model or agent generation.
  */
 struct Response {
-    std::string text; ///< Assistant-visible response text.
-    TokenUsage usage; ///< Prompt and completion token usage.
-    Metrics metrics; ///< Latency and throughput data.
+    std::string text;                ///< Assistant-visible response text.
+    TokenUsage usage;                ///< Prompt and completion token usage.
+    Metrics metrics;                 ///< Latency and throughput data.
     std::vector<Message> tool_calls; ///< Tool result messages produced during the request, if any.
 
     /// Compares two responses field-by-field.
@@ -369,32 +382,26 @@ using RequestId = uint64_t;
  * @return Empty success when the role may be appended, otherwise an
  *         `InvalidMessageSequence` error.
  */
-[[nodiscard]] inline Expected<void> validate_role_sequence(
-    const std::vector<Message>& messages, Role role
-) {
+[[nodiscard]] inline Expected<void> validate_role_sequence(const std::vector<Message>& messages,
+                                                           Role role) {
     if (messages.empty()) {
         if (role == Role::Tool) {
-            return std::unexpected(Error{
-                ErrorCode::InvalidMessageSequence,
-                "First message cannot be a tool response"
-            });
+            return std::unexpected(Error{ErrorCode::InvalidMessageSequence,
+                                         "First message cannot be a tool response"});
         }
         return {};
     }
 
     if (role == Role::System) {
-        return std::unexpected(Error{
-            ErrorCode::InvalidMessageSequence,
-            "System message only allowed at the beginning"
-        });
+        return std::unexpected(Error{ErrorCode::InvalidMessageSequence,
+                                     "System message only allowed at the beginning"});
     }
 
     const Role last_role = messages.back().role;
     if (role == last_role && role != Role::Tool) {
-        return std::unexpected(Error{
-            ErrorCode::InvalidMessageSequence,
-            "Cannot have consecutive messages with the same role (except Tool)"
-        });
+        return std::unexpected(
+            Error{ErrorCode::InvalidMessageSequence,
+                  "Cannot have consecutive messages with the same role (except Tool)"});
     }
 
     return {};

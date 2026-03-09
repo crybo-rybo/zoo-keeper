@@ -3,8 +3,8 @@
  * @brief Unit tests for sentinel-delimited tool-call parsing.
  */
 
-#include <gtest/gtest.h>
 #include "zoo/tools/parser.hpp"
+#include <gtest/gtest.h>
 
 TEST(SentinelParserTest, BasicSentinelExtraction) {
     std::string output =
@@ -27,8 +27,7 @@ TEST(SentinelParserTest, NoSentinel) {
 }
 
 TEST(SentinelParserTest, SentinelOnly) {
-    std::string output =
-        R"(<tool_call>{"name": "get_time", "arguments": {}}</tool_call>)";
+    std::string output = R"(<tool_call>{"name": "get_time", "arguments": {}}</tool_call>)";
     auto result = zoo::tools::ToolCallParser::parse_sentinel(output);
     ASSERT_TRUE(result.tool_call.has_value());
     EXPECT_EQ(result.tool_call->name, "get_time");
@@ -44,15 +43,15 @@ TEST(SentinelParserTest, IncompleteSentinel) {
 }
 
 TEST(SentinelParserTest, InvalidJsonInSentinel) {
-    std::string output =
-        R"(<tool_call>{"name": "add", "arguments": {"a": 3, "b":}</tool_call>)";
+    std::string output = R"(<tool_call>{"name": "add", "arguments": {"a": 3, "b":}</tool_call>)";
     auto result = zoo::tools::ToolCallParser::parse_sentinel(output);
     EXPECT_FALSE(result.tool_call.has_value());
     EXPECT_EQ(result.text_before, output);
 }
 
 TEST(SentinelParserTest, WhitespaceAroundJson) {
-    std::string output = "<tool_call>\n  {\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}\n</tool_call>";
+    std::string output =
+        "<tool_call>\n  {\"name\": \"add\", \"arguments\": {\"a\": 1, \"b\": 2}}\n</tool_call>";
     auto result = zoo::tools::ToolCallParser::parse_sentinel(output);
     ASSERT_TRUE(result.tool_call.has_value());
     EXPECT_EQ(result.tool_call->name, "add");
@@ -67,8 +66,7 @@ TEST(SentinelParserTest, SentinelWithId) {
 }
 
 TEST(SentinelParserTest, GeneratesIdWhenMissing) {
-    std::string output =
-        R"(<tool_call>{"name": "add", "arguments": {"a": 1, "b": 2}}</tool_call>)";
+    std::string output = R"(<tool_call>{"name": "add", "arguments": {"a": 1, "b": 2}}</tool_call>)";
     auto result = zoo::tools::ToolCallParser::parse_sentinel(output);
     ASSERT_TRUE(result.tool_call.has_value());
     EXPECT_FALSE(result.tool_call->id.empty());
@@ -95,8 +93,7 @@ I'll start with the addition.
 }
 
 TEST(SentinelParserTest, MissingNameField) {
-    std::string output =
-        R"(<tool_call>{"arguments": {"a": 1}}</tool_call>)";
+    std::string output = R"(<tool_call>{"arguments": {"a": 1}}</tool_call>)";
     auto result = zoo::tools::ToolCallParser::parse_sentinel(output);
     EXPECT_FALSE(result.tool_call.has_value());
 }

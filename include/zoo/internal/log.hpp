@@ -13,8 +13,8 @@
  * When logging is disabled the macro compiles to a no-op.
  */
 #ifdef ZOO_LOGGING_ENABLED
-#define ZOO_LOG(level, fmt, ...) \
-    std::fprintf(stderr, "[zoo:%s] " fmt "\n", level __VA_OPT__(,) __VA_ARGS__)
+#define ZOO_LOG(level, fmt, ...)                                                                   \
+    std::fprintf(stderr, "[zoo:%s] " fmt "\n", level __VA_OPT__(, ) __VA_ARGS__)
 #else
 #define ZOO_LOG(level, fmt, ...) ((void)0)
 #endif

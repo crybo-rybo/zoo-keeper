@@ -5,8 +5,8 @@
 
 #include <zoo/zoo.hpp>
 
-#include <chrono>
 #include <atomic>
+#include <chrono>
 #include <iostream>
 #include <thread>
 
@@ -30,12 +30,8 @@ int main(int argc, char** argv) {
     }
 
     auto& agent = *agent_result;
-    auto handle = agent->chat(
-        zoo::Message::user("Write a detailed travel guide for Iceland."),
-        [](std::string_view token) {
-            std::cout << token << std::flush;
-        }
-    );
+    auto handle = agent->chat(zoo::Message::user("Write a detailed travel guide for Iceland."),
+                              [](std::string_view token) { std::cout << token << std::flush; });
 
     std::atomic<bool> completed{false};
     std::thread canceller([&agent, &completed, id = handle.id] {

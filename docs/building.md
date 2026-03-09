@@ -182,7 +182,7 @@ pkg-config --cflags --libs zoo-keeper
 ```bash
 cmake -B build -DZOO_BUILD_EXAMPLES=ON
 cmake --build build
-./build/examples/demo_chat models/your-model.gguf
+./build/examples/demo_chat examples/config.example.json
 ```
 
 Additional example executables are built alongside `demo_chat`:

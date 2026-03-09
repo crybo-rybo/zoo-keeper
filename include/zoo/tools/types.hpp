@@ -5,12 +5,12 @@
 
 #pragma once
 
-#include <zoo/core/types.hpp>
-#include <nlohmann/json.hpp>
 #include <atomic>
-#include <string>
-#include <optional>
 #include <functional>
+#include <nlohmann/json.hpp>
+#include <optional>
+#include <string>
+#include <zoo/core/types.hpp>
 
 namespace zoo::tools {
 
@@ -18,8 +18,8 @@ namespace zoo::tools {
  * @brief Structured tool call extracted from model output.
  */
 struct ToolCall {
-    std::string id; ///< Unique identifier for correlating tool responses.
-    std::string name; ///< Registered tool name to invoke.
+    std::string id;           ///< Unique identifier for correlating tool responses.
+    std::string name;         ///< Registered tool name to invoke.
     nlohmann::json arguments; ///< JSON arguments supplied by the model.
 
     /// Compares two tool calls field-by-field.
@@ -38,10 +38,10 @@ using ToolHandler = std::function<Expected<nlohmann::json>(const nlohmann::json&
  * @brief Metadata and executable handler for a registered tool.
  */
 struct ToolEntry {
-    std::string name; ///< Public tool name presented to the model.
-    std::string description; ///< Human-readable tool description for prompts and schemas.
+    std::string name;                 ///< Public tool name presented to the model.
+    std::string description;          ///< Human-readable tool description for prompts and schemas.
     nlohmann::json parameters_schema; ///< JSON Schema describing accepted arguments.
-    ToolHandler handler; ///< Callable invoked when the tool is executed.
+    ToolHandler handler;              ///< Callable invoked when the tool is executed.
 };
 
 } // namespace zoo::tools

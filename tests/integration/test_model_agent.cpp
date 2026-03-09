@@ -54,7 +54,7 @@ zoo::Config make_base_config(const std::filesystem::path& model_path) {
 }
 
 class LiveModelIntegrationTest : public ::testing::Test {
-protected:
+  protected:
     void SetUp() override {
         auto model_path = live_model_path();
         if (!model_path.has_value()) {
@@ -123,12 +123,8 @@ TEST_F(LiveModelIntegrationTest, AgentChatsAndStreams) {
     agent->set_system_prompt("Reply briefly.");
 
     std::string streamed;
-    auto handle = agent->chat(
-        zoo::Message::user("Say hello in one short sentence."),
-        [&](std::string_view token) {
-            streamed.append(token);
-        }
-    );
+    auto handle = agent->chat(zoo::Message::user("Say hello in one short sentence."),
+                              [&](std::string_view token) { streamed.append(token); });
 
     auto response = handle.future.get();
     ASSERT_TRUE(response.has_value()) << response.error().to_string();

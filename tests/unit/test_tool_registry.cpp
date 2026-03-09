@@ -3,16 +3,16 @@
  * @brief Unit tests for tool registration, schema generation, and invocation.
  */
 
-#include <gtest/gtest.h>
-#include "zoo/tools/registry.hpp"
 #include "fixtures/tool_definitions.hpp"
+#include "zoo/tools/registry.hpp"
+#include <gtest/gtest.h>
 
 using json = nlohmann::json;
 using namespace zoo::testing::tools;
 
 /// Shared fixture that provides a fresh tool registry for each test.
 class ToolRegistryTest : public ::testing::Test {
-protected:
+  protected:
     zoo::tools::ToolRegistry registry;
 };
 
@@ -101,8 +101,8 @@ TEST_F(ToolRegistryTest, GetParametersSchema) {
 }
 
 TEST_F(ToolRegistryTest, LambdaRegistration) {
-    auto result = registry.register_tool("double_it", "Double a number", {"x"},
-        [](int x) { return x * 2; });
+    auto result =
+        registry.register_tool("double_it", "Double a number", {"x"}, [](int x) { return x * 2; });
     EXPECT_TRUE(result.has_value());
 
     auto invoke_result = registry.invoke("double_it", {{"x", 5}});
