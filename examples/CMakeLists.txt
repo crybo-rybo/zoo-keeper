@@ -4,7 +4,7 @@ function(zoo_add_example target source)
     add_executable(${target} ${source})
     target_link_libraries(${target}
         PRIVATE
-            zoo_core
+            zoo
     )
     zoo_set_warnings(${target} PRIVATE)
     install(TARGETS ${target}

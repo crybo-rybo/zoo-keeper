@@ -6,7 +6,7 @@ add_executable(zoo_integration_tests
 
 target_link_libraries(zoo_integration_tests
     PRIVATE
-        zoo_core
+        zoo
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
