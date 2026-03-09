@@ -87,6 +87,7 @@ The primary entry point for agentic behavior. Created via the `Agent::create()` 
 | `clear_history()` | Clear conversation history |
 | `get_history()` | Get a copy of current conversation messages |
 | `tool_count()` | Number of registered tools |
+| `get_config()` | Returns a const reference to the active configuration |
 
 ### `zoo::core::Model`
 
