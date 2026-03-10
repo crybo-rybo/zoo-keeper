@@ -4,30 +4,14 @@ include(CMakeFindDependencyMacro)
 
 find_dependency(llama CONFIG)
 
-set_and_check(ZooKeeper_INCLUDE_DIR "@PACKAGE_ZOOKEEPER_INCLUDE_INSTALL_DIR@")
-set_and_check(ZooKeeper_LIB_DIR "@PACKAGE_ZOOKEEPER_LIB_INSTALL_DIR@")
+include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperTargets.cmake")
 
-find_library(ZooKeeper_LIBRARY zoo
-    REQUIRED
-    HINTS ${ZooKeeper_LIB_DIR}
-    NO_CMAKE_FIND_ROOT_PATH
-)
-
-if(NOT TARGET ZooKeeper::zoo)
-    add_library(ZooKeeper::zoo STATIC IMPORTED)
-    set_target_properties(ZooKeeper::zoo PROPERTIES
-        IMPORTED_LINK_INTERFACE_LANGUAGES "CXX"
-        IMPORTED_LOCATION "${ZooKeeper_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${ZooKeeper_INCLUDE_DIR}"
-        INTERFACE_COMPILE_FEATURES cxx_std_23
-        INTERFACE_LINK_LIBRARIES "llama"
-    )
-endif()
-
-if(NOT TARGET ZooKeeper::zoo_core)
-    add_library(ZooKeeper::zoo_core INTERFACE IMPORTED)
-    set_target_properties(ZooKeeper::zoo_core PROPERTIES
-        INTERFACE_LINK_LIBRARIES "ZooKeeper::zoo"
+# llama is a private build dependency of zoo but consumers of the static library
+# still need it on the link line.  The export set intentionally omits it (llama
+# is not in our export set), so we append it here after find_dependency succeeds.
+if(TARGET ZooKeeper::zoo AND TARGET llama)
+    set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES llama
     )
 endif()
 

@@ -355,10 +355,11 @@ struct Metrics {
  * @brief Final response returned by model or agent generation.
  */
 struct Response {
-    std::string text;                ///< Assistant-visible response text.
-    TokenUsage usage;                ///< Prompt and completion token usage.
-    Metrics metrics;                 ///< Latency and throughput data.
-    std::vector<Message> tool_calls; ///< Tool result messages produced during the request, if any.
+    std::string text; ///< Assistant-visible response text.
+    TokenUsage usage; ///< Prompt and completion token usage.
+    Metrics metrics;  ///< Latency and throughput data.
+    std::vector<Message>
+        tool_calls; ///< Tool result messages (role=Tool) injected during the agentic loop.
 
     /// Compares two responses field-by-field.
     bool operator==(const Response& other) const = default;

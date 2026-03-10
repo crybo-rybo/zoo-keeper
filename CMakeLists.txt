@@ -51,11 +51,10 @@ target_include_directories(zoo PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(zoo PUBLIC cxx_std_23)
-target_link_libraries(zoo PRIVATE llama)
-target_link_libraries(zoo INTERFACE
-    $<BUILD_INTERFACE:llama>
-    $<INSTALL_INTERFACE:llama>
-)
+# llama is only linked in the build tree — the installed config file adds llama
+# via find_dependency() + set_property() instead, sidestepping the requirement
+# that llama appear in ZooKeeper's CMake export set.
+target_link_libraries(zoo PRIVATE $<BUILD_INTERFACE:llama>)
 
 if(ZOO_ENABLE_LOGGING)
     target_compile_definitions(zoo PRIVATE ZOO_LOGGING_ENABLED)
@@ -64,6 +63,11 @@ endif()
 # Backward-compatible compatibility target.
 add_library(zoo_core INTERFACE)
 target_link_libraries(zoo_core INTERFACE zoo)
+
+# Namespaced aliases so FetchContent / add_subdirectory consumers can use the
+# same target names as installed-package consumers (ZooKeeper::zoo).
+add_library(ZooKeeper::zoo ALIAS zoo)
+add_library(ZooKeeper::zoo_core ALIAS zoo_core)
 
 # Compiler warnings
 zoo_set_warnings(zoo PRIVATE)
@@ -92,10 +96,17 @@ endif()
 
 # Install rules
 install(TARGETS zoo zoo_core
+    EXPORT ZooKeeperTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(EXPORT ZooKeeperTargets
+    FILE ZooKeeperTargets.cmake
+    NAMESPACE ZooKeeper::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )
 
 install(DIRECTORY include/zoo DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
@@ -111,15 +122,10 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp
 
 # Config file
 include(CMakePackageConfigHelpers)
-set(ZOOKEEPER_INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
-set(ZOOKEEPER_LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
 configure_package_config_file(
     cmake/ZooKeeperConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
-    PATH_VARS
-        ZOOKEEPER_INCLUDE_INSTALL_DIR
-        ZOOKEEPER_LIB_INSTALL_DIR
 )
 
 write_basic_package_version_file(

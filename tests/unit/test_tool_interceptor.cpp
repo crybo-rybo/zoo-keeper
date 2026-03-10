@@ -3,7 +3,7 @@
  * @brief Unit tests for streamed tool-call interception behavior.
  */
 
-#include "zoo/tools/interceptor.hpp"
+#include "zoo/internal/tools/interceptor.hpp"
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>

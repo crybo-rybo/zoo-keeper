@@ -16,7 +16,6 @@
 #include "core/types.hpp"
 
 // Tool system
-#include "tools/interceptor.hpp"
 #include "tools/parser.hpp"
 #include "tools/registry.hpp"
 #include "tools/types.hpp"

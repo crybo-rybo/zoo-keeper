@@ -4,7 +4,7 @@
  */
 
 #include "zoo/core/model.hpp"
-#include "zoo/core/batch.hpp"
+#include "zoo/internal/core/batch.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>

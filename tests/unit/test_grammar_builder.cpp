@@ -3,7 +3,7 @@
  * @brief Unit tests for grammar generation from registered tool schemas.
  */
 
-#include "zoo/tools/grammar.hpp"
+#include "zoo/internal/tools/grammar.hpp"
 #include "zoo/tools/registry.hpp"
 #include <gtest/gtest.h>
 
