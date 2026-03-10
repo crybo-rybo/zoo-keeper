@@ -39,39 +39,40 @@ configure_file(
     @ONLY
 )
 
-# Header-only library target (core types + tools)
-add_library(zoo INTERFACE)
-target_include_directories(zoo INTERFACE
+# Primary public library target
+add_library(zoo STATIC
+    src/agent.cpp
+    src/core/model.cpp
+)
+target_include_directories(zoo PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
     $<BUILD_INTERFACE:${json_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_compile_features(zoo INTERFACE cxx_std_23)
+target_compile_features(zoo PUBLIC cxx_std_23)
+target_link_libraries(zoo PRIVATE llama)
+target_link_libraries(zoo INTERFACE
+    $<BUILD_INTERFACE:llama>
+    $<INSTALL_INTERFACE:llama>
+)
 
 if(ZOO_ENABLE_LOGGING)
-    target_compile_definitions(zoo INTERFACE ZOO_LOGGING_ENABLED)
+    target_compile_definitions(zoo PRIVATE ZOO_LOGGING_ENABLED)
 endif()
 
-# Core library (Model + llama.cpp)
-add_library(zoo_core STATIC src/core/model.cpp)
-target_link_libraries(zoo_core PUBLIC
-    zoo
-)
-target_link_libraries(zoo_core
-    PRIVATE llama
-    INTERFACE $<INSTALL_INTERFACE:llama>
-)
+# Backward-compatible compatibility target.
+add_library(zoo_core INTERFACE)
+target_link_libraries(zoo_core INTERFACE zoo)
 
 # Compiler warnings
-zoo_set_warnings(zoo INTERFACE)
-zoo_set_warnings(zoo_core PRIVATE)
+zoo_set_warnings(zoo PRIVATE)
 
 # Sanitizers
-zoo_enable_sanitizers(zoo_core)
+zoo_enable_sanitizers(zoo)
 
 # Coverage
-zoo_enable_coverage(zoo_core)
+zoo_enable_coverage(zoo)
 
 # Tests
 if(ZOO_BUILD_TESTS)
@@ -97,7 +98,8 @@ install(TARGETS zoo zoo_core
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+install(DIRECTORY include/zoo DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    PATTERN "internal" EXCLUDE
     PATTERN "*.in" EXCLUDE
 )
 install(DIRECTORY ${json_SOURCE_DIR}/include/nlohmann
@@ -132,7 +134,8 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )
 
-set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo_core -llama -lggml -lggml-base -lggml-cpu")
+
+set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo -llama -lggml -lggml-base -lggml-cpu")
 if(TARGET ggml-blas)
     string(APPEND ZOO_PKGCONFIG_LIBS " -lggml-blas")
 endif()
