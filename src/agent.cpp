@@ -15,8 +15,9 @@
 #include "zoo/tools/validation.hpp"
 #include <atomic>
 #include <chrono>
-#include <mutex>
 #include <thread>
+#include <unordered_map>
+#include <variant>
 
 namespace zoo {
 namespace runtime = internal::agent;
@@ -60,8 +61,15 @@ struct Agent::Impl {
     }
 
     void set_system_prompt(const std::string& prompt) {
-        std::lock_guard<std::mutex> lock(model_mutex);
-        model->set_system_prompt(prompt);
+        if (!running.load(std::memory_order_acquire))
+            return;
+        auto done = std::make_shared<std::promise<void>>();
+        auto future = done->get_future();
+        if (!request_mailbox.push_command(
+                runtime::SetSystemPromptCmd{prompt, std::move(done)})) {
+            return;
+        }
+        future.get();
     }
 
     void stop() {
@@ -78,14 +86,26 @@ struct Agent::Impl {
         return running.load(std::memory_order_acquire);
     }
 
-    std::vector<Message> get_history() const {
-        std::lock_guard<std::mutex> lock(model_mutex);
-        return model->get_history();
+    std::vector<Message> get_history() {
+        if (!running.load(std::memory_order_acquire))
+            return {};
+        auto done = std::make_shared<std::promise<std::vector<Message>>>();
+        auto future = done->get_future();
+        if (!request_mailbox.push_command(runtime::GetHistoryCmd{std::move(done)})) {
+            return {};
+        }
+        return future.get();
     }
 
     void clear_history() {
-        std::lock_guard<std::mutex> lock(model_mutex);
-        model->clear_history();
+        if (!running.load(std::memory_order_acquire))
+            return;
+        auto done = std::make_shared<std::promise<void>>();
+        auto future = done->get_future();
+        if (!request_mailbox.push_command(runtime::ClearHistoryCmd{std::move(done)})) {
+            return;
+        }
+        future.get();
     }
 
     Expected<void> register_tool(tools::ToolDefinition definition) {
@@ -105,7 +125,7 @@ struct Agent::Impl {
         if (schemas.empty())
             return base_prompt;
 
-        if (model->has_tool_grammar()) {
+        if (tool_grammar_active_.load(std::memory_order_acquire)) {
             return base_prompt +
                    "\n\nYou have access to tools. When you need to use a tool, wrap the "
                    "call in sentinel tags like this:\n"
@@ -130,62 +150,109 @@ struct Agent::Impl {
                schemas.dump(2);
     }
 
+    // -----------------------------------------------------------------------
+    // Inference thread
+    // -----------------------------------------------------------------------
+
     void inference_loop() {
         try {
             while (running.load(std::memory_order_acquire)) {
-                auto request_opt = request_mailbox.pop_request();
-                if (!request_opt)
+                auto item_opt = request_mailbox.pop();
+                if (!item_opt)
                     break;
 
-                auto promise = request_opt->promise;
-
-                if (request_opt->cancelled &&
-                    request_opt->cancelled->load(std::memory_order_acquire)) {
-                    ZOO_LOG("info", "request %lu cancelled before processing",
-                            static_cast<unsigned long>(request_opt->id));
-                    request_tracker.fail(request_opt->id,
-                                         Error{ErrorCode::RequestCancelled, "Request cancelled"});
-                    continue;
-                }
-
-                Expected<Response> result;
-                try {
-                    result = process_request(*request_opt);
-                } catch (const std::exception& e) {
-                    ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
-                    result =
-                        std::unexpected(Error{ErrorCode::InferenceFailed,
-                                              std::string("Unhandled exception: ") + e.what()});
-                } catch (...) {
-                    ZOO_LOG("error", "unknown exception in inference thread");
-                    result = std::unexpected(
-                        Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
-                }
-
-                request_tracker.cleanup(request_opt->id);
-
-                if (promise) {
-                    promise->set_value(std::move(result));
-                }
+                std::visit(
+                    [this](auto&& item) {
+                        using T = std::decay_t<decltype(item)>;
+                        if constexpr (std::is_same_v<T, runtime::Request>) {
+                            handle_request(item);
+                        } else if constexpr (std::is_same_v<T, runtime::Command>) {
+                            handle_command(item);
+                        }
+                    },
+                    *item_opt);
             }
 
-            fail_pending_requests(Error{ErrorCode::AgentNotRunning,
-                                        "Agent stopped before request could be processed"});
+            fail_pending(Error{ErrorCode::AgentNotRunning,
+                               "Agent stopped before request could be processed"});
         } catch (const std::exception& e) {
             ZOO_LOG("error", "fatal exception escaped inference thread: %s", e.what());
-            fail_pending_requests(
+            fail_pending(
                 Error{ErrorCode::InferenceFailed,
                       std::string("Inference thread terminated unexpectedly: ") + e.what()});
         } catch (...) {
             ZOO_LOG("error", "fatal unknown exception escaped inference thread");
-            fail_pending_requests(
+            fail_pending(
                 Error{ErrorCode::InferenceFailed, "Inference thread terminated unexpectedly"});
         }
     }
 
-    Expected<Response> process_request(const runtime::Request& request) {
-        std::lock_guard<std::mutex> lock(model_mutex);
+    void handle_request(runtime::Request& request) {
+        auto promise = request.promise;
 
+        if (request.cancelled && request.cancelled->load(std::memory_order_acquire)) {
+            ZOO_LOG("info", "request %lu cancelled before processing",
+                    static_cast<unsigned long>(request.id));
+            request_tracker.fail(request.id,
+                                 Error{ErrorCode::RequestCancelled, "Request cancelled"});
+            return;
+        }
+
+        Expected<Response> result;
+        try {
+            result = process_request(request);
+        } catch (const std::exception& e) {
+            ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
+            result = std::unexpected(Error{ErrorCode::InferenceFailed,
+                                           std::string("Unhandled exception: ") + e.what()});
+        } catch (...) {
+            ZOO_LOG("error", "unknown exception in inference thread");
+            result = std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
+        }
+
+        request_tracker.cleanup(request.id);
+
+        if (promise) {
+            promise->set_value(std::move(result));
+        }
+    }
+
+    void handle_command(runtime::Command& cmd) {
+        std::visit(
+            [this](auto&& c) {
+                using T = std::decay_t<decltype(c)>;
+                if constexpr (std::is_same_v<T, runtime::SetSystemPromptCmd>) {
+                    model->set_system_prompt(c.prompt);
+                    c.done->set_value();
+                } else if constexpr (std::is_same_v<T, runtime::GetHistoryCmd>) {
+                    c.done->set_value(model->get_history());
+                } else if constexpr (std::is_same_v<T, runtime::ClearHistoryCmd>) {
+                    model->clear_history();
+                    c.done->set_value();
+                } else if constexpr (std::is_same_v<T, runtime::RefreshToolGrammarCmd>) {
+                    auto grammar = tools::GrammarBuilder::build(c.metadata);
+                    bool active = false;
+                    if (grammar.empty()) {
+                        model->clear_tool_grammar();
+                    } else if (model->set_tool_grammar(grammar)) {
+                        active = true;
+                        ZOO_LOG("info", "tool grammar updated (%zu tools)",
+                                c.metadata.size());
+                    } else {
+                        model->clear_tool_grammar();
+                        ZOO_LOG("warn",
+                                "grammar sampler init failed, falling back to "
+                                "unconstrained generation");
+                    }
+                    tool_grammar_active_.store(active, std::memory_order_release);
+                    c.done->set_value(active);
+                }
+            },
+            cmd);
+    }
+
+    Expected<Response> process_request(const runtime::Request& request) {
         auto start_time = std::chrono::steady_clock::now();
 
         auto add_result = model->add_message(request.message);
@@ -203,7 +270,8 @@ struct Agent::Impl {
         int iteration = 0;
         const int max_tool_iterations = config.max_tool_iterations;
         const bool has_tools = tool_registry.size() > 0;
-        const bool use_grammar_path = has_tools && model->has_tool_grammar();
+        const bool use_grammar_path =
+            has_tools && tool_grammar_active_.load(std::memory_order_acquire);
 
         ZOO_LOG("debug", "processing request %lu (tools=%d, grammar=%d)",
                 static_cast<unsigned long>(request.id), has_tools, use_grammar_path);
@@ -386,40 +454,71 @@ struct Agent::Impl {
                                                        std::to_string(max_tool_iterations) + ")"});
     }
 
-    void fail_pending_requests(const Error& error) {
+    // -----------------------------------------------------------------------
+    // Shutdown helpers
+    // -----------------------------------------------------------------------
+
+    void fail_pending(const Error& error) {
         running.store(false, std::memory_order_release);
         request_mailbox.shutdown();
 
-        while (auto remaining = request_mailbox.pop_request()) {
-            request_tracker.fail(remaining->id, error);
+        while (auto remaining = request_mailbox.pop()) {
+            std::visit(
+                [&](auto&& item) {
+                    using T = std::decay_t<decltype(item)>;
+                    if constexpr (std::is_same_v<T, runtime::Request>) {
+                        request_tracker.fail(item.id, error);
+                    } else if constexpr (std::is_same_v<T, runtime::Command>) {
+                        resolve_command_on_shutdown(item);
+                    }
+                },
+                *remaining);
         }
+    }
+
+    static void resolve_command_on_shutdown(runtime::Command& cmd) {
+        std::visit(
+            [](auto&& c) {
+                using T = std::decay_t<decltype(c)>;
+                if constexpr (std::is_same_v<T, runtime::SetSystemPromptCmd>) {
+                    c.done->set_value();
+                } else if constexpr (std::is_same_v<T, runtime::GetHistoryCmd>) {
+                    c.done->set_value(std::vector<Message>{});
+                } else if constexpr (std::is_same_v<T, runtime::ClearHistoryCmd>) {
+                    c.done->set_value();
+                } else if constexpr (std::is_same_v<T, runtime::RefreshToolGrammarCmd>) {
+                    c.done->set_value(false);
+                }
+            },
+            cmd);
     }
 
     void update_tool_grammar() {
-        std::lock_guard<std::mutex> lock(model_mutex);
-        auto metadata = tool_registry.get_all_tool_metadata();
-        auto grammar = tools::GrammarBuilder::build(metadata);
-        if (grammar.empty()) {
-            model->clear_tool_grammar();
+        if (!running.load(std::memory_order_acquire))
             return;
-        } else if (model->set_tool_grammar(grammar)) {
-            ZOO_LOG("info", "tool grammar updated (%zu tools)", tool_registry.size());
-        } else {
-            model->clear_tool_grammar();
-            ZOO_LOG("warn",
-                    "grammar sampler init failed, falling back to unconstrained generation");
+        auto metadata = tool_registry.get_all_tool_metadata();
+        auto done = std::make_shared<std::promise<bool>>();
+        auto future = done->get_future();
+        if (!request_mailbox.push_command(
+                runtime::RefreshToolGrammarCmd{std::move(metadata), std::move(done)})) {
+            return;
         }
+        future.get();
     }
+
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
 
     Config config;
     std::unique_ptr<core::Model> model;
-    mutable std::mutex model_mutex;
     tools::ToolRegistry tool_registry;
     runtime::RequestTracker request_tracker;
-    runtime::RuntimeMailbox request_mailbox;
+    mutable runtime::RuntimeMailbox request_mailbox;
 
     std::thread inference_thread;
     std::atomic<bool> running;
+    std::atomic<bool> tool_grammar_active_{false};
 };
 
 Expected<std::unique_ptr<Agent>> Agent::create(const Config& config) {

@@ -127,8 +127,8 @@ class Agent {
     /**
      * @brief Registers a strongly typed tool and refreshes grammar constraints.
      *
-     * This call blocks until any in-flight request completes because the
-     * grammar refresh must acquire the model mutex.
+     * This call blocks until the inference thread has applied the grammar
+     * refresh, so the tool is ready to use when the call returns.
      *
      * @tparam Func Callable type to register.
      * @param name Public tool name.

@@ -1,6 +1,6 @@
 /**
  * @file test_agent_mailbox.cpp
- * @brief Unit tests for the agent request mailbox.
+ * @brief Unit tests for the agent runtime mailbox.
  */
 
 #include "zoo/internal/agent/mailbox.hpp"
@@ -10,33 +10,39 @@
 
 namespace {
 
-zoo::internal::agent::Request make_request(zoo::RequestId id, std::string text) {
-    zoo::internal::agent::Request request(zoo::Message::user(std::move(text)));
+using namespace zoo::internal::agent;
+
+Request make_request(zoo::RequestId id, std::string text) {
+    Request request(zoo::Message::user(std::move(text)));
     request.id = id;
     return request;
+}
+
+const Request& as_request(const WorkItem& item) {
+    return std::get<Request>(item);
 }
 
 } // namespace
 
 TEST(RuntimeMailboxTest, PopsRequestsInSubmissionOrder) {
-    zoo::internal::agent::RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox(2);
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, "first")));
     ASSERT_TRUE(mailbox.push_request(make_request(2, "second")));
 
-    auto first = mailbox.pop_request();
+    auto first = mailbox.pop();
     ASSERT_TRUE(first.has_value());
-    EXPECT_EQ(first->id, 1u);
-    EXPECT_EQ(first->message.content, "first");
+    EXPECT_EQ(as_request(*first).id, 1u);
+    EXPECT_EQ(as_request(*first).message.content, "first");
 
-    auto second = mailbox.pop_request();
+    auto second = mailbox.pop();
     ASSERT_TRUE(second.has_value());
-    EXPECT_EQ(second->id, 2u);
-    EXPECT_EQ(second->message.content, "second");
+    EXPECT_EQ(as_request(*second).id, 2u);
+    EXPECT_EQ(as_request(*second).message.content, "second");
 }
 
 TEST(RuntimeMailboxTest, RejectsRequestsPastCapacity) {
-    zoo::internal::agent::RuntimeMailbox mailbox(1);
+    RuntimeMailbox mailbox(1);
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, "first")));
     EXPECT_FALSE(mailbox.push_request(make_request(2, "second")));
@@ -44,31 +50,71 @@ TEST(RuntimeMailboxTest, RejectsRequestsPastCapacity) {
 }
 
 TEST(RuntimeMailboxTest, ShutdownDrainsQueuedRequestsThenStops) {
-    zoo::internal::agent::RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox(2);
 
     ASSERT_TRUE(mailbox.push_request(make_request(7, "queued")));
     mailbox.shutdown();
 
-    auto queued = mailbox.pop_request();
+    auto queued = mailbox.pop();
     ASSERT_TRUE(queued.has_value());
-    EXPECT_EQ(queued->id, 7u);
+    EXPECT_EQ(as_request(*queued).id, 7u);
 
-    auto drained = mailbox.pop_request();
+    auto drained = mailbox.pop();
     EXPECT_FALSE(drained.has_value());
 }
 
 TEST(RuntimeMailboxTest, RejectsNewRequestsAfterShutdown) {
-    zoo::internal::agent::RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox(2);
 
     mailbox.shutdown();
     EXPECT_FALSE(mailbox.push_request(make_request(3, "late")));
 }
 
 TEST(RuntimeMailboxTest, ZeroCapacityAllowsUnboundedPushes) {
-    zoo::internal::agent::RuntimeMailbox mailbox(0);
+    RuntimeMailbox mailbox(0);
 
     for (zoo::RequestId i = 1; i <= 10; ++i) {
         ASSERT_TRUE(mailbox.push_request(make_request(i, "msg")));
     }
     EXPECT_EQ(mailbox.size(), 10u);
+}
+
+TEST(RuntimeMailboxTest, CommandsArePrioritizedOverRequests) {
+    RuntimeMailbox mailbox(2);
+
+    ASSERT_TRUE(mailbox.push_request(make_request(1, "request")));
+
+    auto promise = std::make_shared<std::promise<void>>();
+    ASSERT_TRUE(mailbox.push_command(SetSystemPromptCmd{"hello", promise}));
+
+    auto first = mailbox.pop();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_TRUE(std::holds_alternative<Command>(*first));
+
+    auto second = mailbox.pop();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_TRUE(std::holds_alternative<Request>(*second));
+}
+
+TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
+    RuntimeMailbox mailbox(2);
+
+    mailbox.shutdown();
+    auto promise = std::make_shared<std::promise<void>>();
+    EXPECT_FALSE(mailbox.push_command(SetSystemPromptCmd{"late", promise}));
+}
+
+TEST(RuntimeMailboxTest, ShutdownDrainsCommandsThenStops) {
+    RuntimeMailbox mailbox(2);
+
+    auto promise = std::make_shared<std::promise<void>>();
+    ASSERT_TRUE(mailbox.push_command(ClearHistoryCmd{promise}));
+    mailbox.shutdown();
+
+    auto item = mailbox.pop();
+    ASSERT_TRUE(item.has_value());
+    EXPECT_TRUE(std::holds_alternative<Command>(*item));
+
+    auto drained = mailbox.pop();
+    EXPECT_FALSE(drained.has_value());
 }
