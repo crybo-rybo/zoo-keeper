@@ -17,7 +17,6 @@
 #include <chrono>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
 
 namespace zoo {
 namespace runtime = internal::agent;

@@ -63,3 +63,12 @@ TEST(RuntimeMailboxTest, RejectsNewRequestsAfterShutdown) {
     mailbox.shutdown();
     EXPECT_FALSE(mailbox.push_request(make_request(3, "late")));
 }
+
+TEST(RuntimeMailboxTest, ZeroCapacityAllowsUnboundedPushes) {
+    zoo::internal::agent::RuntimeMailbox mailbox(0);
+
+    for (zoo::RequestId i = 1; i <= 10; ++i) {
+        ASSERT_TRUE(mailbox.push_request(make_request(i, "msg")));
+    }
+    EXPECT_EQ(mailbox.size(), 10u);
+}

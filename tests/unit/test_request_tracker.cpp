@@ -54,3 +54,16 @@ TEST(RequestTrackerTest, CleanupRemovesTrackedRequest) {
     EXPECT_FALSE(
         tracker.fail(prepared.request.id, zoo::Error{zoo::ErrorCode::Unknown, "already removed"}));
 }
+
+TEST(RequestTrackerTest, CancelNonExistentIdIsNoOp) {
+    zoo::internal::agent::RequestTracker tracker;
+
+    tracker.cancel(999);
+    EXPECT_EQ(tracker.size(), 0u);
+}
+
+TEST(RequestTrackerTest, FailReturnsFalseForUnknownId) {
+    zoo::internal::agent::RequestTracker tracker;
+
+    EXPECT_FALSE(tracker.fail(42, zoo::Error{zoo::ErrorCode::Unknown, "not tracked"}));
+}
