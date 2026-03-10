@@ -53,15 +53,13 @@ int main(int argc, char** argv) {
         {"properties",
          {{"query", {{"type", "string"}, {"description", "Search query"}}},
           {"limit", {{"type", "integer"}, {"enum", nlohmann::json::array({5, 10, 20})}}},
-          {"scope",
-           {{"type", "string"}, {"enum", nlohmann::json::array({"docs", "issues"})}}}}},
+          {"scope", {{"type", "string"}, {"enum", nlohmann::json::array({"docs", "issues"})}}}}},
         {"required", nlohmann::json::array({"query"})},
         {"additionalProperties", false}};
 
     auto register_result = agent->register_tool(
-        "search_documents",
-        "Search a tiny in-memory document index for matching snippets.",
-        schema, [](const nlohmann::json& args) -> zoo::Expected<nlohmann::json> {
+        "search_documents", "Search a tiny in-memory document index for matching snippets.", schema,
+        [](const nlohmann::json& args) -> zoo::Expected<nlohmann::json> {
             const std::string query = args.at("query").get<std::string>();
             const int limit = args.value("limit", 5);
             const std::string scope = args.value("scope", "docs");
