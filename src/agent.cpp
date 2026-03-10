@@ -6,6 +6,8 @@
 #include "zoo/agent.hpp"
 
 #include "zoo/core/model.hpp"
+#include "zoo/internal/agent/mailbox.hpp"
+#include "zoo/internal/agent/request_tracker.hpp"
 #include "zoo/internal/log.hpp"
 #include "zoo/internal/tools/grammar.hpp"
 #include "zoo/internal/tools/interceptor.hpp"
@@ -13,75 +15,17 @@
 #include "zoo/tools/validation.hpp"
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <mutex>
-#include <queue>
 #include <thread>
 #include <unordered_map>
 
 namespace zoo {
-
-namespace {
-
-struct Request {
-    Message message;
-    std::optional<std::function<void(std::string_view)>> streaming_callback;
-    std::chrono::steady_clock::time_point submitted_at;
-    std::shared_ptr<std::promise<Expected<Response>>> promise;
-    RequestId id = 0;
-    std::shared_ptr<std::atomic<bool>> cancelled;
-
-    Request(Message msg,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt)
-        : message(std::move(msg)), streaming_callback(std::move(callback)),
-          submitted_at(std::chrono::steady_clock::now()),
-          cancelled(std::make_shared<std::atomic<bool>>(false)) {}
-};
-
-class RequestQueue {
-  public:
-    explicit RequestQueue(size_t max_size = 0) : max_size_(max_size), shutdown_(false) {}
-
-    bool push(Request request) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (shutdown_)
-            return false;
-        if (max_size_ > 0 && queue_.size() >= max_size_)
-            return false;
-        queue_.push(std::move(request));
-        cv_.notify_one();
-        return true;
-    }
-
-    std::optional<Request> pop() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] { return !queue_.empty() || shutdown_; });
-        if (shutdown_ && queue_.empty())
-            return std::nullopt;
-        Request req = std::move(queue_.front());
-        queue_.pop();
-        return req;
-    }
-
-    void shutdown() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        shutdown_ = true;
-        cv_.notify_all();
-    }
-
-  private:
-    std::queue<Request> queue_;
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    size_t max_size_;
-    bool shutdown_;
-};
-
-} // namespace
+namespace runtime = internal::agent;
 
 struct Agent::Impl {
     explicit Impl(const Config& cfg, std::unique_ptr<core::Model> owned_model)
-        : config(cfg), model(std::move(owned_model)), request_queue(cfg.request_queue_capacity),
+        : config(cfg), model(std::move(owned_model)),
+          request_mailbox(cfg.request_queue_capacity),
           running(true) {
         inference_thread = std::thread([this]() { inference_loop(); });
     }
@@ -93,42 +37,27 @@ struct Agent::Impl {
     RequestHandle
     chat(Message message,
          std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
-        auto promise = std::make_shared<std::promise<Expected<Response>>>();
-        std::future<Expected<Response>> future = promise->get_future();
-        RequestId request_id = next_request_id.fetch_add(1, std::memory_order_relaxed);
+        auto prepared = request_tracker.prepare(std::move(message), std::move(callback));
+        RequestHandle handle{prepared.request.id, std::move(prepared.future)};
 
         if (!running.load(std::memory_order_acquire)) {
-            promise->set_value(
-                std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"}));
-            return RequestHandle{request_id, std::move(future)};
+            request_tracker.fail(handle.id,
+                                 Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+            return handle;
         }
 
-        Request request(std::move(message), std::move(callback));
-        request.promise = promise;
-        request.id = request_id;
-
-        {
-            std::lock_guard<std::mutex> lock(cancel_tokens_mutex);
-            cancel_tokens[request_id] = request.cancelled;
+        if (!request_mailbox.push_request(std::move(prepared.request))) {
+            request_tracker.fail(
+                handle.id,
+                Error{ErrorCode::QueueFull, "Request queue is full or agent is shutting down"});
+            return handle;
         }
 
-        if (!request_queue.push(std::move(request))) {
-            promise->set_value(std::unexpected(
-                Error{ErrorCode::QueueFull, "Request queue is full or agent is shutting down"}));
-            std::lock_guard<std::mutex> lock(cancel_tokens_mutex);
-            cancel_tokens.erase(request_id);
-            return RequestHandle{request_id, std::move(future)};
-        }
-
-        return RequestHandle{request_id, std::move(future)};
+        return handle;
     }
 
     void cancel(RequestId id) {
-        std::lock_guard<std::mutex> lock(cancel_tokens_mutex);
-        auto it = cancel_tokens.find(id);
-        if (it != cancel_tokens.end()) {
-            it->second->store(true, std::memory_order_release);
-        }
+        request_tracker.cancel(id);
     }
 
     void set_system_prompt(const std::string& prompt) {
@@ -140,7 +69,7 @@ struct Agent::Impl {
         if (!running.load(std::memory_order_acquire))
             return;
         running.store(false, std::memory_order_release);
-        request_queue.shutdown();
+        request_mailbox.shutdown();
         if (inference_thread.joinable()) {
             inference_thread.join();
         }
@@ -205,7 +134,7 @@ struct Agent::Impl {
     void inference_loop() {
         try {
             while (running.load(std::memory_order_acquire)) {
-                auto request_opt = request_queue.pop();
+                auto request_opt = request_mailbox.pop_request();
                 if (!request_opt)
                     break;
 
@@ -215,11 +144,8 @@ struct Agent::Impl {
                     request_opt->cancelled->load(std::memory_order_acquire)) {
                     ZOO_LOG("info", "request %lu cancelled before processing",
                             static_cast<unsigned long>(request_opt->id));
-                    if (promise) {
-                        promise->set_value(std::unexpected(
-                            Error{ErrorCode::RequestCancelled, "Request cancelled"}));
-                    }
-                    cleanup_cancel_token(request_opt->id);
+                    request_tracker.fail(request_opt->id,
+                                         Error{ErrorCode::RequestCancelled, "Request cancelled"});
                     continue;
                 }
 
@@ -237,7 +163,7 @@ struct Agent::Impl {
                         Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
                 }
 
-                cleanup_cancel_token(request_opt->id);
+                request_tracker.cleanup(request_opt->id);
 
                 if (promise) {
                     promise->set_value(std::move(result));
@@ -258,7 +184,7 @@ struct Agent::Impl {
         }
     }
 
-    Expected<Response> process_request(const Request& request) {
+    Expected<Response> process_request(const runtime::Request& request) {
         std::lock_guard<std::mutex> lock(model_mutex);
 
         auto start_time = std::chrono::steady_clock::now();
@@ -461,20 +387,12 @@ struct Agent::Impl {
                                                        std::to_string(max_tool_iterations) + ")"});
     }
 
-    void cleanup_cancel_token(RequestId id) {
-        std::lock_guard<std::mutex> lock(cancel_tokens_mutex);
-        cancel_tokens.erase(id);
-    }
-
     void fail_pending_requests(const Error& error) {
         running.store(false, std::memory_order_release);
-        request_queue.shutdown();
+        request_mailbox.shutdown();
 
-        while (auto remaining = request_queue.pop()) {
-            if (remaining->promise) {
-                remaining->promise->set_value(std::unexpected(error));
-            }
-            cleanup_cancel_token(remaining->id);
+        while (auto remaining = request_mailbox.pop_request()) {
+            request_tracker.fail(remaining->id, error);
         }
     }
 
@@ -498,14 +416,11 @@ struct Agent::Impl {
     std::unique_ptr<core::Model> model;
     mutable std::mutex model_mutex;
     tools::ToolRegistry tool_registry;
-    RequestQueue request_queue;
+    runtime::RequestTracker request_tracker;
+    runtime::RuntimeMailbox request_mailbox;
 
     std::thread inference_thread;
     std::atomic<bool> running;
-    std::atomic<uint64_t> next_request_id{1};
-
-    std::mutex cancel_tokens_mutex;
-    std::unordered_map<RequestId, std::shared_ptr<std::atomic<bool>>> cancel_tokens;
 };
 
 Expected<std::unique_ptr<Agent>> Agent::create(const Config& config) {
