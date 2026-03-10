@@ -469,9 +469,12 @@ struct Agent::Impl {
         auto grammar = tools::GrammarBuilder::build(schemas);
         if (grammar.empty()) {
             model->clear_tool_grammar();
-        } else if (model->set_tool_grammar(grammar)) {
+            return;
+        }
+        else if (model->set_tool_grammar(grammar)) {
             ZOO_LOG("info", "tool grammar updated (%zu tools)", tool_registry.size());
         } else {
+            model->clear_tool_grammar();
             ZOO_LOG("warn",
                     "grammar sampler init failed, falling back to unconstrained generation");
         }
