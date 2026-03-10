@@ -103,6 +103,10 @@ class Agent {
     /**
      * @brief Replaces the current system prompt on the underlying model.
      *
+     * This call blocks until the inference thread has applied the change. If a
+     * request is currently generating, the prompt update runs before the next
+     * queued request begins.
+     *
      * @param prompt New system prompt content.
      */
     void set_system_prompt(const std::string& prompt);
@@ -118,17 +122,17 @@ class Agent {
         return config_;
     }
 
-    /// Returns a snapshot of the underlying model conversation history.
+    /// Returns a history snapshot taken synchronously on the inference thread.
     std::vector<Message> get_history() const;
 
-    /// Clears the underlying model conversation history.
+    /// Clears history synchronously on the inference thread before later queued work.
     void clear_history();
 
     /**
      * @brief Registers a strongly typed tool and refreshes grammar constraints.
      *
-     * This call blocks until any in-flight request completes because the
-     * grammar refresh must acquire the model mutex.
+     * This call blocks until the inference thread has applied the grammar
+     * refresh, so the tool is ready to use when the call returns.
      *
      * @tparam Func Callable type to register.
      * @param name Public tool name.

@@ -42,6 +42,8 @@ configure_file(
 # Primary public library target
 add_library(zoo STATIC
     src/agent.cpp
+    src/agent/backend_model.cpp
+    src/agent/runtime.cpp
     src/core/model.cpp
 )
 target_include_directories(zoo PUBLIC

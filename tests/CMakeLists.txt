@@ -11,6 +11,9 @@ add_executable(zoo_tests
     unit/test_error_recovery.cpp
     unit/test_tool_interceptor.cpp
     unit/test_batch.cpp
+    unit/test_agent_mailbox.cpp
+    unit/test_agent_runtime.cpp
+    unit/test_request_tracker.cpp
 )
 
 target_link_libraries(zoo_tests
