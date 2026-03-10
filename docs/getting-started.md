@@ -81,7 +81,8 @@ The primary entry point for agentic behavior. Created via the `Agent::create()` 
 | `chat(message, callback)` | Chat with per-token streaming callback |
 | `cancel(id)` | Cancel a pending request by ID |
 | `set_system_prompt(text)` | Set or update the system prompt |
-| `register_tool(name, desc, params, func)` | Register a callable as a tool |
+| `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
+| `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
 | `stop()` | Gracefully shut down the agent |
 | `is_running()` | Check if the agent is accepting requests |
 | `clear_history()` | Clear conversation history |
@@ -124,7 +125,7 @@ Returned from `chat()` via `std::future`. Contains:
 - `text` -- generated response text
 - `usage` -- token counts (prompt, completion, total)
 - `metrics` -- latency, time-to-first-token, tokens/sec
-- `tool_calls` -- tool result messages (role `Tool`) injected during the agentic loop
+- `tool_invocations` -- explicit tool attempts including name, arguments, result, and error outcome
 
 ### Error Handling
 

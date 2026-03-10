@@ -132,6 +132,8 @@ enum class ErrorCode {
     InvalidToolSignature = 502, ///< Registered tool metadata does not match its callable signature.
     ToolRetriesExhausted = 503, ///< Validation retries for a tool call were exhausted.
     ToolLoopLimitReached = 504, ///< The agent exceeded its tool-iteration budget.
+    InvalidToolSchema = 505,    ///< A manually supplied tool schema uses an unsupported construct.
+    ToolValidationFailed = 506, ///< A parsed tool call failed schema-based argument validation.
 
     Unknown = 999 ///< Fallback code for uncategorized failures.
 };
@@ -166,6 +168,9 @@ struct Error {
         }
         return result;
     }
+
+    /// Compares two errors including code, message, and optional context.
+    bool operator==(const Error& other) const = default;
 };
 
 /**
@@ -352,14 +357,52 @@ struct Metrics {
 };
 
 /**
+ * @brief Outcome recorded for one attempted tool invocation.
+ */
+enum class ToolInvocationStatus {
+    Succeeded,        ///< Tool arguments validated and the handler returned a result.
+    ValidationFailed, ///< Parsed arguments did not satisfy the registered schema.
+    ExecutionFailed   ///< The handler returned or raised an execution failure.
+};
+
+/// Returns a human-readable string for a tool invocation status.
+[[nodiscard]] inline const char* to_string(ToolInvocationStatus status) noexcept {
+    switch (status) {
+    case ToolInvocationStatus::Succeeded:
+        return "succeeded";
+    case ToolInvocationStatus::ValidationFailed:
+        return "validation_failed";
+    case ToolInvocationStatus::ExecutionFailed:
+        return "execution_failed";
+    }
+    return "unknown";
+}
+
+/**
+ * @brief Structured record of one attempted tool call during agent execution.
+ */
+struct ToolInvocation {
+    std::string id;   ///< Correlation identifier parsed from or derived for the tool call.
+    std::string name; ///< Registered tool name the model attempted to invoke.
+    std::string arguments_json; ///< Serialized arguments exactly as parsed from model output.
+    ToolInvocationStatus status = ToolInvocationStatus::Succeeded; ///< Final outcome category.
+    std::optional<std::string> result_json; ///< Serialized handler result when execution succeeded.
+    std::optional<Error>
+        error; ///< Validation or execution error details when the attempt did not succeed.
+
+    /// Compares two tool invocation records field-by-field.
+    bool operator==(const ToolInvocation& other) const = default;
+};
+
+/**
  * @brief Final response returned by model or agent generation.
  */
 struct Response {
     std::string text; ///< Assistant-visible response text.
     TokenUsage usage; ///< Prompt and completion token usage.
     Metrics metrics;  ///< Latency and throughput data.
-    std::vector<Message>
-        tool_calls; ///< Tool result messages (role=Tool) injected during the agentic loop.
+    std::vector<ToolInvocation>
+        tool_invocations; ///< Explicit tool invocation attempts recorded during the agentic loop.
 
     /// Compares two responses field-by-field.
     bool operator==(const Response& other) const = default;

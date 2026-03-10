@@ -190,7 +190,7 @@ Additional example executables are built alongside `demo_chat`:
 - `model_generate` -- standalone `zoo::core::Model` usage
 - `error_handling` -- practical error reporting patterns
 - `stream_cancel` -- streaming output with cooperative cancellation
-- `custom_tool_schema` -- manual JSON schema registration for nested tool arguments
+- `manual_tool_schema` -- manual-schema registration through `Agent::register_tool(...)`
 
 ## See Also
 

@@ -7,10 +7,13 @@
 
 #include "core/types.hpp"
 #include "tools/registry.hpp"
+#include <concepts>
 #include <exception>
 #include <future>
+#include <initializer_list>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -124,6 +127,9 @@ class Agent {
     /**
      * @brief Registers a strongly typed tool and refreshes grammar constraints.
      *
+     * This call blocks until any in-flight request completes because the
+     * grammar refresh must acquire the model mutex.
+     *
      * @tparam Func Callable type to register.
      * @param name Public tool name.
      * @param description Human-readable description for prompts and schemas.
@@ -133,48 +139,49 @@ class Agent {
      */
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 const std::vector<std::string>& param_names, Func func) {
-        using traits = tools::detail::function_traits<Func>;
-        using args_tuple = typename traits::args_tuple;
+                                 std::initializer_list<std::string> param_names, Func func) {
+        return register_tool(name, description, std::vector<std::string>(param_names),
+                             std::move(func));
+    }
 
-        if (param_names.size() != traits::arity) {
-            return std::unexpected(Error{
-                ErrorCode::InvalidToolSignature,
-                "Parameter name count (" + std::to_string(param_names.size()) +
-                    ") does not match function arity (" + std::to_string(traits::arity) + ")"});
+    /**
+     * @brief Registers a strongly typed tool and refreshes grammar constraints.
+     *
+     * @tparam Func Callable type to register.
+     * @param name Public tool name.
+     * @param description Human-readable description for prompts and schemas.
+     * @param param_names Parameter names in callable argument order.
+     * @param func Callable implementation.
+     * @return Empty success when registered, or the underlying registry error.
+     */
+    template <typename Func>
+    Expected<void> register_tool(const std::string& name, const std::string& description,
+                                 std::span<const std::string> param_names, Func func) {
+        auto definition = tools::detail::make_tool_definition(
+            name, description, std::vector<std::string>(param_names.begin(), param_names.end()),
+            std::move(func));
+        if (!definition) {
+            return std::unexpected(definition.error());
         }
+        return register_tool(std::move(*definition));
+    }
 
-        nlohmann::json schema;
-        if constexpr (traits::arity == 0) {
-            schema = nlohmann::json{{"type", "object"},
-                                    {"properties", nlohmann::json::object()},
-                                    {"required", nlohmann::json::array()}};
-        } else {
-            schema = tools::detail::build_properties<args_tuple>(param_names);
-        }
-
-        auto captured_names = param_names;
-        tools::ToolHandler handler = [f = std::move(func), names = std::move(captured_names)](
-                                         const nlohmann::json& args) -> Expected<nlohmann::json> {
-            try {
-                if constexpr (traits::arity == 0) {
-                    auto result = f();
-                    return tools::detail::wrap_result(std::move(result));
-                } else {
-                    auto result =
-                        tools::detail::invoke_with_json<decltype(f), args_tuple>(f, args, names);
-                    return tools::detail::wrap_result(std::move(result));
-                }
-            } catch (const nlohmann::json::exception& e) {
-                return std::unexpected(Error{ErrorCode::ToolExecutionFailed,
-                                             std::string("JSON argument error: ") + e.what()});
-            } catch (const std::exception& e) {
-                return std::unexpected(Error{ErrorCode::ToolExecutionFailed,
-                                             std::string("Tool execution failed: ") + e.what()});
-            }
-        };
-
-        return register_tool(name, description, std::move(schema), std::move(handler));
+    /**
+     * @brief Registers a tool using a prebuilt JSON Schema and a JSON-backed callable.
+     *
+     * @tparam Handler Callable type that accepts one JSON object and returns `Expected<json>`.
+     * @param name Public tool name.
+     * @param description Human-readable description for prompts and schemas.
+     * @param schema JSON Schema describing accepted arguments.
+     * @param handler JSON-backed callable implementation.
+     * @return Empty success when registered.
+     */
+    template <typename Handler>
+        requires tools::detail::is_json_handler_like_v<Handler>
+    Expected<void> register_tool(const std::string& name, const std::string& description,
+                                 const nlohmann::json& schema, Handler handler) {
+        return register_tool(name, description, nlohmann::json(schema),
+                             tools::ToolHandler(std::move(handler)));
     }
 
     /**
@@ -207,6 +214,7 @@ class Agent {
     struct Impl;
 
     Agent(Config config, std::unique_ptr<Impl> impl);
+    Expected<void> register_tool(tools::ToolDefinition definition);
 
     Config config_;
     std::unique_ptr<Impl> impl_;

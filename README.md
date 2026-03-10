@@ -83,7 +83,7 @@ The generated site is written to `build/docs/doxygen/html/index.html`. GitHub Ac
 
 ## Testing
 
-135 unit tests plus 4 integration tests for the concrete Model/Agent layers:
+142 unit tests plus 4 integration tests for the concrete Model/Agent layers:
 
 ```bash
 ctest --test-dir build --output-on-failure
