@@ -6,6 +6,7 @@
 #include "zoo/agent.hpp"
 
 #include "zoo/core/model.hpp"
+#include "zoo/internal/agent/backend.hpp"
 #include "zoo/internal/agent/mailbox.hpp"
 #include "zoo/internal/agent/request_tracker.hpp"
 #include "zoo/internal/log.hpp"
@@ -22,9 +23,50 @@
 namespace zoo {
 namespace runtime = internal::agent;
 
+// ---------------------------------------------------------------------------
+// ModelBackend — thin adapter from AgentBackend to core::Model
+// ---------------------------------------------------------------------------
+
+class ModelBackend final : public runtime::AgentBackend {
+  public:
+    explicit ModelBackend(std::unique_ptr<core::Model> model) : model_(std::move(model)) {}
+
+    Expected<void> add_message(const Message& message) override {
+        return model_->add_message(message);
+    }
+
+    Expected<runtime::GenerationResult>
+    generate_from_history(std::optional<TokenCallback> on_token,
+                          CancellationCallback should_cancel) override {
+        auto result = model_->generate_from_history(std::move(on_token), std::move(should_cancel));
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+        return runtime::GenerationResult{
+            std::move(result->text), result->prompt_tokens, result->tool_call_detected};
+    }
+
+    void finalize_response() override { model_->finalize_response(); }
+    void set_system_prompt(const std::string& prompt) override { model_->set_system_prompt(prompt); }
+    std::vector<Message> get_history() const override { return model_->get_history(); }
+    void clear_history() override { model_->clear_history(); }
+
+    bool set_tool_grammar(const std::string& grammar_str) override {
+        return model_->set_tool_grammar(grammar_str);
+    }
+    void clear_tool_grammar() override { model_->clear_tool_grammar(); }
+
+  private:
+    std::unique_ptr<core::Model> model_;
+};
+
+// ---------------------------------------------------------------------------
+// Agent::Impl
+// ---------------------------------------------------------------------------
+
 struct Agent::Impl {
-    explicit Impl(const Config& cfg, std::unique_ptr<core::Model> owned_model)
-        : config(cfg), model(std::move(owned_model)),
+    explicit Impl(const Config& cfg, std::unique_ptr<runtime::AgentBackend> owned_backend)
+        : config(cfg), backend(std::move(owned_backend)),
           request_mailbox(cfg.request_queue_capacity),
           running(true) {
         inference_thread = std::thread([this]() { inference_loop(); });
@@ -223,24 +265,24 @@ struct Agent::Impl {
             [this](auto&& c) {
                 using T = std::decay_t<decltype(c)>;
                 if constexpr (std::is_same_v<T, runtime::SetSystemPromptCmd>) {
-                    model->set_system_prompt(c.prompt);
+                    backend->set_system_prompt(c.prompt);
                     c.done->set_value();
                 } else if constexpr (std::is_same_v<T, runtime::GetHistoryCmd>) {
-                    c.done->set_value(model->get_history());
+                    c.done->set_value(backend->get_history());
                 } else if constexpr (std::is_same_v<T, runtime::ClearHistoryCmd>) {
-                    model->clear_history();
+                    backend->clear_history();
                     c.done->set_value();
                 } else if constexpr (std::is_same_v<T, runtime::RefreshToolGrammarCmd>) {
                     auto grammar = tools::GrammarBuilder::build(c.metadata);
                     bool active = false;
                     if (grammar.empty()) {
-                        model->clear_tool_grammar();
-                    } else if (model->set_tool_grammar(grammar)) {
+                        backend->clear_tool_grammar();
+                    } else if (backend->set_tool_grammar(grammar)) {
                         active = true;
                         ZOO_LOG("info", "tool grammar updated (%zu tools)",
                                 c.metadata.size());
                     } else {
-                        model->clear_tool_grammar();
+                        backend->clear_tool_grammar();
                         ZOO_LOG("warn",
                                 "grammar sampler init failed, falling back to "
                                 "unconstrained generation");
@@ -255,7 +297,7 @@ struct Agent::Impl {
     Expected<Response> process_request(const runtime::Request& request) {
         auto start_time = std::chrono::steady_clock::now();
 
-        auto add_result = model->add_message(request.message);
+        auto add_result = backend->add_message(request.message);
         if (!add_result) {
             return std::unexpected(add_result.error());
         }
@@ -324,7 +366,7 @@ struct Agent::Impl {
                     [](std::string_view) -> TokenAction { return TokenAction::Continue; });
             }
 
-            auto generated = model->generate_from_history(std::move(callback), [&request]() {
+            auto generated = backend->generate_from_history(std::move(callback), [&request]() {
                 return request.cancelled && request.cancelled->load(std::memory_order_acquire);
             });
 
@@ -353,9 +395,9 @@ struct Agent::Impl {
             if (detected_tool_call.has_value()) {
                 const auto& tc = *detected_tool_call;
 
-                model->add_message(
+                backend->add_message(
                     Message::assistant(use_grammar_path ? generated->text : response_text));
-                model->finalize_response();
+                backend->finalize_response();
 
                 std::string args_json = tc.arguments.dump();
 
@@ -378,7 +420,7 @@ struct Agent::Impl {
                             validation_error.message.c_str());
 
                     std::string error_content = "Error: " + validation_error.message;
-                    model->add_message(
+                    backend->add_message(
                         Message::tool(error_content + "\nPlease correct the arguments.", tc.id));
                     tool_invocations.push_back(ToolInvocation{
                         tc.id, tc.name, args_json, ToolInvocationStatus::ValidationFailed,
@@ -403,7 +445,7 @@ struct Agent::Impl {
                 }
 
                 Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
-                model->add_message(tool_msg);
+                backend->add_message(tool_msg);
                 tool_invocations.push_back(ToolInvocation{tc.id, tc.name, std::move(args_json),
                                                           status, std::move(result_json),
                                                           std::move(tool_error)});
@@ -412,15 +454,15 @@ struct Agent::Impl {
 
             if (response_text.empty() && !tool_invocations.empty() &&
                 iteration < max_tool_iterations) {
-                model->add_message(
+                backend->add_message(
                     Message::user("Please respond to the user with the tool result."));
                 continue;
             }
 
             auto end_time = std::chrono::steady_clock::now();
 
-            model->add_message(Message::assistant(response_text));
-            model->finalize_response();
+            backend->add_message(Message::assistant(response_text));
+            backend->finalize_response();
 
             Response response;
             response.text = std::move(response_text);
@@ -511,7 +553,7 @@ struct Agent::Impl {
     // -----------------------------------------------------------------------
 
     Config config;
-    std::unique_ptr<core::Model> model;
+    std::unique_ptr<runtime::AgentBackend> backend;
     tools::ToolRegistry tool_registry;
     runtime::RequestTracker request_tracker;
     mutable runtime::RuntimeMailbox request_mailbox;
@@ -527,7 +569,8 @@ Expected<std::unique_ptr<Agent>> Agent::create(const Config& config) {
         return std::unexpected(model_result.error());
     }
 
-    auto agent_impl = std::make_unique<Impl>(config, std::move(*model_result));
+    auto backend = std::make_unique<ModelBackend>(std::move(*model_result));
+    auto agent_impl = std::make_unique<Impl>(config, std::move(backend));
     return std::unique_ptr<Agent>(new Agent(config, std::move(agent_impl)));
 }
 
