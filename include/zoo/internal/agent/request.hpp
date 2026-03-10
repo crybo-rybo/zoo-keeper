@@ -28,8 +28,7 @@ struct Request {
 
     Request(Message msg,
             std::optional<std::function<void(std::string_view)>> callback = std::nullopt)
-        : message(std::move(msg)), streaming_callback(std::move(callback)),
-          cancelled(std::make_shared<std::atomic<bool>>(false)) {}
+        : message(std::move(msg)), streaming_callback(std::move(callback)) {}
 
     Request(Message msg, std::optional<std::function<void(std::string_view)>> callback,
             std::shared_ptr<std::promise<Expected<Response>>> request_promise, RequestId request_id,

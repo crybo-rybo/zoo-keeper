@@ -67,3 +67,23 @@ TEST(RequestTrackerTest, FailReturnsFalseForUnknownId) {
 
     EXPECT_FALSE(tracker.fail(42, zoo::Error{zoo::ErrorCode::Unknown, "not tracked"}));
 }
+
+TEST(RequestTrackerTest, FailAllResolvesAllTrackedRequests) {
+    zoo::internal::agent::RequestTracker tracker;
+
+    auto first = tracker.prepare(zoo::Message::user("one"));
+    auto second = tracker.prepare(zoo::Message::user("two"));
+    EXPECT_EQ(tracker.size(), 2u);
+
+    tracker.fail_all(zoo::Error{zoo::ErrorCode::AgentNotRunning, "shutdown"});
+
+    EXPECT_EQ(tracker.size(), 0u);
+
+    auto r1 = first.future.get();
+    ASSERT_FALSE(r1.has_value());
+    EXPECT_EQ(r1.error().code, zoo::ErrorCode::AgentNotRunning);
+
+    auto r2 = second.future.get();
+    ASSERT_FALSE(r2.has_value());
+    EXPECT_EQ(r2.error().code, zoo::ErrorCode::AgentNotRunning);
+}

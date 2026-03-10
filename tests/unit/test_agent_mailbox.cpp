@@ -104,6 +104,29 @@ TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
     EXPECT_FALSE(mailbox.push_command(SetSystemPromptCmd{"late", promise}));
 }
 
+TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
+    RuntimeMailbox mailbox(4);
+
+    ASSERT_TRUE(mailbox.push_request(make_request(1, "req")));
+
+    auto p1 = std::make_shared<std::promise<void>>();
+    auto p2 = std::make_shared<std::promise<void>>();
+    ASSERT_TRUE(mailbox.push_command(ClearHistoryCmd{p1}));
+    ASSERT_TRUE(mailbox.push_command(SetSystemPromptCmd{"hi", p2}));
+
+    auto first = mailbox.pop();
+    ASSERT_TRUE(first.has_value());
+    EXPECT_TRUE(std::holds_alternative<Command>(*first));
+
+    auto second = mailbox.pop();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_TRUE(std::holds_alternative<Command>(*second));
+
+    auto third = mailbox.pop();
+    ASSERT_TRUE(third.has_value());
+    EXPECT_TRUE(std::holds_alternative<Request>(*third));
+}
+
 TEST(RuntimeMailboxTest, ShutdownDrainsCommandsThenStops) {
     RuntimeMailbox mailbox(2);
 

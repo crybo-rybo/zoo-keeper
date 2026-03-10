@@ -94,6 +94,26 @@ class RequestTracker {
         return true;
     }
 
+    /**
+     * @brief Fails all tracked requests with the given error.
+     *
+     * Resolves every outstanding promise and clears the tracking map.
+     * Used during shutdown to catch requests that were prepared but never
+     * reached the mailbox.
+     */
+    void fail_all(const Error& error) {
+        std::unordered_map<RequestId, State> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            snapshot.swap(requests_);
+        }
+        for (auto& [id, state] : snapshot) {
+            if (state.promise) {
+                state.promise->set_value(std::unexpected(error));
+            }
+        }
+    }
+
     /// Returns the number of tracked requests.
     size_t size() const {
         std::lock_guard<std::mutex> lock(mutex_);

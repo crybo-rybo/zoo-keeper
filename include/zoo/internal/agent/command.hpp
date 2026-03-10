@@ -44,4 +44,9 @@ struct RefreshToolGrammarCmd {
 using Command = std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd,
                              RefreshToolGrammarCmd>;
 
+/// Helper for exhaustive std::visit with overloaded lambdas.
+template <class... Ts> struct overloaded : Ts... {
+    using Ts::operator()...;
+};
+
 } // namespace zoo::internal::agent

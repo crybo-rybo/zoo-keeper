@@ -15,6 +15,7 @@
 #include "zoo/tools/parser.hpp"
 #include "zoo/tools/validation.hpp"
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <thread>
 #include <unordered_map>
@@ -150,7 +151,14 @@ struct Agent::Impl {
         future.get();
     }
 
+    /// @note tool_registry is internally thread-safe (shared_mutex). The
+    /// grammar refresh command provides the happens-before guarantee for the
+    /// inference thread to observe the newly registered tool.
+    /// Must NOT be called from the inference thread (e.g. from within a tool
+    /// handler) — that would deadlock on the grammar refresh future.
     Expected<void> register_tool(tools::ToolDefinition definition) {
+        assert(!inference_thread.joinable() ||
+               std::this_thread::get_id() != inference_thread.get_id());
         if (auto result = tool_registry.register_tool(std::move(definition)); !result) {
             return std::unexpected(result.error());
         }
@@ -203,16 +211,11 @@ struct Agent::Impl {
                 if (!item_opt)
                     break;
 
-                std::visit(
-                    [this](auto&& item) {
-                        using T = std::decay_t<decltype(item)>;
-                        if constexpr (std::is_same_v<T, runtime::Request>) {
-                            handle_request(item);
-                        } else if constexpr (std::is_same_v<T, runtime::Command>) {
-                            handle_command(item);
-                        }
-                    },
-                    *item_opt);
+                std::visit(runtime::overloaded{
+                               [this](runtime::Request& r) { handle_request(r); },
+                               [this](runtime::Command& c) { handle_command(c); },
+                           },
+                           *item_opt);
             }
 
             fail_pending(Error{ErrorCode::AgentNotRunning,
@@ -261,37 +264,38 @@ struct Agent::Impl {
     }
 
     void handle_command(runtime::Command& cmd) {
-        std::visit(
-            [this](auto&& c) {
-                using T = std::decay_t<decltype(c)>;
-                if constexpr (std::is_same_v<T, runtime::SetSystemPromptCmd>) {
-                    backend->set_system_prompt(c.prompt);
-                    c.done->set_value();
-                } else if constexpr (std::is_same_v<T, runtime::GetHistoryCmd>) {
-                    c.done->set_value(backend->get_history());
-                } else if constexpr (std::is_same_v<T, runtime::ClearHistoryCmd>) {
-                    backend->clear_history();
-                    c.done->set_value();
-                } else if constexpr (std::is_same_v<T, runtime::RefreshToolGrammarCmd>) {
-                    auto grammar = tools::GrammarBuilder::build(c.metadata);
-                    bool active = false;
-                    if (grammar.empty()) {
-                        backend->clear_tool_grammar();
-                    } else if (backend->set_tool_grammar(grammar)) {
-                        active = true;
-                        ZOO_LOG("info", "tool grammar updated (%zu tools)",
-                                c.metadata.size());
-                    } else {
-                        backend->clear_tool_grammar();
-                        ZOO_LOG("warn",
-                                "grammar sampler init failed, falling back to "
-                                "unconstrained generation");
-                    }
-                    tool_grammar_active_.store(active, std::memory_order_release);
-                    c.done->set_value(active);
-                }
-            },
-            cmd);
+        std::visit(runtime::overloaded{
+                       [this](runtime::SetSystemPromptCmd& c) {
+                           backend->set_system_prompt(c.prompt);
+                           c.done->set_value();
+                       },
+                       [this](runtime::GetHistoryCmd& c) {
+                           c.done->set_value(backend->get_history());
+                       },
+                       [this](runtime::ClearHistoryCmd& c) {
+                           backend->clear_history();
+                           c.done->set_value();
+                       },
+                       [this](runtime::RefreshToolGrammarCmd& c) {
+                           auto grammar = tools::GrammarBuilder::build(c.metadata);
+                           bool active = false;
+                           if (grammar.empty()) {
+                               backend->clear_tool_grammar();
+                           } else if (backend->set_tool_grammar(grammar)) {
+                               active = true;
+                               ZOO_LOG("info", "tool grammar updated (%zu tools)",
+                                       c.metadata.size());
+                           } else {
+                               backend->clear_tool_grammar();
+                               ZOO_LOG("warn",
+                                       "grammar sampler init failed, falling back to "
+                                       "unconstrained generation");
+                           }
+                           tool_grammar_active_.store(active, std::memory_order_release);
+                           c.done->set_value(active);
+                       },
+                   },
+                   cmd);
     }
 
     Expected<Response> process_request(const runtime::Request& request) {
@@ -505,34 +509,28 @@ struct Agent::Impl {
         request_mailbox.shutdown();
 
         while (auto remaining = request_mailbox.pop()) {
-            std::visit(
-                [&](auto&& item) {
-                    using T = std::decay_t<decltype(item)>;
-                    if constexpr (std::is_same_v<T, runtime::Request>) {
-                        request_tracker.fail(item.id, error);
-                    } else if constexpr (std::is_same_v<T, runtime::Command>) {
-                        resolve_command_on_shutdown(item);
-                    }
-                },
-                *remaining);
+            std::visit(runtime::overloaded{
+                           [&](runtime::Request& r) { request_tracker.fail(r.id, error); },
+                           [](runtime::Command& c) { resolve_command_on_shutdown(c); },
+                       },
+                       *remaining);
         }
+
+        // Catch any requests that were prepared (tracked) but had not yet
+        // been pushed to the mailbox when shutdown occurred.
+        request_tracker.fail_all(error);
     }
 
     static void resolve_command_on_shutdown(runtime::Command& cmd) {
-        std::visit(
-            [](auto&& c) {
-                using T = std::decay_t<decltype(c)>;
-                if constexpr (std::is_same_v<T, runtime::SetSystemPromptCmd>) {
-                    c.done->set_value();
-                } else if constexpr (std::is_same_v<T, runtime::GetHistoryCmd>) {
-                    c.done->set_value(std::vector<Message>{});
-                } else if constexpr (std::is_same_v<T, runtime::ClearHistoryCmd>) {
-                    c.done->set_value();
-                } else if constexpr (std::is_same_v<T, runtime::RefreshToolGrammarCmd>) {
-                    c.done->set_value(false);
-                }
-            },
-            cmd);
+        std::visit(runtime::overloaded{
+                       [](runtime::SetSystemPromptCmd& c) { c.done->set_value(); },
+                       [](runtime::GetHistoryCmd& c) {
+                           c.done->set_value(std::vector<Message>{});
+                       },
+                       [](runtime::ClearHistoryCmd& c) { c.done->set_value(); },
+                       [](runtime::RefreshToolGrammarCmd& c) { c.done->set_value(false); },
+                   },
+                   cmd);
     }
 
     void update_tool_grammar() {
@@ -554,12 +552,26 @@ struct Agent::Impl {
 
     Config config;
     std::unique_ptr<runtime::AgentBackend> backend;
+
+    // Thread-safe internally (shared_mutex).  register_tool() mutates from
+    // the calling thread; invoke()/validate()/size() read from the inference
+    // thread.  The grammar-refresh command's future provides the
+    // happens-before for the inference thread to observe new registrations.
     tools::ToolRegistry tool_registry;
+
     runtime::RequestTracker request_tracker;
+
+    // Mutable because get_history() is const on the public Agent API but
+    // internally pushes a command through the mailbox.  The mailbox is
+    // inherently thread-safe so this does not weaken the const contract.
     mutable runtime::RuntimeMailbox request_mailbox;
 
     std::thread inference_thread;
     std::atomic<bool> running;
+
+    // Snapshot published by the inference thread after each grammar refresh
+    // so build_tool_system_prompt() can read prompt mode without touching
+    // the backend.  Safe to read from any thread via acquire/release.
     std::atomic<bool> tool_grammar_active_{false};
 };
 
