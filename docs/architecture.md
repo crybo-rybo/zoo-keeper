@@ -10,7 +10,7 @@ Consumer Code
      v
 +-- Layer 3: Agent ---------+
 |   zoo::Agent               |   Async orchestration, request queue, agentic tool loop
-|   RequestQueue             |   Thread-safe MPSC request queue
+|   Internal runtime units   |   Mailbox, request tracking, private model backend seam
 |   RequestHandle            |   Future-based response handle
 +----------------------------+
      |
@@ -47,13 +47,15 @@ The tools layer is header-only and has zero dependency on Layer 1. It operates e
 
 ### Layer 3: Agent (`zoo::Agent`)
 
-**Agent** is the async orchestration layer. It composes a `core::Model` and `tools::ToolRegistry`, spawns an inference thread, and implements the agentic tool loop.
+**Agent** is the async orchestration layer. It composes a `tools::ToolRegistry` plus a private backend adapter around `core::Model`, spawns an inference thread, and implements the agentic tool loop.
 
-Created via the `Agent::create()` factory method, which validates config, initializes the backend, loads the model, and starts the inference thread. Agent is non-copyable and non-movable because the inference thread captures `this`.
+Created via the `Agent::create()` factory method, which validates config, loads the model, wraps it in the private agent backend seam, and starts the inference thread. Agent is non-copyable and non-movable because the inference thread captures `this`.
+
+The inference thread owns all model access. Cross-thread operations such as `set_system_prompt()`, `get_history()`, `clear_history()`, and tool-grammar refresh are routed through typed control commands and applied between requests.
 
 The agentic tool loop runs inline in `process_request()`:
 1. Add user message to history
-2. Generate response via `Model::generate_from_history()`
+2. Generate response via the private backend seam
 3. Parse output for tool calls
 4. If a tool call is found: validate args, record a `ToolInvocation`, execute the handler when valid, inject the tool message, loop back to step 2
 5. If no tool call: return final response
@@ -65,17 +67,18 @@ Zoo-Keeper uses a two-thread architecture:
 
 | Thread | Responsibilities |
 |--------|-----------------|
-| **Calling Thread** | Submits `chat()` requests, receives `std::future<Response>`, registers tools, sets system prompt |
-| **Inference Thread** | Processes request queue, runs inference, executes tools, manages history, fires callbacks |
+| **Calling Thread** | Submits `chat()` requests, receives `std::future<Response>`, registers tools, and enqueues synchronous control commands |
+| **Inference Thread** | Owns model state, processes the mailbox, runs inference, executes tools, manages history, and fires callbacks |
 
 ### Synchronization
 
 | Resource | Mechanism |
 |----------|-----------|
-| Request Queue | Mutex + condition variable |
-| Model Access | `std::mutex` (model_mutex_) |
+| Runtime mailbox | Mutex + condition variable |
+| Model Access | Inference-thread ownership with typed control commands and atomic snapshots |
 | Cancellation Flag | `std::atomic<bool>` per request |
 | Tool Registry | `std::shared_mutex` (read-heavy) |
+| Prompt/Grammar Mode | `std::atomic<bool>` snapshot published by the inference thread |
 
 ### Callback Context
 
@@ -90,7 +93,7 @@ All callbacks (`on_token`, tool handlers) execute on the **inference thread**. T
 | Direct wrapping | Model owns llama.cpp resources directly -- no unnecessary abstraction |
 | Value semantics | Predictable ownership, fewer lifetime bugs |
 | Synchronous core | Model is single-threaded; async behavior is layered on top by Agent |
-| Pure logic testing | Unit tests cover types and tools; Model/Agent tested via integration |
+| Pure logic testing | Unit tests cover types, tools, runtime primitives, and fake-backend Agent orchestration; live Model/Agent coverage remains smoke-level integration |
 
 ## CMake Targets
 
