@@ -62,10 +62,6 @@ if(ZOO_ENABLE_LOGGING)
     target_compile_definitions(zoo PRIVATE ZOO_LOGGING_ENABLED)
 endif()
 
-if(ZOO_BUILD_TESTS)
-    target_compile_definitions(zoo PRIVATE ZOO_TESTING_HOOKS)
-endif()
-
 # Backward-compatible compatibility target.
 add_library(zoo_core INTERFACE)
 target_link_libraries(zoo_core INTERFACE zoo)

@@ -93,7 +93,7 @@ All callbacks (`on_token`, tool handlers) execute on the **inference thread**. T
 | Direct wrapping | Model owns llama.cpp resources directly -- no unnecessary abstraction |
 | Value semantics | Predictable ownership, fewer lifetime bugs |
 | Synchronous core | Model is single-threaded; async behavior is layered on top by Agent |
-| Pure logic testing | Unit tests cover types, tools, runtime primitives, and fake-backend Agent orchestration; live Model/Agent coverage remains smoke-level integration |
+| Pure logic testing | Unit tests cover types, tools, runtime primitives, and fake-backend runtime orchestration; live Model/Agent coverage remains smoke-level integration |
 
 ## CMake Targets
 

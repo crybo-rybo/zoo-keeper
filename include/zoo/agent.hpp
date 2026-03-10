@@ -21,16 +21,6 @@
 
 namespace zoo {
 
-class Agent;
-
-#ifdef ZOO_TESTING_HOOKS
-namespace internal::agent {
-class AgentBackend;
-std::unique_ptr<Agent> make_test_agent(const Config& config,
-                                       std::unique_ptr<AgentBackend> backend);
-} // namespace internal::agent
-#endif
-
 /**
  * @brief Handle returned by `Agent::chat()` for request tracking and result retrieval.
  */
@@ -226,12 +216,6 @@ class Agent {
 
   private:
     struct Impl;
-
-#ifdef ZOO_TESTING_HOOKS
-    friend std::unique_ptr<Agent>
-    internal::agent::make_test_agent(const Config& config,
-                                     std::unique_ptr<internal::agent::AgentBackend> backend);
-#endif
 
     Agent(Config config, std::unique_ptr<Impl> impl);
     Expected<void> register_tool(tools::ToolDefinition definition);

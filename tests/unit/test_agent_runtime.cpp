@@ -1,9 +1,9 @@
 /**
  * @file test_agent_runtime.cpp
- * @brief Unit tests for the Agent runtime using a fake backend.
+ * @brief Unit tests for the internal agent runtime using a fake backend.
  */
 
-#include "zoo/internal/agent/test_factory.hpp"
+#include "zoo/internal/agent/runtime.hpp"
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -18,7 +18,6 @@ namespace {
 
 using namespace std::chrono_literals;
 
-using zoo::Agent;
 using zoo::CancellationCallback;
 using zoo::Config;
 using zoo::Error;
@@ -27,6 +26,7 @@ using zoo::Expected;
 using zoo::Message;
 using zoo::TokenCallback;
 using zoo::internal::agent::AgentBackend;
+using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
 
 class FakeBackend final : public AgentBackend {
@@ -138,8 +138,13 @@ Config make_config() {
     return config;
 }
 
-std::unique_ptr<Agent> make_agent(Config config, std::unique_ptr<FakeBackend> backend) {
-    return zoo::internal::agent::make_test_agent(config, std::move(backend));
+template <typename Func>
+void register_single_int_tool(AgentRuntime& runtime, const std::string& name,
+                              const std::string& description, Func func) {
+    auto definition = zoo::tools::detail::make_tool_definition(
+        name, description, std::vector<std::string>{"value"}, std::move(func));
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
 }
 
 GenerationResult tool_call_generation(const std::string& tool_name, const nlohmann::json& arguments,
@@ -161,7 +166,7 @@ TEST(AgentRuntimeTest, QueueFullFailsAdditionalQueuedRequest) {
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.request_queue_capacity = 1;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -179,11 +184,11 @@ TEST(AgentRuntimeTest, QueueFullFailsAdditionalQueuedRequest) {
             return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
         });
 
-    auto first = agent->chat(Message::user("first"));
+    auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
 
-    auto second = agent->chat(Message::user("second"));
-    auto third = agent->chat(Message::user("third"));
+    auto second = runtime.chat(Message::user("second"));
+    auto third = runtime.chat(Message::user("third"));
 
     auto third_result = third.future.get();
     ASSERT_FALSE(third_result.has_value());
@@ -203,7 +208,7 @@ TEST(AgentRuntimeTest, QueueFullFailsAdditionalQueuedRequest) {
 TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    auto agent = make_agent(make_config(), std::move(backend));
+    AgentRuntime runtime(make_config(), std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -217,11 +222,11 @@ TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
             return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
         });
 
-    auto first = agent->chat(Message::user("first"));
+    auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
 
-    auto second = agent->chat(Message::user("second"));
-    agent->cancel(second.id);
+    auto second = runtime.chat(Message::user("second"));
+    runtime.cancel(second.id);
 
     release->set_value();
 
@@ -236,7 +241,7 @@ TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
 TEST(AgentRuntimeTest, CancelDuringGenerationPropagatesCancellationError) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    auto agent = make_agent(make_config(), std::move(backend));
+    AgentRuntime runtime(make_config(), std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -251,10 +256,10 @@ TEST(AgentRuntimeTest, CancelDuringGenerationPropagatesCancellationError) {
                 std::unexpected(Error{ErrorCode::RequestCancelled, "cancelled during generation"}));
         });
 
-    auto handle = agent->chat(Message::user("cancel me"));
+    auto handle = runtime.chat(Message::user("cancel me"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
 
-    agent->cancel(handle.id);
+    runtime.cancel(handle.id);
 
     auto result = handle.future.get();
     ASSERT_FALSE(result.has_value());
@@ -266,7 +271,7 @@ TEST(AgentRuntimeTest, StopDrainsQueuedRequestsWithAgentNotRunning) {
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.request_queue_capacity = 3;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -280,13 +285,13 @@ TEST(AgentRuntimeTest, StopDrainsQueuedRequestsWithAgentNotRunning) {
             return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
         });
 
-    auto first = agent->chat(Message::user("first"));
+    auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
 
-    auto second = agent->chat(Message::user("second"));
-    auto third = agent->chat(Message::user("third"));
+    auto second = runtime.chat(Message::user("second"));
+    auto third = runtime.chat(Message::user("third"));
 
-    auto stop_future = std::async(std::launch::async, [&agent] { agent->stop(); });
+    auto stop_future = std::async(std::launch::async, [&runtime] { runtime.stop(); });
     EXPECT_EQ(stop_future.wait_for(50ms), std::future_status::timeout);
 
     release->set_value();
@@ -309,11 +314,10 @@ TEST(AgentRuntimeTest, ToolValidationRetryExhaustionReturnsToolRetriesExhausted)
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.max_tool_retries = 1;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
-    ASSERT_TRUE(agent->register_tool("double_value", "Doubles a number", {"value"},
-                                     [](int value) { return value * 2; })
-                    .has_value());
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
     EXPECT_FALSE(backend_ptr->last_tool_grammar().empty());
 
     backend_ptr->push_generation(
@@ -327,7 +331,7 @@ TEST(AgentRuntimeTest, ToolValidationRetryExhaustionReturnsToolRetriesExhausted)
                 tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
         });
 
-    auto handle = agent->chat(Message::user("use the tool"));
+    auto handle = runtime.chat(Message::user("use the tool"));
     auto result = handle.future.get();
 
     ASSERT_FALSE(result.has_value());
@@ -339,11 +343,10 @@ TEST(AgentRuntimeTest, ToolLoopLimitExhaustionReturnsToolLoopLimitReached) {
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.max_tool_iterations = 2;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
-    ASSERT_TRUE(agent->register_tool("double_value", "Doubles a number", {"value"},
-                                     [](int value) { return value * 2; })
-                    .has_value());
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
 
     backend_ptr->push_generation(
         [](std::optional<TokenCallback>, const CancellationCallback&) {
@@ -356,7 +359,7 @@ TEST(AgentRuntimeTest, ToolLoopLimitExhaustionReturnsToolLoopLimitReached) {
                 tool_call_generation("double_value", nlohmann::json{{"value", 2}}, "call-2"));
         });
 
-    auto handle = agent->chat(Message::user("use the tool twice"));
+    auto handle = runtime.chat(Message::user("use the tool twice"));
     auto result = handle.future.get();
 
     ASSERT_FALSE(result.has_value());
@@ -368,7 +371,7 @@ TEST(AgentRuntimeTest, SetSystemPromptSerializesBeforeQueuedRequests) {
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.request_queue_capacity = 2;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -386,12 +389,12 @@ TEST(AgentRuntimeTest, SetSystemPromptSerializesBeforeQueuedRequests) {
             return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
         });
 
-    auto first = agent->chat(Message::user("first"));
+    auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-    auto second = agent->chat(Message::user("second"));
+    auto second = runtime.chat(Message::user("second"));
 
-    auto prompt_future = std::async(std::launch::async, [&agent] {
-        agent->set_system_prompt("updated");
+    auto prompt_future = std::async(std::launch::async, [&runtime] {
+        runtime.set_system_prompt("updated");
     });
 
     EXPECT_EQ(prompt_future.wait_for(50ms), std::future_status::timeout);
@@ -414,7 +417,7 @@ TEST(AgentRuntimeTest, GetHistorySerializesBeforeQueuedRequests) {
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.request_queue_capacity = 2;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -432,11 +435,11 @@ TEST(AgentRuntimeTest, GetHistorySerializesBeforeQueuedRequests) {
             return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
         });
 
-    auto first = agent->chat(Message::user("first"));
+    auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-    auto second = agent->chat(Message::user("second"));
+    auto second = runtime.chat(Message::user("second"));
 
-    auto history_future = std::async(std::launch::async, [&agent] { return agent->get_history(); });
+    auto history_future = std::async(std::launch::async, [&runtime] { return runtime.get_history(); });
     EXPECT_EQ(history_future.wait_for(50ms), std::future_status::timeout);
 
     release->set_value();
@@ -460,7 +463,7 @@ TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
     auto* backend_ptr = backend.get();
     Config config = make_config();
     config.request_queue_capacity = 2;
-    auto agent = make_agent(config, std::move(backend));
+    AgentRuntime runtime(config, std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -478,12 +481,12 @@ TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
             return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
         });
 
-    auto first = agent->chat(Message::user("first"));
+    auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-    auto second = agent->chat(Message::user("second"));
+    auto second = runtime.chat(Message::user("second"));
 
-    auto clear_future = std::async(std::launch::async, [&agent] {
-        agent->clear_history();
+    auto clear_future = std::async(std::launch::async, [&runtime] {
+        runtime.clear_history();
     });
     EXPECT_EQ(clear_future.wait_for(50ms), std::future_status::timeout);
 
@@ -495,7 +498,7 @@ TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
     auto second_result = second.future.get();
     ASSERT_TRUE(second_result.has_value());
 
-    auto history = agent->get_history();
+    auto history = runtime.get_history();
     ASSERT_EQ(history.size(), 2u);
     EXPECT_EQ(history[0].content, "second");
     EXPECT_EQ(history[1].content, "second reply");
@@ -507,14 +510,13 @@ TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
 TEST(AgentRuntimeTest, BuildToolSystemPromptUsesPublishedGrammarSnapshot) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    auto agent = make_agent(make_config(), std::move(backend));
+    AgentRuntime runtime(make_config(), std::move(backend));
 
     backend_ptr->set_tool_grammar_supported(true);
-    ASSERT_TRUE(agent->register_tool("adder", "Adds a number", {"value"},
-                                     [](int value) { return value + 1; })
-                    .has_value());
+    register_single_int_tool(runtime, "adder", "Adds a number",
+                             [](int value) { return value + 1; });
 
-    std::string prompt = agent->build_tool_system_prompt("base");
+    std::string prompt = runtime.build_tool_system_prompt("base");
     EXPECT_NE(prompt.find("<tool_call>"), std::string::npos);
     EXPECT_EQ(prompt.find("respond with a JSON object"), std::string::npos);
 }
@@ -522,14 +524,13 @@ TEST(AgentRuntimeTest, BuildToolSystemPromptUsesPublishedGrammarSnapshot) {
 TEST(AgentRuntimeTest, BuildToolSystemPromptFallsBackToJsonWhenGrammarRefreshFails) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    auto agent = make_agent(make_config(), std::move(backend));
+    AgentRuntime runtime(make_config(), std::move(backend));
 
     backend_ptr->set_tool_grammar_supported(false);
-    ASSERT_TRUE(agent->register_tool("adder", "Adds a number", {"value"},
-                                     [](int value) { return value + 1; })
-                    .has_value());
+    register_single_int_tool(runtime, "adder", "Adds a number",
+                             [](int value) { return value + 1; });
 
-    std::string prompt = agent->build_tool_system_prompt("base");
+    std::string prompt = runtime.build_tool_system_prompt("base");
     EXPECT_NE(prompt.find("respond with a JSON object"), std::string::npos);
     EXPECT_EQ(prompt.find("<tool_call>"), std::string::npos);
 }
