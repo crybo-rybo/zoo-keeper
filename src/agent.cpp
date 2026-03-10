@@ -7,8 +7,8 @@
 
 #include "zoo/core/model.hpp"
 #include "zoo/internal/log.hpp"
-#include "zoo/tools/grammar.hpp"
-#include "zoo/tools/interceptor.hpp"
+#include "zoo/internal/tools/grammar.hpp"
+#include "zoo/internal/tools/interceptor.hpp"
 #include "zoo/tools/parser.hpp"
 #include "zoo/tools/validation.hpp"
 #include <atomic>

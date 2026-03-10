@@ -1,6 +1,6 @@
 # Zoo-Keeper
 
-[![Tests](https://img.shields.io/badge/tests-135%20passing-success)]() [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Tests](https://img.shields.io/badge/tests-139%20passing-success)]() [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
 
 A C++23 library built on [llama.cpp](https://github.com/ggerganov/llama.cpp) that wraps and harnesses local LLMs for agentic behavior. Zoo-Keeper handles model loading, inference, conversation management, type-safe tool calling, and an async agentic loop -- so you can focus on your application.
 

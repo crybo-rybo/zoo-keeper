@@ -101,7 +101,7 @@ The `ToolCallParser` scans model output for JSON objects containing `name` and `
 {"name": "add", "arguments": {"a": 42, "b": 58}}
 ```
 
-An optional `id` field is used for correlation; if absent, one is auto-generated (`call_1`, `call_2`, ...).
+An optional `id` field is used for correlation; if absent, one is derived from a deterministic FNV-1a hash of the raw JSON text (e.g. `call_<hash>`).
 
 ## Agentic Loop
 
@@ -113,21 +113,38 @@ The tool system integrates into the Agent's inference loop as follows:
 4. Loop back for the model to process the tool result
 5. Repeat until no tool call is detected or the loop limit is reached (default: 5 iterations)
 
-Tool call and result history is captured in `Response::tool_calls`.
+Tool result messages produced during the agentic loop are captured in `Response::tool_calls`. Each entry is a `Message` with role `Tool` whose `content` holds the serialized result (or validation error) and whose `tool_call_id` holds the correlation identifier.
 
 ## Tool Call History
 
-After a chat request completes, inspect which tools were called:
+After a chat request completes, inspect the tool results that were injected:
 
 ```cpp
 auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
 auto response = handle.future.get();
 if (response) {
     for (const auto& msg : response->tool_calls) {
+        // msg.role == Role::Tool
+        // msg.tool_call_id correlates with the triggering call
         std::cout << msg.content << std::endl;
     }
 }
 ```
+
+## Supported Schema Subset
+
+The tool system supports a deliberately limited JSON Schema subset. Unsupported constructs are silently ignored rather than rejected, so it is important to stay within these bounds.
+
+**Supported:**
+- Top-level `"type": "object"` with a `"properties"` map and a `"required"` array.
+- Property types: `integer`, `number`, `string`, `boolean`.
+- Grammar-constrained generation covers only `required` properties in the order listed.
+
+**Not supported:**
+- Nested objects or arrays with `items` schemas.
+- `enum`, `oneOf`, `anyOf`, `allOf`, `$ref`, `pattern`, `minimum`/`maximum`, `minLength`/`maxLength`, or `default` values.
+- Optional properties are accepted by validation but omitted from grammar-constrained generation.
+- Unrecognized property types fall back to `string` in grammar mode.
 
 ## Error Codes
 

@@ -5,13 +5,13 @@
 
 #pragma once
 
-#include "parser.hpp"
-#include "types.hpp"
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <zoo/core/types.hpp>
+#include <zoo/tools/parser.hpp>
+#include <zoo/tools/types.hpp>
 
 namespace zoo::tools {
 

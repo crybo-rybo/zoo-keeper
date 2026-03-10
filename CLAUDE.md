@@ -85,8 +85,10 @@ All callbacks execute on the inference thread. Consumer is responsible for cross
 
 | Target | Description | Links |
 |--------|-------------|-------|
-| `zoo` | INTERFACE library (headers + nlohmann_json) | — |
-| `zoo_core` | STATIC library (Model + llama.cpp) | zoo, llama |
+| `zoo` | STATIC library (Model + Agent + llama.cpp) | llama (private, build-tree only) |
+| `zoo_core` | INTERFACE compatibility target | zoo |
+| `ZooKeeper::zoo` | Namespaced alias (recommended for consumers) | — |
+| `ZooKeeper::zoo_core` | Namespaced alias | — |
 
 ## File Structure
 
@@ -100,21 +102,38 @@ include/zoo/
 │   ├── registry.hpp       # ToolRegistry (template registration + invocation)
 │   ├── parser.hpp         # ToolCallParser
 │   └── validation.hpp     # ErrorRecovery
-├── agent.hpp              # Agent class + RequestQueue + RequestHandle
-└── zoo.hpp                # Convenience header
-src/core/
-└── model.cpp              # Model implementation (llama.cpp calls)
+├── internal/
+│   ├── log.hpp            # ZOO_LOG macro (no-op unless ZOO_LOGGING_ENABLED)
+│   ├── core/
+│   │   └── batch.hpp      # Prefill chunk planning helper
+│   └── tools/
+│       ├── grammar.hpp    # GBNF grammar generation for constrained tool calling
+│       └── interceptor.hpp # Streaming tool-call interception
+├── agent.hpp              # Agent class (public API declaration)
+└── zoo.hpp                # Convenience umbrella header
+src/
+├── agent.cpp              # Agent implementation (agentic loop, request queue)
+└── core/
+    └── model.cpp          # Model implementation (llama.cpp calls)
 tests/
 ├── unit/
-│   ├── test_types.cpp         # Types, config validation, role sequence validation
-│   ├── test_tool_registry.cpp # Tool registration, schema, invocation
-│   ├── test_tool_parser.cpp   # Tool call parsing
-│   └── test_error_recovery.cpp # Argument validation, retries
+│   ├── test_types.cpp             # Types, config validation, role sequence validation
+│   ├── test_tool_registry.cpp     # Tool registration, schema, invocation
+│   ├── test_tool_parser.cpp       # Tool call parsing
+│   ├── test_error_recovery.cpp    # Argument validation, retries
+│   ├── test_grammar_builder.cpp   # Grammar generation from tool schemas
+│   ├── test_tool_interceptor.cpp  # Streamed tool-call interception
+│   ├── test_batch.cpp             # Prefill chunk planning
+│   └── test_sentinel_parser.cpp   # Sentinel-based tool-call parsing
 └── fixtures/
     ├── sample_responses.hpp
     └── tool_definitions.hpp
 examples/
 ├── demo_chat.cpp          # Interactive CLI chat app
+├── model_generate.cpp     # Standalone Model usage
+├── error_handling.cpp     # Structured error reporting
+├── stream_cancel.cpp      # Streaming with cancellation
+├── custom_tool_schema.cpp # Manual JSON schema registration
 └── config.example.json    # Example JSON configuration
 ```
 

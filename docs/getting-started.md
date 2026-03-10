@@ -124,7 +124,7 @@ Returned from `chat()` via `std::future`. Contains:
 - `text` -- generated response text
 - `usage` -- token counts (prompt, completion, total)
 - `metrics` -- latency, time-to-first-token, tokens/sec
-- `tool_calls` -- tool call and result history
+- `tool_calls` -- tool result messages (role `Tool`) injected during the agentic loop
 
 ### Error Handling
 

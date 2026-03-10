@@ -150,7 +150,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(zoo-keeper)
 
-target_link_libraries(your_target PRIVATE zoo)
+target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 ```
 
 ### Git Submodule
@@ -161,7 +161,7 @@ git submodule add https://github.com/crybo-rybo/zoo-keeper.git extern/zoo-keeper
 
 ```cmake
 add_subdirectory(extern/zoo-keeper)
-target_link_libraries(your_target PRIVATE zoo)
+target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 ```
 
 ### Installed CMake Package

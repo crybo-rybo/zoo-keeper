@@ -68,9 +68,10 @@ auto response = handle.future.get();
 if (response) {
     std::cout << response->text << std::endl;
 
-    // Inspect tool call history
+    // Inspect tool result messages injected during the agentic loop
     for (const auto& msg : response->tool_calls) {
-        std::cout << "Tool: " << msg.content << std::endl;
+        // msg.role == Role::Tool, msg.tool_call_id has the correlation id
+        std::cout << "Tool result: " << msg.content << std::endl;
     }
 }
 ```

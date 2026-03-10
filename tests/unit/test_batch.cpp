@@ -3,7 +3,7 @@
  * @brief Unit tests for prompt prefill chunk planning.
  */
 
-#include "zoo/core/batch.hpp"
+#include "zoo/internal/core/batch.hpp"
 #include <gtest/gtest.h>
 
 using zoo::core::BatchChunk;
