@@ -18,13 +18,14 @@ class ToolArgumentsValidatorTest : public ::testing::Test {
     void SetUp() override {
         ASSERT_TRUE(registry.register_tool("add", "Add two integers", {"a", "b"}, add).has_value());
         ASSERT_TRUE(registry.register_tool("greet", "Greet someone", {"name"}, greet).has_value());
-        ASSERT_TRUE(
-            registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply).has_value());
+        ASSERT_TRUE(registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply)
+                        .has_value());
 
         nlohmann::json schema = {
             {"type", "object"},
             {"properties",
-             {{"unit", {{"type", "string"}, {"enum", nlohmann::json::array({"celsius", "fahrenheit"})}}},
+             {{"unit",
+               {{"type", "string"}, {"enum", nlohmann::json::array({"celsius", "fahrenheit"})}}},
               {"days", {{"type", "integer"}}}}},
             {"required", nlohmann::json::array({"unit"})},
             {"additionalProperties", false}};

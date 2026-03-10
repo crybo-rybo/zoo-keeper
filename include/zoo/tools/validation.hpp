@@ -64,14 +64,14 @@ class ToolArgumentsValidator {
             }
 
             if (!detail::json_matches_type(value, parameter->type)) {
-                return std::unexpected(Error{ErrorCode::ToolValidationFailed,
-                                             "Argument '" + key + "' has wrong type: expected " +
-                                                 std::string(tool_value_type_name(parameter->type)) +
-                                                 ", got " + json_type_name(value)});
+                return std::unexpected(
+                    Error{ErrorCode::ToolValidationFailed,
+                          "Argument '" + key + "' has wrong type: expected " +
+                              std::string(tool_value_type_name(parameter->type)) + ", got " +
+                              json_type_name(value)});
             }
 
-            if (!parameter->enum_values.empty() &&
-                !matches_enum(value, parameter->enum_values)) {
+            if (!parameter->enum_values.empty() && !matches_enum(value, parameter->enum_values)) {
                 return std::unexpected(
                     Error{ErrorCode::ToolValidationFailed,
                           "Argument '" + key + "' must match one of the registered enum values"});

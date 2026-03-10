@@ -70,7 +70,8 @@ TEST_F(ToolRegistryTest, ManualSchemaRegistrationNormalizesOptionalAndEnumFields
     EXPECT_TRUE(metadata->parameters[0].required);
     EXPECT_EQ(metadata->parameters[1].name, "limit");
     EXPECT_FALSE(metadata->parameters[1].required);
-    EXPECT_EQ(metadata->parameters[1].enum_values, json::array({5, 10, 20}).get<std::vector<json>>());
+    EXPECT_EQ(metadata->parameters[1].enum_values,
+              json::array({5, 10, 20}).get<std::vector<json>>());
 }
 
 TEST_F(ToolRegistryTest, ManualSchemaRejectsNestedObjects) {
@@ -84,9 +85,9 @@ TEST_F(ToolRegistryTest, ManualSchemaRejectsNestedObjects) {
         {"required", json::array({"query"})},
     };
 
-    auto result = registry.register_tool(
-        "search_documents", "Search with nested query", schema,
-        [](const json&) -> zoo::Expected<json> { return json::object(); });
+    auto result =
+        registry.register_tool("search_documents", "Search with nested query", schema,
+                               [](const json&) -> zoo::Expected<json> { return json::object(); });
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
@@ -96,9 +97,9 @@ TEST_F(ToolRegistryTest, ManualSchemaRejectsUnsupportedKeywords) {
     json schema = {{"type", "object"},
                    {"properties", {{"limit", {{"type", "integer"}, {"minimum", 1}}}}}};
 
-    auto result = registry.register_tool(
-        "bounded_limit", "Schema with unsupported bounds", schema,
-        [](const json&) -> zoo::Expected<json> { return json::object(); });
+    auto result =
+        registry.register_tool("bounded_limit", "Schema with unsupported bounds", schema,
+                               [](const json&) -> zoo::Expected<json> { return json::object(); });
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
@@ -110,22 +111,23 @@ TEST_F(ToolRegistryTest, ManualSchemaRejectsRefKeyword) {
                    {"properties", {{"data", {{"$ref", "#/definitions/Data"}}}}},
                    {"required", json::array({"data"})}};
 
-    auto result = registry.register_tool(
-        "ref_tool", "Schema with $ref", schema,
-        [](const json&) -> zoo::Expected<json> { return json::object(); });
+    auto result =
+        registry.register_tool("ref_tool", "Schema with $ref", schema,
+                               [](const json&) -> zoo::Expected<json> { return json::object(); });
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
 }
 
 TEST_F(ToolRegistryTest, ManualSchemaRejectsArrayType) {
-    json schema = {{"type", "object"},
-                   {"properties", {{"items", {{"type", "array"}, {"items", {{"type", "string"}}}}}}},
-                   {"required", json::array({"items"})}};
+    json schema = {
+        {"type", "object"},
+        {"properties", {{"items", {{"type", "array"}, {"items", {{"type", "string"}}}}}}},
+        {"required", json::array({"items"})}};
 
-    auto result = registry.register_tool(
-        "array_tool", "Schema with array", schema,
-        [](const json&) -> zoo::Expected<json> { return json::object(); });
+    auto result =
+        registry.register_tool("array_tool", "Schema with array", schema,
+                               [](const json&) -> zoo::Expected<json> { return json::object(); });
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
@@ -182,8 +184,8 @@ TEST_F(ToolRegistryTest, GetParametersSchemaReturnsNormalizedSchema) {
 }
 
 TEST_F(ToolRegistryTest, LambdaRegistration) {
-    auto result = registry.register_tool("double_it", "Double a number", {"x"},
-                                         [](int x) { return x * 2; });
+    auto result =
+        registry.register_tool("double_it", "Double a number", {"x"}, [](int x) { return x * 2; });
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
 
     auto invoke_result = registry.invoke("double_it", {{"x", 5}});
