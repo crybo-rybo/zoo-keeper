@@ -372,6 +372,8 @@ Detailed execution doc: [phase-b-implementation-plan.md](phase-b-implementation-
 6. Epic 3 — Agent Runtime Simplification
 7. Expand unit-test coverage for agent orchestration behavior
 
+Detailed execution doc: [phase-c-implementation-plan.md](phase-c-implementation-plan.md)
+
 ### Phase D — Decompose the model implementation
 8. Epic 4 — Core Model File Decomposition
 
