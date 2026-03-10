@@ -23,7 +23,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          mapfile -t files < <(git ls-files '*.hpp' '*.cpp' '*.h' '*.c' | grep -v '^extern/' | grep -v '^tests/')
+          mapfile -t files < <(git ls-files '*.hpp' '*.cpp' '*.h' '*.c' | grep -v '^extern/')
           if [ ${#files[@]} -eq 0 ]; then
             exit 0
           fi

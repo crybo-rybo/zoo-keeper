@@ -364,6 +364,8 @@ struct Agent::Impl {
                     Message::assistant(use_grammar_path ? generated->text : response_text));
                 model->finalize_response();
 
+                std::string args_json = tc.arguments.dump();
+
                 if (auto validation_result = validator.validate(tc, tool_registry);
                     !validation_result) {
                     const Error validation_error = validation_result.error();
@@ -386,7 +388,7 @@ struct Agent::Impl {
                     model->add_message(
                         Message::tool(error_content + "\nPlease correct the arguments.", tc.id));
                     tool_invocations.push_back(ToolInvocation{
-                        tc.id, tc.name, tc.arguments.dump(), ToolInvocationStatus::ValidationFailed,
+                        tc.id, tc.name, args_json, ToolInvocationStatus::ValidationFailed,
                         std::nullopt, validation_error});
                     continue;
                 }
@@ -409,9 +411,9 @@ struct Agent::Impl {
 
                 Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
                 model->add_message(tool_msg);
-                tool_invocations.push_back(ToolInvocation{tc.id, tc.name, tc.arguments.dump(),
+                tool_invocations.push_back(ToolInvocation{tc.id, tc.name, std::move(args_json),
                                                           status, std::move(result_json),
-                                                          tool_error});
+                                                          std::move(tool_error)});
                 continue;
             }
 

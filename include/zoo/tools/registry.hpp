@@ -386,15 +386,20 @@ normalize_manual_tool_metadata(const std::string& name, const std::string& descr
         parameters_by_name.emplace(param_name, std::move(parameter));
     }
 
+    // Build canonical parameter order: required params first (in the order
+    // listed in the "required" array), then optional params (in nlohmann::json
+    // object iteration order, which is alphabetical by default).
     std::vector<ToolParameter> parameters;
     parameters.reserve(parameters_by_name.size());
 
     for (const auto& required_name : required_names) {
-        parameters.push_back(parameters_by_name.at(required_name));
+        auto node = parameters_by_name.extract(required_name);
+        parameters.push_back(std::move(node.mapped()));
     }
     for (const auto& [param_name, _] : props_it->items()) {
         if (!required_lookup.contains(param_name)) {
-            parameters.push_back(parameters_by_name.at(param_name));
+            auto node = parameters_by_name.extract(param_name);
+            parameters.push_back(std::move(node.mapped()));
         }
     }
 
@@ -569,17 +574,12 @@ class ToolRegistry {
      * @brief Invokes a registered tool with JSON arguments.
      */
     Expected<nlohmann::json> invoke(const std::string& name, const nlohmann::json& args) const {
-        ToolHandler handler;
-        {
-            std::shared_lock lock(mutex_);
-            auto it = index_by_name_.find(name);
-            if (it == index_by_name_.end()) {
-                return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
-            }
-            handler = tools_[it->second].handler;
+        std::shared_lock lock(mutex_);
+        auto it = index_by_name_.find(name);
+        if (it == index_by_name_.end()) {
+            return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
         }
-
-        return handler(args);
+        return tools_[it->second].handler(args);
     }
 
     /**

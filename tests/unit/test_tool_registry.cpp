@@ -105,6 +105,32 @@ TEST_F(ToolRegistryTest, ManualSchemaRejectsUnsupportedKeywords) {
     EXPECT_NE(result.error().message.find("minimum"), std::string::npos);
 }
 
+TEST_F(ToolRegistryTest, ManualSchemaRejectsRefKeyword) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"data", {{"$ref", "#/definitions/Data"}}}}},
+                   {"required", json::array({"data"})}};
+
+    auto result = registry.register_tool(
+        "ref_tool", "Schema with $ref", schema,
+        [](const json&) -> zoo::Expected<json> { return json::object(); });
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST_F(ToolRegistryTest, ManualSchemaRejectsArrayType) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"items", {{"type", "array"}, {"items", {{"type", "string"}}}}}}},
+                   {"required", json::array({"items"})}};
+
+    auto result = registry.register_tool(
+        "array_tool", "Schema with array", schema,
+        [](const json&) -> zoo::Expected<json> { return json::object(); });
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
 TEST_F(ToolRegistryTest, InvokeSuccess) {
     ASSERT_TRUE(registry.register_tool("add", "Add", {"a", "b"}, add).has_value());
 

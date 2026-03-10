@@ -365,6 +365,19 @@ enum class ToolInvocationStatus {
     ExecutionFailed   ///< The handler returned or raised an execution failure.
 };
 
+/// Returns a human-readable string for a tool invocation status.
+[[nodiscard]] inline const char* to_string(ToolInvocationStatus status) noexcept {
+    switch (status) {
+    case ToolInvocationStatus::Succeeded:
+        return "succeeded";
+    case ToolInvocationStatus::ValidationFailed:
+        return "validation_failed";
+    case ToolInvocationStatus::ExecutionFailed:
+        return "execution_failed";
+    }
+    return "unknown";
+}
+
 /**
  * @brief Structured record of one attempted tool call during agent execution.
  */

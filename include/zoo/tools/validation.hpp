@@ -11,7 +11,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 namespace zoo::tools {
 
@@ -50,12 +49,6 @@ class ToolArgumentsValidator {
                 Error{ErrorCode::ToolValidationFailed, "Tool arguments must be a JSON object"});
         }
 
-        std::unordered_map<std::string_view, const ToolParameter*> parameters_by_name;
-        parameters_by_name.reserve(metadata.parameters.size());
-        for (const auto& parameter : metadata.parameters) {
-            parameters_by_name.emplace(parameter.name, &parameter);
-        }
-
         for (const auto& parameter : metadata.parameters) {
             if (parameter.required && !tool_call.arguments.contains(parameter.name)) {
                 return std::unexpected(Error{ErrorCode::ToolValidationFailed,
@@ -64,21 +57,21 @@ class ToolArgumentsValidator {
         }
 
         for (const auto& [key, value] : tool_call.arguments.items()) {
-            auto it = parameters_by_name.find(key);
-            if (it == parameters_by_name.end()) {
+            const ToolParameter* parameter = find_parameter(metadata.parameters, key);
+            if (!parameter) {
                 return std::unexpected(
                     Error{ErrorCode::ToolValidationFailed, "Unexpected argument: " + key});
             }
 
-            const ToolParameter& parameter = *it->second;
-            if (!detail::json_matches_type(value, parameter.type)) {
+            if (!detail::json_matches_type(value, parameter->type)) {
                 return std::unexpected(Error{ErrorCode::ToolValidationFailed,
                                              "Argument '" + key + "' has wrong type: expected " +
-                                                 std::string(tool_value_type_name(parameter.type)) +
+                                                 std::string(tool_value_type_name(parameter->type)) +
                                                  ", got " + json_type_name(value)});
             }
 
-            if (!parameter.enum_values.empty() && !matches_enum(value, parameter.enum_values)) {
+            if (!parameter->enum_values.empty() &&
+                !matches_enum(value, parameter->enum_values)) {
                 return std::unexpected(
                     Error{ErrorCode::ToolValidationFailed,
                           "Argument '" + key + "' must match one of the registered enum values"});
@@ -89,6 +82,16 @@ class ToolArgumentsValidator {
     }
 
   private:
+    static const ToolParameter* find_parameter(const std::vector<ToolParameter>& parameters,
+                                               std::string_view name) {
+        for (const auto& parameter : parameters) {
+            if (parameter.name == name) {
+                return &parameter;
+            }
+        }
+        return nullptr;
+    }
+
     static bool matches_enum(const nlohmann::json& value,
                              const std::vector<nlohmann::json>& enum_values) {
         for (const auto& enum_value : enum_values) {

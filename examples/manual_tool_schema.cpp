@@ -9,22 +9,6 @@
 #include <iostream>
 #include <string>
 
-namespace {
-
-const char* status_to_string(zoo::ToolInvocationStatus status) {
-    switch (status) {
-    case zoo::ToolInvocationStatus::Succeeded:
-        return "succeeded";
-    case zoo::ToolInvocationStatus::ValidationFailed:
-        return "validation_failed";
-    case zoo::ToolInvocationStatus::ExecutionFailed:
-        return "execution_failed";
-    }
-    return "unknown";
-}
-
-} // namespace
-
 int main(int argc, char** argv) {
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <model.gguf>\n";
@@ -94,7 +78,7 @@ int main(int argc, char** argv) {
 
     std::cout << response->text << "\n\n";
     for (const auto& invocation : response->tool_invocations) {
-        std::cout << invocation.name << " [" << status_to_string(invocation.status) << "]\n";
+        std::cout << invocation.name << " [" << zoo::to_string(invocation.status) << "]\n";
         std::cout << "args: " << invocation.arguments_json << '\n';
         if (invocation.result_json) {
             std::cout << "result: " << *invocation.result_json << '\n';

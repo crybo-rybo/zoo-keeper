@@ -107,3 +107,20 @@ TEST_F(ToolArgumentsValidatorTest, OptionalArgumentMayBeOmitted) {
     tc.arguments = {{"unit", "celsius"}};
     EXPECT_TRUE(validator.validate(tc, registry).has_value());
 }
+
+TEST_F(ToolArgumentsValidatorTest, NonObjectArgumentsFail) {
+    zoo::tools::ToolCall tc;
+    tc.name = "add";
+    tc.arguments = nlohmann::json::array({1, 2});
+    auto result = validator.validate(tc, registry);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::ToolValidationFailed);
+    EXPECT_NE(result.error().message.find("JSON object"), std::string::npos);
+}
+
+TEST_F(ToolArgumentsValidatorTest, ValidEnumArgumentPasses) {
+    zoo::tools::ToolCall tc;
+    tc.name = "forecast";
+    tc.arguments = {{"unit", "fahrenheit"}, {"days", 3}};
+    EXPECT_TRUE(validator.validate(tc, registry).has_value());
+}

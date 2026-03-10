@@ -336,6 +336,40 @@ TEST(ToolInvocationTest, Defaults) {
     EXPECT_FALSE(invocation.error.has_value());
 }
 
+TEST(ToolInvocationTest, StatusToString) {
+    EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::Succeeded), "succeeded");
+    EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::ValidationFailed), "validation_failed");
+    EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::ExecutionFailed), "execution_failed");
+}
+
+TEST(ToolInvocationTest, ConstructedFieldsMatch) {
+    zoo::ToolInvocation invocation;
+    invocation.id = "call_123";
+    invocation.name = "add";
+    invocation.arguments_json = R"({"a":1,"b":2})";
+    invocation.status = zoo::ToolInvocationStatus::Succeeded;
+    invocation.result_json = R"({"result":3})";
+
+    EXPECT_EQ(invocation.id, "call_123");
+    EXPECT_EQ(invocation.name, "add");
+    EXPECT_TRUE(invocation.result_json.has_value());
+    EXPECT_FALSE(invocation.error.has_value());
+}
+
+TEST(ToolInvocationTest, FailedInvocationCarriesError) {
+    zoo::ToolInvocation invocation;
+    invocation.id = "call_456";
+    invocation.name = "greet";
+    invocation.arguments_json = R"({"name":42})";
+    invocation.status = zoo::ToolInvocationStatus::ValidationFailed;
+    invocation.error = zoo::Error{zoo::ErrorCode::ToolValidationFailed, "wrong type"};
+
+    EXPECT_EQ(invocation.status, zoo::ToolInvocationStatus::ValidationFailed);
+    ASSERT_TRUE(invocation.error.has_value());
+    EXPECT_EQ(invocation.error->code, zoo::ErrorCode::ToolValidationFailed);
+    EXPECT_FALSE(invocation.result_json.has_value());
+}
+
 TEST(ResponseTest, Defaults) {
     zoo::Response response;
     EXPECT_TRUE(response.text.empty());
