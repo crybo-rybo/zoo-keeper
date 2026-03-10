@@ -5,11 +5,10 @@
 
 #pragma once
 
-#include <atomic>
 #include <functional>
 #include <nlohmann/json.hpp>
-#include <optional>
 #include <string>
+#include <vector>
 #include <zoo/core/types.hpp>
 
 namespace zoo::tools {
@@ -35,13 +34,64 @@ struct ToolCall {
 using ToolHandler = std::function<Expected<nlohmann::json>(const nlohmann::json&)>;
 
 /**
- * @brief Metadata and executable handler for a registered tool.
+ * @brief Supported primitive value kinds for registered tool parameters.
  */
-struct ToolEntry {
-    std::string name;                 ///< Public tool name presented to the model.
-    std::string description;          ///< Human-readable tool description for prompts and schemas.
-    nlohmann::json parameters_schema; ///< JSON Schema describing accepted arguments.
-    ToolHandler handler;              ///< Callable invoked when the tool is executed.
+enum class ToolValueType {
+    Integer,
+    Number,
+    String,
+    Boolean,
+};
+
+/// Returns the JSON Schema primitive string for a supported tool value type.
+[[nodiscard]] inline const char* tool_value_type_name(ToolValueType type) noexcept {
+    switch (type) {
+    case ToolValueType::Integer:
+        return "integer";
+    case ToolValueType::Number:
+        return "number";
+    case ToolValueType::String:
+        return "string";
+    case ToolValueType::Boolean:
+        return "boolean";
+    }
+    return "unknown";
+}
+
+/**
+ * @brief Normalized schema metadata for one tool parameter.
+ */
+struct ToolParameter {
+    std::string name; ///< Public parameter name.
+    ToolValueType type = ToolValueType::String; ///< Supported primitive type.
+    bool required = false; ///< Whether the parameter must be present in arguments.
+    std::string description; ///< Optional human-readable parameter description.
+    std::vector<nlohmann::json>
+        enum_values; ///< Optional enum domain, expressed as exact JSON literals.
+
+    /// Compares two parameter schemas field-by-field.
+    bool operator==(const ToolParameter& other) const = default;
+};
+
+/**
+ * @brief Public metadata stored for one registered tool.
+ */
+struct ToolMetadata {
+    std::string name; ///< Public tool name presented to the model.
+    std::string description; ///< Human-readable tool description for prompts and schemas.
+    nlohmann::json parameters_schema; ///< Normalized JSON Schema describing accepted arguments.
+    std::vector<ToolParameter> parameters; ///< Canonical parameter order used by validation/grammar.
+
+    /// Compares two tool metadata records field-by-field.
+    bool operator==(const ToolMetadata& other) const = default;
+};
+
+/**
+ * @brief Metadata plus executable handler for a registered tool.
+ */
+struct ToolDefinition {
+    ToolMetadata metadata; ///< Public metadata exposed to prompts and validators.
+    ToolHandler handler;   ///< Callable invoked when the tool is executed.
 };
 
 } // namespace zoo::tools

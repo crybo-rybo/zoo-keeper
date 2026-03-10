@@ -1,163 +1,169 @@
 # Tool System
 
-Zoo-Keeper provides a type-safe tool calling system that lets LLMs invoke native C++ functions during inference. The model detects when a tool should be called, the engine validates arguments, executes the function, and feeds the result back for continued generation.
+Zoo-Keeper exposes one primary tool story: register tools on `zoo::Agent`, let the agent validate and execute them, and inspect the resulting `tool_invocations` after each request.
 
-## Template-Based Registration
+## Typed Registration
 
-Register any callable (function pointer, lambda, functor, `std::function`) with automatic JSON schema generation:
+Register any supported callable and Zoo-Keeper will derive the argument schema automatically:
 
 ```cpp
-// Free function
 int add(int a, int b) { return a + b; }
+
 agent->register_tool("add", "Add two integers", {"a", "b"}, add);
 
-// Lambda
 agent->register_tool("greet", "Greet a person", {"name"},
     [](std::string name) -> std::string {
         return "Hello, " + name + "!";
     });
 
-// Zero-parameter function
-std::string get_time() { return "2025-01-01 12:00:00"; }
-agent->register_tool("get_time", "Get current time", {}, get_time);
+agent->register_tool("get_time", "Get current time", {}, []() -> std::string {
+    return "2025-01-01 12:00:00";
+});
 ```
 
-### Supported Parameter Types
+Supported typed parameter types:
 
 | C++ Type | JSON Schema Type |
-|----------|-----------------|
+|----------|------------------|
 | `int` | `integer` |
 | `float` | `number` |
 | `double` | `number` |
 | `bool` | `boolean` |
 | `std::string` | `string` |
 
-The `param_names` vector must match the function's arity. A mismatch returns an error with `ErrorCode::InvalidToolSignature`.
+The parameter-name list must match the callable arity exactly or registration fails with `ErrorCode::InvalidToolSignature`.
 
-### Generated Schema
+## Manual Schema Registration
 
-For `add(int a, int b)`, the registry generates:
-
-```json
-{
-  "type": "function",
-  "function": {
-    "name": "add",
-    "description": "Add two integers",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "a": { "type": "integer" },
-        "b": { "type": "integer" }
-      },
-      "required": ["a", "b"]
-    }
-  }
-}
-```
-
-## Manual Registration
-
-For tools that need custom schemas beyond the supported types:
+Use the manual path when you need a JSON-backed handler or schema features that typed registration does not express directly, such as optional parameters or enums.
 
 ```cpp
 nlohmann::json schema = {
     {"type", "object"},
     {"properties", {
-        {"query", {{"type", "string"}}},
-        {"limit", {{"type", "integer"}}}
+        {"query", {{"type", "string"}, {"description", "Search term"}}},
+        {"limit", {{"type", "integer"}, {"enum", {5, 10, 20}}}},
+        {"scope", {{"type", "string"}, {"enum", {"docs", "issues"}}}}
     }},
-    {"required", {"query"}}
+    {"required", {"query"}},
+    {"additionalProperties", false}
 };
 
-zoo::tools::ToolHandler handler = [](const nlohmann::json& args)
-    -> zoo::Expected<nlohmann::json> {
-    std::string query = args.at("query").get<std::string>();
-    int limit = args.value("limit", 10);
-    // ... perform search ...
-    return nlohmann::json{{"result", "found items"}};
-};
-
-// Access the registry directly for manual registration
-registry.register_tool("search", "Search documents", schema, handler);
+auto result = agent->register_tool(
+    "search_documents",
+    "Search a local knowledge base.",
+    schema,
+    [](const nlohmann::json& args) -> zoo::Expected<nlohmann::json> {
+        return nlohmann::json{
+            {"query", args.at("query")},
+            {"limit", args.value("limit", 10)},
+            {"scope", args.value("scope", "docs")}
+        };
+    });
 ```
 
-## Error Recovery and Retries
+Manual handlers must accept a single JSON argument object and return `zoo::Expected<nlohmann::json>`.
 
-When the model produces invalid tool call arguments, the `ErrorRecovery` component:
+## Supported Manual Schema Subset
 
-1. Validates arguments against the registered JSON schema
-2. Checks required fields and type correctness
-3. On failure, injects an error message back into the conversation
-4. The model gets another chance to self-correct (up to `max_retries`, default: 2)
+Manual registration accepts a deliberately small subset of JSON Schema. Unsupported constructs fail fast during registration with `ErrorCode::InvalidToolSchema`.
 
-If retries are exhausted, the request fails with `ErrorCode::ToolRetriesExhausted`.
+Supported:
 
-## Tool Call Detection
+- top-level `"type": "object"`
+- `"properties"` object
+- primitive property types: `string`, `integer`, `number`, `boolean`
+- `"required"` array
+- property `"description"`
+- property `"enum"`
+- `"additionalProperties": false` or omission
 
-The `ToolCallParser` scans model output for JSON objects containing `name` and `arguments` fields:
+Not supported:
 
-```json
-{"name": "add", "arguments": {"a": 42, "b": 58}}
-```
+- nested objects
+- arrays and `items`
+- `oneOf`, `anyOf`, `allOf`, `not`
+- `$ref`
+- numeric or string bounds such as `minimum`, `maximum`, `pattern`, `minLength`, `maxLength`
+- unknown keywords that would change validation semantics
 
-An optional `id` field is used for correlation; if absent, one is derived from a deterministic FNV-1a hash of the raw JSON text (e.g. `call_<hash>`).
+The runtime normalizes supported schemas into one internal representation and uses that same representation for:
 
-## Agentic Loop
+- validation,
+- deterministic schema export,
+- grammar-constrained tool calling.
 
-The tool system integrates into the Agent's inference loop as follows:
+## Validation and Retries
 
-1. Model generates text
-2. Parser checks for a tool call in the output
-3. If found: validate args, execute handler, inject result as a `Tool` message
-4. Loop back for the model to process the tool result
-5. Repeat until no tool call is detected or the loop limit is reached (default: 5 iterations)
+Every detected tool call is validated against the normalized registered schema, including grammar-constrained calls.
 
-Tool result messages produced during the agentic loop are captured in `Response::tool_calls`. Each entry is a `Message` with role `Tool` whose `content` holds the serialized result (or validation error) and whose `tool_call_id` holds the correlation identifier.
+Validation enforces:
 
-## Tool Call History
+- required arguments are present,
+- argument types match the registered primitive type,
+- enum values match exactly when configured,
+- unknown arguments are rejected.
 
-After a chat request completes, inspect the tool results that were injected:
+If validation fails, the agent injects a corrective tool message and gives the model another chance to repair the call up to `Config::max_tool_retries`. Exhaustion fails the request with `ErrorCode::ToolRetriesExhausted`.
+
+## Deterministic Ordering
+
+Tool ordering is deterministic and follows registration order. That order is used for:
+
+- `ToolRegistry::get_tool_names()`
+- `ToolRegistry::get_all_schemas()`
+- tool grammar generation
+- tool listings embedded in the system prompt
+
+Re-registering an existing tool updates it in place without moving its slot.
+
+## Tool Invocation Records
+
+After a chat request completes, inspect `Response::tool_invocations` to see what happened during the tool loop:
 
 ```cpp
 auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
 auto response = handle.future.get();
+
 if (response) {
-    for (const auto& msg : response->tool_calls) {
-        // msg.role == Role::Tool
-        // msg.tool_call_id correlates with the triggering call
-        std::cout << msg.content << std::endl;
+    for (const auto& invocation : response->tool_invocations) {
+        std::cout << invocation.name << " " << invocation.arguments_json << std::endl;
+
+        if (invocation.result_json) {
+            std::cout << *invocation.result_json << std::endl;
+        }
+
+        if (invocation.error) {
+            std::cerr << invocation.error->to_string() << std::endl;
+        }
     }
 }
 ```
 
-## Supported Schema Subset
+`ToolInvocationStatus` distinguishes:
 
-The tool system supports a deliberately limited JSON Schema subset. Unsupported constructs are silently ignored rather than rejected, so it is important to stay within these bounds.
+- `Succeeded`
+- `ValidationFailed`
+- `ExecutionFailed`
 
-**Supported:**
-- Top-level `"type": "object"` with a `"properties"` map and a `"required"` array.
-- Property types: `integer`, `number`, `string`, `boolean`.
-- Grammar-constrained generation covers only `required` properties in the order listed.
+## Low-Level Registry Access
 
-**Not supported:**
-- Nested objects or arrays with `items` schemas.
-- `enum`, `oneOf`, `anyOf`, `allOf`, `$ref`, `pattern`, `minimum`/`maximum`, `minLength`/`maxLength`, or `default` values.
-- Optional properties are accepted by validation but omitted from grammar-constrained generation.
-- Unrecognized property types fall back to `string` in grammar mode.
+`zoo::tools::ToolRegistry` remains public for lower-level usage, testing, or embedding inside custom runtimes. It is no longer the primary user path documented for normal application code.
 
 ## Error Codes
 
 | Code | Name | Description |
 |------|------|-------------|
-| 500 | `ToolNotFound` | Requested tool not in registry |
-| 501 | `ToolExecutionFailed` | Handler threw or returned error |
-| 502 | `InvalidToolSignature` | Signature doesn't match supported types |
-| 503 | `ToolRetriesExhausted` | Max retries exceeded |
-| 504 | `ToolLoopLimitReached` | Max agentic loop iterations exceeded |
+| 500 | `ToolNotFound` | Requested tool name is not registered |
+| 501 | `ToolExecutionFailed` | Handler threw or returned an execution failure |
+| 502 | `InvalidToolSignature` | Typed registration metadata does not match the callable |
+| 503 | `ToolRetriesExhausted` | Validation retry budget was exhausted |
+| 504 | `ToolLoopLimitReached` | Agent exceeded the configured tool-iteration budget |
+| 505 | `InvalidToolSchema` | Manual schema uses an unsupported construct |
+| 506 | `ToolValidationFailed` | Parsed arguments failed validation |
 
 ## See Also
 
 - [Getting Started](getting-started.md) -- basic Agent setup
-- [Examples](examples.md) -- complete tool usage snippets
-- [Architecture](architecture.md) -- how the agentic loop works internally
+- [Examples](examples.md) -- complete usage snippets
+- [Architecture](architecture.md) -- runtime structure and threading model

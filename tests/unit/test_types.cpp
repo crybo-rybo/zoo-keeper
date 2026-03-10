@@ -326,8 +326,18 @@ TEST(TokenUsageTest, Defaults) {
     EXPECT_EQ(usage.total_tokens, 0);
 }
 
+TEST(ToolInvocationTest, Defaults) {
+    zoo::ToolInvocation invocation;
+    EXPECT_TRUE(invocation.id.empty());
+    EXPECT_TRUE(invocation.name.empty());
+    EXPECT_TRUE(invocation.arguments_json.empty());
+    EXPECT_EQ(invocation.status, zoo::ToolInvocationStatus::Succeeded);
+    EXPECT_FALSE(invocation.result_json.has_value());
+    EXPECT_FALSE(invocation.error.has_value());
+}
+
 TEST(ResponseTest, Defaults) {
     zoo::Response response;
     EXPECT_TRUE(response.text.empty());
-    EXPECT_TRUE(response.tool_calls.empty());
+    EXPECT_TRUE(response.tool_invocations.empty());
 }

@@ -1,6 +1,6 @@
 /**
  * @file test_error_recovery.cpp
- * @brief Unit tests for tool argument validation and retry tracking.
+ * @brief Unit tests for tool argument validation.
  */
 
 #include "fixtures/tool_definitions.hpp"
@@ -10,81 +10,100 @@
 using namespace zoo::testing::tools;
 
 /// Shared fixture that pre-registers common tools for validation tests.
-class ErrorRecoveryTest : public ::testing::Test {
+class ToolArgumentsValidatorTest : public ::testing::Test {
   protected:
     zoo::tools::ToolRegistry registry;
-    zoo::tools::ErrorRecovery recovery{2};
+    zoo::tools::ToolArgumentsValidator validator;
 
     void SetUp() override {
-        (void)registry.register_tool("add", "Add two integers", {"a", "b"}, add);
-        (void)registry.register_tool("greet", "Greet someone", {"name"}, greet);
-        (void)registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply);
+        ASSERT_TRUE(registry.register_tool("add", "Add two integers", {"a", "b"}, add).has_value());
+        ASSERT_TRUE(registry.register_tool("greet", "Greet someone", {"name"}, greet).has_value());
+        ASSERT_TRUE(
+            registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply).has_value());
+
+        nlohmann::json schema = {
+            {"type", "object"},
+            {"properties",
+             {{"unit", {{"type", "string"}, {"enum", nlohmann::json::array({"celsius", "fahrenheit"})}}},
+              {"days", {{"type", "integer"}}}}},
+            {"required", nlohmann::json::array({"unit"})},
+            {"additionalProperties", false}};
+
+        ASSERT_TRUE(registry
+                        .register_tool("forecast", "Fetch forecast", schema,
+                                       [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
+                                           return nlohmann::json::object();
+                                       })
+                        .has_value());
     }
 };
 
-TEST_F(ErrorRecoveryTest, ValidArgsPass) {
+TEST_F(ToolArgumentsValidatorTest, ValidArgsPass) {
     zoo::tools::ToolCall tc;
     tc.name = "add";
     tc.arguments = {{"a", 3}, {"b", 4}};
-    EXPECT_TRUE(recovery.validate_args(tc, registry).empty());
+    EXPECT_TRUE(validator.validate(tc, registry).has_value());
 }
 
-TEST_F(ErrorRecoveryTest, ValidStringArgs) {
+TEST_F(ToolArgumentsValidatorTest, ValidStringArgs) {
     zoo::tools::ToolCall tc;
     tc.name = "greet";
     tc.arguments = {{"name", "Alice"}};
-    EXPECT_TRUE(recovery.validate_args(tc, registry).empty());
+    EXPECT_TRUE(validator.validate(tc, registry).has_value());
 }
 
-TEST_F(ErrorRecoveryTest, MissingRequiredArg) {
+TEST_F(ToolArgumentsValidatorTest, MissingRequiredArgFails) {
     zoo::tools::ToolCall tc;
     tc.name = "add";
     tc.arguments = {{"a", 3}};
-    auto error = recovery.validate_args(tc, registry);
-    EXPECT_FALSE(error.empty());
-    EXPECT_NE(error.find("Missing"), std::string::npos);
+    auto result = validator.validate(tc, registry);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::ToolValidationFailed);
+    EXPECT_NE(result.error().message.find("Missing"), std::string::npos);
 }
 
-TEST_F(ErrorRecoveryTest, WrongArgType) {
+TEST_F(ToolArgumentsValidatorTest, WrongArgTypeFails) {
     zoo::tools::ToolCall tc;
     tc.name = "add";
     tc.arguments = {{"a", "three"}, {"b", 4}};
-    auto error = recovery.validate_args(tc, registry);
-    EXPECT_FALSE(error.empty());
-    EXPECT_NE(error.find("wrong type"), std::string::npos);
+    auto result = validator.validate(tc, registry);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::ToolValidationFailed);
+    EXPECT_NE(result.error().message.find("wrong type"), std::string::npos);
 }
 
-TEST_F(ErrorRecoveryTest, UnknownTool) {
+TEST_F(ToolArgumentsValidatorTest, UnknownArgumentFails) {
+    zoo::tools::ToolCall tc;
+    tc.name = "greet";
+    tc.arguments = {{"name", "Alice"}, {"salutation", "Hi"}};
+    auto result = validator.validate(tc, registry);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::ToolValidationFailed);
+    EXPECT_NE(result.error().message.find("Unexpected argument"), std::string::npos);
+}
+
+TEST_F(ToolArgumentsValidatorTest, UnknownToolFails) {
     zoo::tools::ToolCall tc;
     tc.name = "nonexistent";
     tc.arguments = {};
-    auto error = recovery.validate_args(tc, registry);
-    EXPECT_FALSE(error.empty());
-    EXPECT_NE(error.find("not found"), std::string::npos);
+    auto result = validator.validate(tc, registry);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::ToolNotFound);
 }
 
-TEST_F(ErrorRecoveryTest, RetryTracking) {
-    EXPECT_TRUE(recovery.can_retry("add"));
-    EXPECT_EQ(recovery.get_retry_count("add"), 0);
-
-    recovery.record_retry("add");
-    EXPECT_EQ(recovery.get_retry_count("add"), 1);
-    EXPECT_TRUE(recovery.can_retry("add"));
-
-    recovery.record_retry("add");
-    EXPECT_EQ(recovery.get_retry_count("add"), 2);
-    EXPECT_FALSE(recovery.can_retry("add"));
+TEST_F(ToolArgumentsValidatorTest, EnumArgumentMustMatchRegisteredValues) {
+    zoo::tools::ToolCall tc;
+    tc.name = "forecast";
+    tc.arguments = {{"unit", "kelvin"}};
+    auto result = validator.validate(tc, registry);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::ToolValidationFailed);
+    EXPECT_NE(result.error().message.find("enum"), std::string::npos);
 }
 
-TEST_F(ErrorRecoveryTest, Reset) {
-    recovery.record_retry("add");
-    recovery.record_retry("add");
-    EXPECT_FALSE(recovery.can_retry("add"));
-    recovery.reset();
-    EXPECT_TRUE(recovery.can_retry("add"));
-    EXPECT_EQ(recovery.get_retry_count("add"), 0);
-}
-
-TEST_F(ErrorRecoveryTest, MaxRetries) {
-    EXPECT_EQ(recovery.max_retries(), 2);
+TEST_F(ToolArgumentsValidatorTest, OptionalArgumentMayBeOmitted) {
+    zoo::tools::ToolCall tc;
+    tc.name = "forecast";
+    tc.arguments = {{"unit", "celsius"}};
+    EXPECT_TRUE(validator.validate(tc, registry).has_value());
 }

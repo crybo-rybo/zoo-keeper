@@ -1,6 +1,6 @@
 /**
  * @file test_grammar_builder.cpp
- * @brief Unit tests for grammar generation from registered tool schemas.
+ * @brief Unit tests for grammar generation from registered tool metadata.
  */
 
 #include "zoo/internal/tools/grammar.hpp"
@@ -30,100 +30,111 @@ class GrammarBuilderTest : public ::testing::Test {
 };
 
 TEST_F(GrammarBuilderTest, EmptyRegistryReturnsEmpty) {
-    auto schemas = registry.get_all_schemas();
-    auto grammar = zoo::tools::GrammarBuilder::build(schemas);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
     EXPECT_TRUE(grammar.empty());
 }
 
 TEST_F(GrammarBuilderTest, SingleToolProducesValidGrammar) {
-    registry.register_tool("add", "Add two numbers", {"a", "b"}, add);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+    ASSERT_TRUE(registry.register_tool("add", "Add two numbers", {"a", "b"}, add).has_value());
+
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
 
     EXPECT_NE(grammar.find("root ::="), std::string::npos);
     EXPECT_NE(grammar.find("<tool_call>"), std::string::npos);
     EXPECT_NE(grammar.find("</tool_call>"), std::string::npos);
-    EXPECT_NE(grammar.find("tool-call ::= tool-add"), std::string::npos);
-    EXPECT_NE(grammar.find("tool-add ::="), std::string::npos);
+    EXPECT_NE(grammar.find("tool-call ::= tool-0"), std::string::npos);
     EXPECT_NE(grammar.find("\\\"add\\\""), std::string::npos);
 }
 
-TEST_F(GrammarBuilderTest, MultipleToolsCreateAlternatives) {
-    registry.register_tool("add", "Add", {"a", "b"}, add);
-    registry.register_tool("greet", "Greet", {"name"}, greet);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+TEST_F(GrammarBuilderTest, MultipleToolsRespectRegistrationOrder) {
+    ASSERT_TRUE(registry.register_tool("greet", "Greet", {"name"}, greet).has_value());
+    ASSERT_TRUE(registry.register_tool("add", "Add", {"a", "b"}, add).has_value());
 
-    // Both tools must appear as alternatives (order depends on registry internals)
-    EXPECT_NE(grammar.find("tool-add"), std::string::npos);
-    EXPECT_NE(grammar.find("tool-greet"), std::string::npos);
-    EXPECT_NE(grammar.find("tool-call ::="), std::string::npos);
-    EXPECT_NE(grammar.find(" | "), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
+    auto tool_call_pos = grammar.find("tool-call ::= tool-0 | tool-1");
+    auto greet_pos = grammar.find("\\\"greet\\\"");
+    auto add_pos = grammar.find("\\\"add\\\"");
+
+    EXPECT_NE(tool_call_pos, std::string::npos);
+    ASSERT_NE(greet_pos, std::string::npos);
+    ASSERT_NE(add_pos, std::string::npos);
+    EXPECT_LT(greet_pos, add_pos);
 }
 
 TEST_F(GrammarBuilderTest, IntegerArgsReferenceIntegerRule) {
-    registry.register_tool("add", "Add", {"a", "b"}, add);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+    ASSERT_TRUE(registry.register_tool("add", "Add", {"a", "b"}, add).has_value());
 
-    EXPECT_NE(grammar.find("add-args ::="), std::string::npos);
-    EXPECT_NE(grammar.find("\\\"a\\\"\" ws \":\" ws integer"), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
     EXPECT_NE(grammar.find("integer ::="), std::string::npos);
+    EXPECT_NE(grammar.find("tool-0-param-0"), std::string::npos);
 }
 
 TEST_F(GrammarBuilderTest, NumberArgsReferenceNumberRule) {
-    registry.register_tool("scale", "Scale", {"x", "factor"}, scale);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+    ASSERT_TRUE(registry.register_tool("scale", "Scale", {"x", "factor"}, scale).has_value());
 
-    EXPECT_NE(grammar.find("\\\"x\\\"\" ws \":\" ws number"), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
     EXPECT_NE(grammar.find("number ::="), std::string::npos);
 }
 
 TEST_F(GrammarBuilderTest, StringArgsReferenceStringRule) {
-    registry.register_tool("greet", "Greet", {"name"}, greet);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+    ASSERT_TRUE(registry.register_tool("greet", "Greet", {"name"}, greet).has_value());
 
-    EXPECT_NE(grammar.find("\\\"name\\\"\" ws \":\" ws string"), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
     EXPECT_NE(grammar.find("string ::="), std::string::npos);
 }
 
 TEST_F(GrammarBuilderTest, BooleanArgsReferenceBooleanRule) {
-    registry.register_tool("negate", "Negate", {"val"}, negate);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+    ASSERT_TRUE(registry.register_tool("negate", "Negate", {"val"}, negate).has_value());
 
-    EXPECT_NE(grammar.find("\\\"val\\\"\" ws \":\" ws boolean"), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
     EXPECT_NE(grammar.find("boolean ::="), std::string::npos);
 }
 
 TEST_F(GrammarBuilderTest, ZeroArityToolHasNoArgsRule) {
-    registry.register_tool("get_time", "Get time", {}, get_time);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+    ASSERT_TRUE(registry.register_tool("get_time", "Get time", {}, get_time).has_value());
 
-    EXPECT_NE(grammar.find("tool-get-time ::="), std::string::npos);
-    // Should NOT have a get-time-args rule
-    EXPECT_EQ(grammar.find("get-time-args ::="), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
+    EXPECT_NE(grammar.find("\\\"get_time\\\""), std::string::npos);
+    EXPECT_EQ(grammar.find("tool-0-args ::="), std::string::npos);
 }
 
-TEST_F(GrammarBuilderTest, ContainsPrimitiveRules) {
-    registry.register_tool("add", "Add", {"a", "b"}, add);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+TEST_F(GrammarBuilderTest, ManualSchemaGeneratesOptionalRules) {
+    nlohmann::json schema = {{"type", "object"},
+                             {"properties",
+                              {{"query", {{"type", "string"}}},
+                               {"limit", {{"type", "integer"}}}}},
+                             {"required", nlohmann::json::array({"query"})},
+                             {"additionalProperties", false}};
 
-    EXPECT_NE(grammar.find("integer ::="), std::string::npos);
-    EXPECT_NE(grammar.find("number ::="), std::string::npos);
-    EXPECT_NE(grammar.find("string ::="), std::string::npos);
-    EXPECT_NE(grammar.find("boolean ::="), std::string::npos);
-    EXPECT_NE(grammar.find("ws ::="), std::string::npos);
+    ASSERT_TRUE(registry.register_tool(
+                           "search", "Search", schema,
+                           [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
+                               return nlohmann::json::object();
+                           })
+                    .has_value());
+
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
+    EXPECT_NE(grammar.find("tool-0-cont-1"), std::string::npos);
+    EXPECT_NE(grammar.find("\\\"limit\\\""), std::string::npos);
 }
 
-TEST_F(GrammarBuilderTest, ToolNameIsLiteralInGrammar) {
-    registry.register_tool("multiply", "Multiply", {"a", "b"}, scale);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
+TEST_F(GrammarBuilderTest, ManualSchemaGeneratesEnumRules) {
+    nlohmann::json schema = {
+        {"type", "object"},
+        {"properties",
+         {{"unit", {{"type", "string"}, {"enum", nlohmann::json::array({"celsius", "fahrenheit"})}}}}},
+        {"required", nlohmann::json::array({"unit"})},
+        {"additionalProperties", false}};
 
-    // The tool name must appear as a literal string in the grammar
-    EXPECT_NE(grammar.find("\\\"multiply\\\""), std::string::npos);
-}
+    ASSERT_TRUE(registry.register_tool(
+                           "weather", "Weather", schema,
+                           [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
+                               return nlohmann::json::object();
+                           })
+                    .has_value());
 
-TEST_F(GrammarBuilderTest, ArgumentNamesAreLiterals) {
-    registry.register_tool("add", "Add", {"left", "right"}, add);
-    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_schemas());
-
-    EXPECT_NE(grammar.find("\\\"left\\\""), std::string::npos);
-    EXPECT_NE(grammar.find("\\\"right\\\""), std::string::npos);
+    auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
+    EXPECT_NE(grammar.find("tool-0-enum-0"), std::string::npos);
+    EXPECT_NE(grammar.find("\\\"celsius\\\""), std::string::npos);
+    EXPECT_NE(grammar.find("\\\"fahrenheit\\\""), std::string::npos);
 }

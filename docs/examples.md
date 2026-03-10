@@ -17,7 +17,7 @@ Available programs:
 - `model_generate` -- synchronous `zoo::core::Model` usage
 - `error_handling` -- structured runtime error reporting
 - `stream_cancel` -- streaming output with cooperative cancellation
-- `custom_tool_schema` -- nested JSON arguments with a manual tool schema
+- `manual_tool_schema` -- `Agent::register_tool(..., schema, handler)` with the supported schema subset
 
 ## Streaming Output
 
@@ -68,10 +68,18 @@ auto response = handle.future.get();
 if (response) {
     std::cout << response->text << std::endl;
 
-    // Inspect tool result messages injected during the agentic loop
-    for (const auto& msg : response->tool_calls) {
-        // msg.role == Role::Tool, msg.tool_call_id has the correlation id
-        std::cout << "Tool result: " << msg.content << std::endl;
+    // Inspect explicit tool invocation records captured during the agentic loop
+    for (const auto& invocation : response->tool_invocations) {
+        std::cout << "Tool: " << invocation.name << std::endl;
+        std::cout << "Args: " << invocation.arguments_json << std::endl;
+
+        if (invocation.result_json) {
+            std::cout << "Result: " << *invocation.result_json << std::endl;
+        }
+
+        if (invocation.error) {
+            std::cout << "Error: " << invocation.error->to_string() << std::endl;
+        }
     }
 }
 ```

@@ -160,9 +160,10 @@ struct Agent::Impl {
         model->clear_history();
     }
 
-    Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 nlohmann::json schema, tools::ToolHandler handler) {
-        tool_registry.register_tool(name, description, std::move(schema), std::move(handler));
+    Expected<void> register_tool(tools::ToolDefinition definition) {
+        if (auto result = tool_registry.register_tool(std::move(definition)); !result) {
+            return std::unexpected(result.error());
+        }
         update_tool_grammar();
         return {};
     }
@@ -271,9 +272,9 @@ struct Agent::Impl {
         bool first_token_received = false;
         int total_completion_tokens = 0;
         int total_prompt_tokens = 0;
-        std::vector<Message> tool_call_history;
-
-        tools::ErrorRecovery error_recovery(config.max_tool_retries);
+        std::vector<ToolInvocation> tool_invocations;
+        std::unordered_map<std::string, int> retry_counts;
+        tools::ToolArgumentsValidator validator;
         int iteration = 0;
         const int max_tool_iterations = config.max_tool_iterations;
         const bool has_tools = tool_registry.size() > 0;
@@ -363,46 +364,59 @@ struct Agent::Impl {
                     Message::assistant(use_grammar_path ? generated->text : response_text));
                 model->finalize_response();
 
-                if (!use_grammar_path) {
-                    auto validation_error = error_recovery.validate_args(tc, tool_registry);
-                    if (!validation_error.empty()) {
-                        if (!error_recovery.can_retry(tc.name)) {
-                            ZOO_LOG("error", "tool retries exhausted for '%s': %s", tc.name.c_str(),
-                                    validation_error.c_str());
-                            return std::unexpected(Error{ErrorCode::ToolRetriesExhausted,
-                                                         "Tool retries exhausted for '" + tc.name +
-                                                             "': " + validation_error});
-                        }
-                        error_recovery.record_retry(tc.name);
-                        ZOO_LOG("warn", "tool '%s' validation failed (retry %d/%d): %s",
-                                tc.name.c_str(), error_recovery.get_retry_count(tc.name),
-                                config.max_tool_retries, validation_error.c_str());
+                if (auto validation_result = validator.validate(tc, tool_registry);
+                    !validation_result) {
+                    const Error validation_error = validation_result.error();
 
-                        std::string error_content = "Error: " + validation_error;
-                        model->add_message(Message::tool(
-                            error_content + "\nPlease correct the arguments.", tc.id));
-                        tool_call_history.push_back(Message::tool(std::move(error_content), tc.id));
-                        continue;
+                    auto& retry_count = retry_counts[tc.name];
+                    if (retry_count >= config.max_tool_retries) {
+                        ZOO_LOG("error", "tool retries exhausted for '%s': %s", tc.name.c_str(),
+                                validation_error.message.c_str());
+                        return std::unexpected(
+                            Error{ErrorCode::ToolRetriesExhausted,
+                                  "Tool retries exhausted for '" + tc.name + "': " +
+                                      validation_error.message});
                     }
+
+                    ++retry_count;
+                    ZOO_LOG("warn", "tool '%s' validation failed (retry %d/%d): %s",
+                            tc.name.c_str(), retry_count, config.max_tool_retries,
+                            validation_error.message.c_str());
+
+                    std::string error_content = "Error: " + validation_error.message;
+                    model->add_message(
+                        Message::tool(error_content + "\nPlease correct the arguments.", tc.id));
+                    tool_invocations.push_back(
+                        ToolInvocation{tc.id, tc.name, tc.arguments.dump(),
+                                       ToolInvocationStatus::ValidationFailed, std::nullopt,
+                                       validation_error});
+                    continue;
                 }
 
                 ZOO_LOG("info", "invoking tool '%s' (iteration %d, grammar=%d)", tc.name.c_str(),
                         iteration, use_grammar_path);
                 auto invoke_result = tool_registry.invoke(tc.name, tc.arguments);
                 std::string tool_result_str;
+                std::optional<std::string> result_json;
+                std::optional<Error> tool_error;
+                ToolInvocationStatus status = ToolInvocationStatus::Succeeded;
                 if (invoke_result) {
                     tool_result_str = invoke_result->dump();
+                    result_json = tool_result_str;
                 } else {
                     tool_result_str = "Error: " + invoke_result.error().message;
+                    tool_error = invoke_result.error();
+                    status = ToolInvocationStatus::ExecutionFailed;
                 }
 
                 Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
                 model->add_message(tool_msg);
-                tool_call_history.push_back(std::move(tool_msg));
+                tool_invocations.push_back(ToolInvocation{
+                    tc.id, tc.name, tc.arguments.dump(), status, std::move(result_json), tool_error});
                 continue;
             }
 
-            if (response_text.empty() && !tool_call_history.empty() &&
+            if (response_text.empty() && !tool_invocations.empty() &&
                 iteration < max_tool_iterations) {
                 model->add_message(
                     Message::user("Please respond to the user with the tool result."));
@@ -416,7 +430,7 @@ struct Agent::Impl {
 
             Response response;
             response.text = std::move(response_text);
-            response.tool_calls = std::move(tool_call_history);
+            response.tool_invocations = std::move(tool_invocations);
             response.usage.prompt_tokens = total_prompt_tokens;
             response.usage.completion_tokens = total_completion_tokens;
             response.usage.total_tokens = total_prompt_tokens + total_completion_tokens;
@@ -465,8 +479,8 @@ struct Agent::Impl {
 
     void update_tool_grammar() {
         std::lock_guard<std::mutex> lock(model_mutex);
-        auto schemas = tool_registry.get_all_schemas();
-        auto grammar = tools::GrammarBuilder::build(schemas);
+        auto metadata = tool_registry.get_all_tool_metadata();
+        auto grammar = tools::GrammarBuilder::build(metadata);
         if (grammar.empty()) {
             model->clear_tool_grammar();
             return;
@@ -537,9 +551,18 @@ void Agent::clear_history() {
     impl_->clear_history();
 }
 
+Expected<void> Agent::register_tool(tools::ToolDefinition definition) {
+    return impl_->register_tool(std::move(definition));
+}
+
 Expected<void> Agent::register_tool(const std::string& name, const std::string& description,
                                     nlohmann::json schema, tools::ToolHandler handler) {
-    return impl_->register_tool(name, description, std::move(schema), std::move(handler));
+    auto definition = tools::detail::make_tool_definition(name, description, schema,
+                                                          std::move(handler));
+    if (!definition) {
+        return std::unexpected(definition.error());
+    }
+    return register_tool(std::move(*definition));
 }
 
 size_t Agent::tool_count() const noexcept {

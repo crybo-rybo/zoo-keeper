@@ -18,7 +18,7 @@ Consumer Code
 +-- Layer 2: Tools ----------+
 |   zoo::tools::ToolRegistry  |   Tool definitions, schema generation, invocation
 |   zoo::tools::ToolCallParser |   Tool call detection in model output
-|   zoo::tools::ErrorRecovery  |   Argument validation + retry tracking
+|   zoo::tools::ToolArgumentsValidator |   Argument validation against normalized schemas
 +----------------------------+
      |
      v
@@ -39,11 +39,11 @@ There is no IBackend abstraction -- Model IS the llama.cpp wrapper, keeping the 
 
 | Component | Responsibility |
 |-----------|---------------|
-| **ToolRegistry** | Stores tool definitions with JSON schemas. Supports template-based registration (auto-generates schema from function signatures) and manual registration. Thread-safe via shared mutex. |
+| **ToolRegistry** | Stores normalized tool definitions. Supports typed registration and manual-schema registration with deterministic ordering. Thread-safe via shared mutex. |
 | **ToolCallParser** | Scans model output for JSON objects with `name` and `arguments` fields. Handles nested JSON and string escaping. |
-| **ErrorRecovery** | Validates tool call arguments against registered schemas. Tracks retry counts per tool with configurable limits (default: 2). |
+| **ToolArgumentsValidator** | Validates parsed tool arguments against the normalized registered schema, including enum checks and unknown-argument rejection. |
 
-The tools layer is header-only and has zero dependency on Layer 1. It operates entirely on strings and JSON.
+The tools layer is header-only and has zero dependency on Layer 1. It operates entirely on strings, JSON, and normalized tool metadata.
 
 ### Layer 3: Agent (`zoo::Agent`)
 
@@ -55,7 +55,7 @@ The agentic tool loop runs inline in `process_request()`:
 1. Add user message to history
 2. Generate response via `Model::generate_from_history()`
 3. Parse output for tool calls
-4. If tool call found: validate args, execute handler, inject result, loop back to step 2
+4. If a tool call is found: validate args, record a `ToolInvocation`, execute the handler when valid, inject the tool message, loop back to step 2
 5. If no tool call: return final response
 6. Loop limit: 5 iterations (returns `ToolLoopLimitReached` if exceeded)
 
