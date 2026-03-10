@@ -198,10 +198,15 @@ The work is organized into epics. Each epic is broken into concrete issues with 
 **Tasks**
 - Split queue/cancellation concerns from request execution concerns.
 - Introduce smaller internal units with clear responsibilities.
+- Move worker lifecycle, command handling, and tool-loop orchestration into private runtime implementation files.
+- Isolate the concrete `core::Model` adapter in its own private implementation file instead of keeping it inline with the public Agent facade.
+- Keep `src/agent.cpp` focused on the public `Agent` facade, construction, and thin forwarding only.
 - Keep the public API unchanged or simpler.
 
 **Acceptance criteria**
 - `Agent` has a smaller, more obvious responsibility set.
+- `src/agent.cpp` no longer contains the full worker loop and concrete backend adapter implementation.
+- Runtime orchestration and llama backend integration live in private implementation files with narrower responsibilities.
 - Runtime shutdown and cancellation behavior are easier to test directly.
 
 ### Issue 3.3 — Add unit-test seams for agent behavior
@@ -212,11 +217,13 @@ The work is organized into epics. Each epic is broken into concrete issues with 
 **Tasks**
 - Introduce a mockable or fake generation backend seam.
 - Add focused tests for queue full handling, cancellation, retry exhaustion, and tool-loop limits.
+- Prefer testing through the internal runtime/backend seam; keep any test-only `Agent` construction hooks minimal and transitional.
 - Keep live integration tests as smoke coverage, not as the only proof of behavior.
 
 **Acceptance criteria**
 - Agent orchestration behavior can be validated without a live model.
 - The most failure-prone runtime behaviors have targeted tests.
+- The primary fast tests do not depend on the live `core::Model` implementation.
 
 ---
 
