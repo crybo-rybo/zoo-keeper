@@ -99,18 +99,17 @@ TEST_F(GrammarBuilderTest, ZeroArityToolHasNoArgsRule) {
 }
 
 TEST_F(GrammarBuilderTest, ManualSchemaGeneratesOptionalRules) {
-    nlohmann::json schema = {{"type", "object"},
-                             {"properties",
-                              {{"query", {{"type", "string"}}},
-                               {"limit", {{"type", "integer"}}}}},
-                             {"required", nlohmann::json::array({"query"})},
-                             {"additionalProperties", false}};
+    nlohmann::json schema = {
+        {"type", "object"},
+        {"properties", {{"query", {{"type", "string"}}}, {"limit", {{"type", "integer"}}}}},
+        {"required", nlohmann::json::array({"query"})},
+        {"additionalProperties", false}};
 
-    ASSERT_TRUE(registry.register_tool(
-                           "search", "Search", schema,
-                           [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
-                               return nlohmann::json::object();
-                           })
+    ASSERT_TRUE(registry
+                    .register_tool("search", "Search", schema,
+                                   [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
+                                       return nlohmann::json::object();
+                                   })
                     .has_value());
 
     auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
@@ -122,15 +121,16 @@ TEST_F(GrammarBuilderTest, ManualSchemaGeneratesEnumRules) {
     nlohmann::json schema = {
         {"type", "object"},
         {"properties",
-         {{"unit", {{"type", "string"}, {"enum", nlohmann::json::array({"celsius", "fahrenheit"})}}}}},
+         {{"unit",
+           {{"type", "string"}, {"enum", nlohmann::json::array({"celsius", "fahrenheit"})}}}}},
         {"required", nlohmann::json::array({"unit"})},
         {"additionalProperties", false}};
 
-    ASSERT_TRUE(registry.register_tool(
-                           "weather", "Weather", schema,
-                           [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
-                               return nlohmann::json::object();
-                           })
+    ASSERT_TRUE(registry
+                    .register_tool("weather", "Weather", schema,
+                                   [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
+                                       return nlohmann::json::object();
+                                   })
                     .has_value());
 
     auto grammar = zoo::tools::GrammarBuilder::build(registry.get_all_tool_metadata());
