@@ -19,8 +19,7 @@
 namespace zoo::internal::agent {
 
 AgentRuntime::AgentRuntime(const Config& cfg, std::unique_ptr<AgentBackend> backend)
-    : config_(cfg), backend_(std::move(backend)),
-      request_mailbox_(cfg.request_queue_capacity) {
+    : config_(cfg), backend_(std::move(backend)), request_mailbox_(cfg.request_queue_capacity) {
     inference_thread_ = std::thread([this]() { inference_loop(); });
 }
 
@@ -28,22 +27,19 @@ AgentRuntime::~AgentRuntime() {
     stop();
 }
 
-RequestHandle
-AgentRuntime::chat(Message message,
-                   std::optional<std::function<void(std::string_view)>> callback) {
+RequestHandle AgentRuntime::chat(Message message,
+                                 std::optional<std::function<void(std::string_view)>> callback) {
     auto prepared = request_tracker_.prepare(std::move(message), std::move(callback));
     RequestHandle handle{prepared.request.id, std::move(prepared.future)};
 
     if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id,
-                              Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
         return handle;
     }
 
     if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(
-            handle.id,
-            Error{ErrorCode::QueueFull, "Request queue is full or agent is shutting down"});
+        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
+                                               "Request queue is full or agent is shutting down"});
         return handle;
     }
 
@@ -175,13 +171,11 @@ void AgentRuntime::inference_loop() {
             Error{ErrorCode::AgentNotRunning, "Agent stopped before request could be processed"});
     } catch (const std::exception& e) {
         ZOO_LOG("error", "fatal exception escaped inference thread: %s", e.what());
-        fail_pending(
-            Error{ErrorCode::InferenceFailed,
-                  std::string("Inference thread terminated unexpectedly: ") + e.what()});
+        fail_pending(Error{ErrorCode::InferenceFailed,
+                           std::string("Inference thread terminated unexpectedly: ") + e.what()});
     } catch (...) {
         ZOO_LOG("error", "fatal unknown exception escaped inference thread");
-        fail_pending(
-            Error{ErrorCode::InferenceFailed, "Inference thread terminated unexpectedly"});
+        fail_pending(Error{ErrorCode::InferenceFailed, "Inference thread terminated unexpectedly"});
     }
 }
 
@@ -191,8 +185,7 @@ void AgentRuntime::handle_request(Request& request) {
     if (request.cancelled && request.cancelled->load(std::memory_order_acquire)) {
         ZOO_LOG("info", "request %lu cancelled before processing",
                 static_cast<unsigned long>(request.id));
-        request_tracker_.fail(request.id,
-                              Error{ErrorCode::RequestCancelled, "Request cancelled"});
+        request_tracker_.fail(request.id, Error{ErrorCode::RequestCancelled, "Request cancelled"});
         return;
     }
 
@@ -237,9 +230,8 @@ void AgentRuntime::handle_command(Command& cmd) {
                            ZOO_LOG("info", "tool grammar updated (%zu tools)", c.metadata.size());
                        } else {
                            backend_->clear_tool_grammar();
-                           ZOO_LOG("warn",
-                                   "grammar sampler init failed, falling back to "
-                                   "unconstrained generation");
+                           ZOO_LOG("warn", "grammar sampler init failed, falling back to "
+                                           "unconstrained generation");
                        }
                        tool_grammar_active_.store(active, std::memory_order_release);
                        c.done->set_value(active);
@@ -266,8 +258,7 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
     int iteration = 0;
     const int max_tool_iterations = config_.max_tool_iterations;
     const bool has_tools = tool_registry_.size() > 0;
-    const bool use_grammar_path =
-        has_tools && tool_grammar_active_.load(std::memory_order_acquire);
+    const bool use_grammar_path = has_tools && tool_grammar_active_.load(std::memory_order_acquire);
 
     ZOO_LOG("debug", "processing request %lu (tools=%d, grammar=%d)",
             static_cast<unsigned long>(request.id), has_tools, use_grammar_path);
@@ -283,14 +274,15 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         int completion_tokens = 0;
 
         auto make_metrics_callback = [&](auto inner_callback) -> TokenCallback {
-            return [&, callback = std::move(inner_callback)](std::string_view token) -> TokenAction {
-                if (!first_token_received) {
-                    first_token_time = std::chrono::steady_clock::now();
-                    first_token_received = true;
-                }
-                ++completion_tokens;
-                return callback(token);
-            };
+            return
+                [&, callback = std::move(inner_callback)](std::string_view token) -> TokenAction {
+                    if (!first_token_received) {
+                        first_token_time = std::chrono::steady_clock::now();
+                        first_token_received = true;
+                    }
+                    ++completion_tokens;
+                    return callback(token);
+                };
         };
 
         std::optional<TokenCallback> callback;
@@ -357,12 +349,11 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 auto& retry_count = retry_counts[tool_call.name];
 
                 if (retry_count >= config_.max_tool_retries) {
-                    ZOO_LOG("error", "tool retries exhausted for '%s': %s",
-                            tool_call.name.c_str(), validation_error.message.c_str());
-                    return std::unexpected(
-                        Error{ErrorCode::ToolRetriesExhausted,
-                              "Tool retries exhausted for '" + tool_call.name +
-                                  "': " + validation_error.message});
+                    ZOO_LOG("error", "tool retries exhausted for '%s': %s", tool_call.name.c_str(),
+                            validation_error.message.c_str());
+                    return std::unexpected(Error{ErrorCode::ToolRetriesExhausted,
+                                                 "Tool retries exhausted for '" + tool_call.name +
+                                                     "': " + validation_error.message});
                 }
 
                 ++retry_count;
@@ -379,8 +370,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 continue;
             }
 
-            ZOO_LOG("info", "invoking tool '%s' (iteration %d, grammar=%d)",
-                    tool_call.name.c_str(), iteration, use_grammar_path);
+            ZOO_LOG("info", "invoking tool '%s' (iteration %d, grammar=%d)", tool_call.name.c_str(),
+                    iteration, use_grammar_path);
             auto invoke_result = tool_registry_.invoke(tool_call.name, tool_call.arguments);
             std::string tool_result_str;
             std::optional<std::string> result_json;
@@ -402,8 +393,7 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
             continue;
         }
 
-        if (response_text.empty() && !tool_invocations.empty() &&
-            iteration < max_tool_iterations) {
+        if (response_text.empty() && !tool_invocations.empty() && iteration < max_tool_iterations) {
             backend_->add_message(
                 Message::user("Please respond to the user with the tool result."));
             continue;
@@ -428,8 +418,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
             response.metrics.time_to_first_token_ms =
                 std::chrono::duration_cast<std::chrono::milliseconds>(first_token_time -
                                                                       start_time);
-            auto generation_time = std::chrono::duration_cast<std::chrono::milliseconds>(
-                end_time - first_token_time);
+            auto generation_time =
+                std::chrono::duration_cast<std::chrono::milliseconds>(end_time - first_token_time);
             if (generation_time.count() > 0) {
                 response.metrics.tokens_per_second =
                     (total_completion_tokens * 1000.0) / generation_time.count();

@@ -31,9 +31,8 @@ using zoo::internal::agent::GenerationResult;
 
 class FakeBackend final : public AgentBackend {
   public:
-    using GenerationAction =
-        std::function<Expected<GenerationResult>(std::optional<TokenCallback>,
-                                                 const CancellationCallback&)>;
+    using GenerationAction = std::function<Expected<GenerationResult>(std::optional<TokenCallback>,
+                                                                      const CancellationCallback&)>;
 
     void push_generation(GenerationAction action) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -63,9 +62,8 @@ class FakeBackend final : public AgentBackend {
         return {};
     }
 
-    Expected<GenerationResult>
-    generate_from_history(std::optional<TokenCallback> on_token,
-                          CancellationCallback should_cancel) override {
+    Expected<GenerationResult> generate_from_history(std::optional<TokenCallback> on_token,
+                                                     CancellationCallback should_cancel) override {
         GenerationAction action;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -149,9 +147,7 @@ void register_single_int_tool(AgentRuntime& runtime, const std::string& name,
 
 GenerationResult tool_call_generation(const std::string& tool_name, const nlohmann::json& arguments,
                                       std::string id = "call-1") {
-    nlohmann::json payload = {{"id", std::move(id)},
-                              {"name", tool_name},
-                              {"arguments", arguments}};
+    nlohmann::json payload = {{"id", std::move(id)}, {"name", tool_name}, {"arguments", arguments}};
     return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true};
 }
 
@@ -179,10 +175,9 @@ TEST(AgentRuntimeTest, QueueFullFailsAdditionalQueuedRequest) {
             release_future.wait();
             return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
         });
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-        });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
+    });
 
     auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
@@ -320,16 +315,14 @@ TEST(AgentRuntimeTest, ToolValidationRetryExhaustionReturnsToolRetriesExhausted)
                              [](int value) { return value * 2; });
     EXPECT_FALSE(backend_ptr->last_tool_grammar().empty());
 
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(
-                tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
-        });
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(
-                tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
-        });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
+    });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
+    });
 
     auto handle = runtime.chat(Message::user("use the tool"));
     auto result = handle.future.get();
@@ -348,16 +341,14 @@ TEST(AgentRuntimeTest, ToolLoopLimitExhaustionReturnsToolLoopLimitReached) {
     register_single_int_tool(runtime, "double_value", "Doubles a number",
                              [](int value) { return value * 2; });
 
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(
-                tool_call_generation("double_value", nlohmann::json{{"value", 1}}, "call-1"));
-        });
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(
-                tool_call_generation("double_value", nlohmann::json{{"value", 2}}, "call-2"));
-        });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", 1}}, "call-1"));
+    });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", 2}}, "call-2"));
+    });
 
     auto handle = runtime.chat(Message::user("use the tool twice"));
     auto result = handle.future.get();
@@ -384,18 +375,16 @@ TEST(AgentRuntimeTest, SetSystemPromptSerializesBeforeQueuedRequests) {
             release_future.wait();
             return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
         });
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-        });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
+    });
 
     auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
     auto second = runtime.chat(Message::user("second"));
 
-    auto prompt_future = std::async(std::launch::async, [&runtime] {
-        runtime.set_system_prompt("updated");
-    });
+    auto prompt_future =
+        std::async(std::launch::async, [&runtime] { runtime.set_system_prompt("updated"); });
 
     EXPECT_EQ(prompt_future.wait_for(50ms), std::future_status::timeout);
 
@@ -430,16 +419,16 @@ TEST(AgentRuntimeTest, GetHistorySerializesBeforeQueuedRequests) {
             release_future.wait();
             return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
         });
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-        });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
+    });
 
     auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
     auto second = runtime.chat(Message::user("second"));
 
-    auto history_future = std::async(std::launch::async, [&runtime] { return runtime.get_history(); });
+    auto history_future =
+        std::async(std::launch::async, [&runtime] { return runtime.get_history(); });
     EXPECT_EQ(history_future.wait_for(50ms), std::future_status::timeout);
 
     release->set_value();
@@ -476,18 +465,15 @@ TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
             release_future.wait();
             return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
         });
-    backend_ptr->push_generation(
-        [](std::optional<TokenCallback>, const CancellationCallback&) {
-            return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-        });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
+    });
 
     auto first = runtime.chat(Message::user("first"));
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
     auto second = runtime.chat(Message::user("second"));
 
-    auto clear_future = std::async(std::launch::async, [&runtime] {
-        runtime.clear_history();
-    });
+    auto clear_future = std::async(std::launch::async, [&runtime] { runtime.clear_history(); });
     EXPECT_EQ(clear_future.wait_for(50ms), std::future_status::timeout);
 
     release->set_value();

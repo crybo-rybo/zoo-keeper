@@ -19,28 +19,37 @@ class ModelBackend final : public AgentBackend {
         return model_->add_message(message);
     }
 
-    Expected<GenerationResult>
-    generate_from_history(std::optional<TokenCallback> on_token,
-                          CancellationCallback should_cancel) override {
+    Expected<GenerationResult> generate_from_history(std::optional<TokenCallback> on_token,
+                                                     CancellationCallback should_cancel) override {
         auto result = model_->generate_from_history(std::move(on_token), std::move(should_cancel));
         if (!result) {
             return std::unexpected(result.error());
         }
 
-        return GenerationResult{
-            std::move(result->text), result->prompt_tokens, result->tool_call_detected};
+        return GenerationResult{std::move(result->text), result->prompt_tokens,
+                                result->tool_call_detected};
     }
 
-    void finalize_response() override { model_->finalize_response(); }
-    void set_system_prompt(const std::string& prompt) override { model_->set_system_prompt(prompt); }
-    std::vector<Message> get_history() const override { return model_->get_history(); }
-    void clear_history() override { model_->clear_history(); }
+    void finalize_response() override {
+        model_->finalize_response();
+    }
+    void set_system_prompt(const std::string& prompt) override {
+        model_->set_system_prompt(prompt);
+    }
+    std::vector<Message> get_history() const override {
+        return model_->get_history();
+    }
+    void clear_history() override {
+        model_->clear_history();
+    }
 
     bool set_tool_grammar(const std::string& grammar_str) override {
         return model_->set_tool_grammar(grammar_str);
     }
 
-    void clear_tool_grammar() override { model_->clear_tool_grammar(); }
+    void clear_tool_grammar() override {
+        model_->clear_tool_grammar();
+    }
 
   private:
     std::unique_ptr<core::Model> model_;
