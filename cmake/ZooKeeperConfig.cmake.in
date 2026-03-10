@@ -3,6 +3,7 @@
 include(CMakeFindDependencyMacro)
 
 find_dependency(llama CONFIG)
+find_dependency(nlohmann_json 3.11 CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperTargets.cmake")
 
@@ -12,6 +13,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperTargets.cmake")
 if(TARGET ZooKeeper::zoo AND TARGET llama)
     set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
         INTERFACE_LINK_LIBRARIES llama
+    )
+endif()
+
+# nlohmann/json headers are used in public zoo headers.  Rather than vendoring
+# the headers into the install tree we require consumers to provide the package.
+if(TARGET ZooKeeper::zoo AND TARGET nlohmann_json::nlohmann_json)
+    set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES nlohmann_json::nlohmann_json
     )
 endif()
 

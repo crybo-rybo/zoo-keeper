@@ -115,18 +115,48 @@ install(DIRECTORY include/zoo DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     PATTERN "internal" EXCLUDE
     PATTERN "*.in" EXCLUDE
 )
-install(DIRECTORY ${json_SOURCE_DIR}/include/nlohmann
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/zoo
 )
 
-# Config file
+# Build-tree config — allows find_package(ZooKeeper CONFIG) against the build
+# tree without requiring install.  We cannot use export(EXPORT) because llama
+# (a private dependency) is not in our export set, so we generate a config
+# that creates IMPORTED targets manually.
+file(GENERATE
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfig.cmake"
+    CONTENT [[# ZooKeeper build-tree package configuration.
+# Dependencies (llama, nlohmann_json) are resolved from the build tree.
+if(NOT TARGET ZooKeeper::zoo)
+    add_library(ZooKeeper::zoo STATIC IMPORTED)
+    set_target_properties(ZooKeeper::zoo PROPERTIES
+        IMPORTED_LOCATION "$<TARGET_FILE:zoo>"
+        INTERFACE_COMPILE_FEATURES "cxx_std_23"
+        INTERFACE_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:zoo,INTERFACE_INCLUDE_DIRECTORIES>"
+    )
+    if(TARGET llama)
+        set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES llama)
+    else()
+        find_package(llama CONFIG QUIET)
+        if(TARGET llama)
+            set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES llama)
+        endif()
+    endif()
+
+    add_library(ZooKeeper::zoo_core INTERFACE IMPORTED)
+    set_property(TARGET ZooKeeper::zoo_core PROPERTY
+        INTERFACE_LINK_LIBRARIES ZooKeeper::zoo)
+endif()
+]]
+)
+
+# Install-tree config — uses find_dependency to locate llama and nlohmann_json.
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
     cmake/ZooKeeperConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/ZooKeeperConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )
 
@@ -137,7 +167,7 @@ write_basic_package_version_file(
 )
 
 install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/ZooKeeperConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )

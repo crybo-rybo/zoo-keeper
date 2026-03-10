@@ -357,6 +357,130 @@ TEST(AgentRuntimeTest, ToolLoopLimitExhaustionReturnsToolLoopLimitReached) {
     EXPECT_EQ(result.error().code, ErrorCode::ToolLoopLimitReached);
 }
 
+TEST(AgentRuntimeTest, SuccessfulToolCallPopulatesToolInvocations) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", 5}}));
+    });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"The result is 10", 0, false});
+    });
+
+    auto handle = runtime.chat(Message::user("double 5"));
+    auto result = handle.future.get();
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "The result is 10");
+    ASSERT_EQ(result->tool_invocations.size(), 1u);
+
+    const auto& inv = result->tool_invocations[0];
+    EXPECT_EQ(inv.id, "call-1");
+    EXPECT_EQ(inv.name, "double_value");
+    EXPECT_EQ(inv.status, zoo::ToolInvocationStatus::Succeeded);
+    ASSERT_TRUE(inv.result_json.has_value());
+    EXPECT_EQ(*inv.result_json, "{\"result\":10}");
+    EXPECT_FALSE(inv.error.has_value());
+}
+
+TEST(AgentRuntimeTest, ValidationFailureThenSuccessPopulatesToolInvocations) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    Config config = make_config();
+    config.max_tool_retries = 2;
+    AgentRuntime runtime(config, std::move(backend));
+
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
+
+    // First attempt: bad arguments (string instead of int)
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}, "call-bad"));
+    });
+    // Second attempt: valid arguments
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", nlohmann::json{{"value", 7}}, "call-good"));
+    });
+    // Final text response
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"The result is 14", 0, false});
+    });
+
+    auto handle = runtime.chat(Message::user("double 7"));
+    auto result = handle.future.get();
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "The result is 14");
+    ASSERT_EQ(result->tool_invocations.size(), 2u);
+
+    const auto& failed = result->tool_invocations[0];
+    EXPECT_EQ(failed.id, "call-bad");
+    EXPECT_EQ(failed.name, "double_value");
+    EXPECT_EQ(failed.status, zoo::ToolInvocationStatus::ValidationFailed);
+    EXPECT_FALSE(failed.result_json.has_value());
+    ASSERT_TRUE(failed.error.has_value());
+
+    const auto& succeeded = result->tool_invocations[1];
+    EXPECT_EQ(succeeded.id, "call-good");
+    EXPECT_EQ(succeeded.name, "double_value");
+    EXPECT_EQ(succeeded.status, zoo::ToolInvocationStatus::Succeeded);
+    ASSERT_TRUE(succeeded.result_json.has_value());
+    EXPECT_EQ(*succeeded.result_json, "{\"result\":14}");
+    EXPECT_FALSE(succeeded.error.has_value());
+}
+
+TEST(AgentRuntimeTest, ExecutionFailurePopulatesToolInvocations) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    // Register a tool whose handler always returns an execution error.
+    zoo::tools::ToolDefinition def;
+    def.metadata.name = "failing_tool";
+    def.metadata.description = "A tool that always fails";
+    def.metadata.parameters_schema = {{"type", "object"},
+                                      {"properties", {{"value", {{"type", "integer"}}}}},
+                                      {"required", nlohmann::json::array({"value"})}};
+    def.metadata.parameters = {
+        zoo::tools::ToolParameter{"value", zoo::tools::ToolValueType::Integer, true, "", {}}};
+    def.handler = [](const nlohmann::json&) -> Expected<nlohmann::json> {
+        return std::unexpected(Error{ErrorCode::ToolExecutionFailed, "intentional failure"});
+    };
+    ASSERT_TRUE(runtime.register_tool(std::move(def)).has_value());
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("failing_tool", nlohmann::json{{"value", 42}}));
+    });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"Sorry, the tool failed", 0, false});
+    });
+
+    auto handle = runtime.chat(Message::user("use failing tool"));
+    auto result = handle.future.get();
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "Sorry, the tool failed");
+    ASSERT_EQ(result->tool_invocations.size(), 1u);
+
+    const auto& inv = result->tool_invocations[0];
+    EXPECT_EQ(inv.id, "call-1");
+    EXPECT_EQ(inv.name, "failing_tool");
+    EXPECT_EQ(inv.status, zoo::ToolInvocationStatus::ExecutionFailed);
+    EXPECT_FALSE(inv.result_json.has_value());
+    ASSERT_TRUE(inv.error.has_value());
+    EXPECT_EQ(inv.error->code, ErrorCode::ToolExecutionFailed);
+    EXPECT_EQ(inv.error->message, "intentional failure");
+}
+
 TEST(AgentRuntimeTest, SetSystemPromptSerializesBeforeQueuedRequests) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
