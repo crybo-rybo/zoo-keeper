@@ -470,8 +470,7 @@ struct Agent::Impl {
         if (grammar.empty()) {
             model->clear_tool_grammar();
             return;
-        }
-        else if (model->set_tool_grammar(grammar)) {
+        } else if (model->set_tool_grammar(grammar)) {
             ZOO_LOG("info", "tool grammar updated (%zu tools)", tool_registry.size());
         } else {
             model->clear_tool_grammar();
