@@ -50,7 +50,8 @@ class GrammarBuilder {
     }
 
   private:
-    static void append_tool_rules(std::string& grammar, size_t tool_index, const ToolMetadata& tool) {
+    static void append_tool_rules(std::string& grammar, size_t tool_index,
+                                  const ToolMetadata& tool) {
         grammar += tool_rule_name(tool_index) + " ::= " + literal("{") + " ws " +
                    json_string_literal("name") + " ws " + literal(":") + " ws " +
                    json_string_literal(tool.name) + " ws " + literal(",") + " ws " +
@@ -90,8 +91,9 @@ class GrammarBuilder {
                                        const ToolMetadata& tool) {
         for (size_t param_index = 0; param_index < tool.parameters.size(); ++param_index) {
             const auto& parameter = tool.parameters[param_index];
-            grammar += param_rule_name(tool_index, param_index) + " ::= " +
-                       json_string_literal(parameter.name) + " ws " + literal(":") + " ws ";
+            grammar += param_rule_name(tool_index, param_index) +
+                       " ::= " + json_string_literal(parameter.name) + " ws " + literal(":") +
+                       " ws ";
 
             if (parameter.enum_values.empty()) {
                 grammar += primitive_rule_name(parameter.type) + "\n";
@@ -121,10 +123,11 @@ class GrammarBuilder {
             }
 
             grammar += start_rule_name(tool_index, index) + " ::= ws | " +
-                       param_rule_name(tool_index, index) + " " + cont_rule_name(tool_index, index + 1) +
-                       " | " + start_rule_name(tool_index, index + 1) + "\n";
-            grammar += cont_rule_name(tool_index, index) + " ::= ws | ws " + literal(",") +
-                       " ws " + param_rule_name(tool_index, index) + " " +
+                       param_rule_name(tool_index, index) + " " +
+                       cont_rule_name(tool_index, index + 1) + " | " +
+                       start_rule_name(tool_index, index + 1) + "\n";
+            grammar += cont_rule_name(tool_index, index) + " ::= ws | ws " + literal(",") + " ws " +
+                       param_rule_name(tool_index, index) + " " +
                        cont_rule_name(tool_index, index + 1) + " | " +
                        cont_rule_name(tool_index, index + 1) + "\n";
         }

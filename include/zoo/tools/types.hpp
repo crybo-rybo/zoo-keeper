@@ -62,9 +62,9 @@ enum class ToolValueType {
  * @brief Normalized schema metadata for one tool parameter.
  */
 struct ToolParameter {
-    std::string name; ///< Public parameter name.
+    std::string name;                           ///< Public parameter name.
     ToolValueType type = ToolValueType::String; ///< Supported primitive type.
-    bool required = false; ///< Whether the parameter must be present in arguments.
+    bool required = false;   ///< Whether the parameter must be present in arguments.
     std::string description; ///< Optional human-readable parameter description.
     std::vector<nlohmann::json>
         enum_values; ///< Optional enum domain, expressed as exact JSON literals.
@@ -77,10 +77,11 @@ struct ToolParameter {
  * @brief Public metadata stored for one registered tool.
  */
 struct ToolMetadata {
-    std::string name; ///< Public tool name presented to the model.
-    std::string description; ///< Human-readable tool description for prompts and schemas.
+    std::string name;                 ///< Public tool name presented to the model.
+    std::string description;          ///< Human-readable tool description for prompts and schemas.
     nlohmann::json parameters_schema; ///< Normalized JSON Schema describing accepted arguments.
-    std::vector<ToolParameter> parameters; ///< Canonical parameter order used by validation/grammar.
+    std::vector<ToolParameter>
+        parameters; ///< Canonical parameter order used by validation/grammar.
 
     /// Compares two tool metadata records field-by-field.
     bool operator==(const ToolMetadata& other) const = default;

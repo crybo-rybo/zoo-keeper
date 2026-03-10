@@ -6,8 +6,8 @@
 #pragma once
 
 #include "types.hpp"
-#include <cstddef>
 #include <concepts>
+#include <cstddef>
 #include <functional>
 #include <initializer_list>
 #include <mutex>
@@ -93,15 +93,15 @@ struct is_json_handler_like<
     Handler, std::void_t<typename function_traits<std::remove_cvref_t<Handler>>::args_tuple,
                          typename function_traits<std::remove_cvref_t<Handler>>::return_type>>
     : std::bool_constant<[] {
-          using traits = function_traits<std::remove_cvref_t<Handler>>;
-          using args_tuple = typename traits::args_tuple;
-          if constexpr (traits::arity != 1) {
-              return false;
-          } else {
-              return std::is_same_v<std::tuple_element_t<0, args_tuple>, nlohmann::json> &&
-                     std::is_same_v<typename traits::return_type, Expected<nlohmann::json>>;
-          }
-      }()> {};
+        using traits = function_traits<std::remove_cvref_t<Handler>>;
+        using args_tuple = typename traits::args_tuple;
+        if constexpr (traits::arity != 1) {
+            return false;
+        } else {
+            return std::is_same_v<std::tuple_element_t<0, args_tuple>, nlohmann::json> &&
+                   std::is_same_v<typename traits::return_type, Expected<nlohmann::json>>;
+        }
+    }()> {};
 
 template <typename Handler>
 inline constexpr bool is_json_handler_like_v = is_json_handler_like<Handler>::value;
@@ -210,8 +210,8 @@ template <typename T> nlohmann::json wrap_result(T&& value) {
     return false;
 }
 
-[[nodiscard]] inline Expected<void>
-validate_root_schema_keys(const nlohmann::json& schema, const std::string& tool_name) {
+[[nodiscard]] inline Expected<void> validate_root_schema_keys(const nlohmann::json& schema,
+                                                              const std::string& tool_name) {
     static const std::unordered_set<std::string> kAllowedKeys = {
         "type", "properties", "required", "additionalProperties", "description"};
 
@@ -236,10 +236,9 @@ validate_root_schema_keys(const nlohmann::json& schema, const std::string& tool_
         if (kAllowedKeys.contains(key)) {
             continue;
         }
-        return std::unexpected(
-            Error{ErrorCode::InvalidToolSchema,
-                  "Unsupported schema keyword '" + key + "' for parameter '" + param_name +
-                      "' on tool '" + tool_name + "'"});
+        return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                     "Unsupported schema keyword '" + key + "' for parameter '" +
+                                         param_name + "' on tool '" + tool_name + "'"});
     }
 
     return {};
@@ -251,10 +250,10 @@ validate_root_schema_keys(const nlohmann::json& schema, const std::string& tool_
                                                          const std::string& param_name) {
     for (const auto& value : values) {
         if (!json_matches_type(value, type)) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidToolSchema,
-                      "Enum value for parameter '" + param_name + "' on tool '" + tool_name +
-                          "' does not match declared type '" + tool_value_type_name(type) + "'"});
+            return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                         "Enum value for parameter '" + param_name + "' on tool '" +
+                                             tool_name + "' does not match declared type '" +
+                                             tool_value_type_name(type) + "'"});
         }
     }
 
@@ -288,10 +287,11 @@ normalize_manual_tool_metadata(const std::string& name, const std::string& descr
     }
 
     auto additional_it = schema.find("additionalProperties");
-    if (additional_it != schema.end() && (!additional_it->is_boolean() || additional_it->get<bool>())) {
-        return std::unexpected(
-            Error{ErrorCode::InvalidToolSchema,
-                  "Tool schema for '" + name + "' must omit 'additionalProperties' or set it to false"});
+    if (additional_it != schema.end() &&
+        (!additional_it->is_boolean() || additional_it->get<bool>())) {
+        return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                     "Tool schema for '" + name +
+                                         "' must omit 'additionalProperties' or set it to false"});
     }
 
     std::vector<std::string> required_names;
@@ -344,8 +344,8 @@ normalize_manual_tool_metadata(const std::string& name, const std::string& descr
         auto property_type_it = property.find("type");
         if (property_type_it == property.end() || !property_type_it->is_string()) {
             return std::unexpected(
-                Error{ErrorCode::InvalidToolSchema,
-                      "Property '" + param_name + "' on tool '" + name + "' must declare a string 'type'"});
+                Error{ErrorCode::InvalidToolSchema, "Property '" + param_name + "' on tool '" +
+                                                        name + "' must declare a string 'type'"});
         }
 
         auto type = parse_tool_value_type(property_type_it->get_ref<const std::string&>());
@@ -362,20 +362,18 @@ normalize_manual_tool_metadata(const std::string& name, const std::string& descr
 
         if (auto description_it = property.find("description"); description_it != property.end()) {
             if (!description_it->is_string()) {
-                return std::unexpected(
-                    Error{ErrorCode::InvalidToolSchema,
-                          "Property '" + param_name + "' on tool '" + name +
-                              "' must use a string 'description'"});
+                return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                             "Property '" + param_name + "' on tool '" + name +
+                                                 "' must use a string 'description'"});
             }
             parameter.description = description_it->get<std::string>();
         }
 
         if (auto enum_it = property.find("enum"); enum_it != property.end()) {
             if (!enum_it->is_array()) {
-                return std::unexpected(
-                    Error{ErrorCode::InvalidToolSchema,
-                          "Property '" + param_name + "' on tool '" + name +
-                              "' must use an array for 'enum'"});
+                return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                             "Property '" + param_name + "' on tool '" + name +
+                                                 "' must use an array for 'enum'"});
             }
             parameter.enum_values = enum_it->get<std::vector<nlohmann::json>>();
             if (auto result =
@@ -411,9 +409,8 @@ normalize_manual_tool_metadata(const std::string& name, const std::string& descr
 template <typename Tuple, size_t... Is>
 std::vector<ToolParameter> build_typed_parameters_impl(const std::vector<std::string>& param_names,
                                                        std::index_sequence<Is...>) {
-    return {ToolParameter{param_names[Is], tool_value_type<std::tuple_element_t<Is, Tuple>>::value,
-                          true, {}, {}}
-            ...};
+    return {ToolParameter{
+        param_names[Is], tool_value_type<std::tuple_element_t<Is, Tuple>>::value, true, {}, {}}...};
 }
 
 template <typename Tuple>
@@ -423,21 +420,21 @@ std::vector<ToolParameter> build_typed_parameters(const std::vector<std::string>
 }
 
 template <typename Func>
-Expected<ToolDefinition> make_tool_definition(const std::string& name,
-                                              const std::string& description,
-                                              const std::vector<std::string>& param_names,
-                                              Func func) {
+Expected<ToolDefinition>
+make_tool_definition(const std::string& name, const std::string& description,
+                     const std::vector<std::string>& param_names, Func func) {
     using traits = function_traits<Func>;
     using args_tuple = typename traits::args_tuple;
 
-    static_assert(tuple_types_supported<args_tuple>(),
-                  "register_tool only supports int, float, double, bool, and std::string parameters");
+    static_assert(
+        tuple_types_supported<args_tuple>(),
+        "register_tool only supports int, float, double, bool, and std::string parameters");
 
     if (param_names.size() != traits::arity) {
-        return std::unexpected(Error{
-            ErrorCode::InvalidToolSignature,
-            "Parameter name count (" + std::to_string(param_names.size()) +
-                ") does not match function arity (" + std::to_string(traits::arity) + ")"});
+        return std::unexpected(Error{ErrorCode::InvalidToolSignature,
+                                     "Parameter name count (" + std::to_string(param_names.size()) +
+                                         ") does not match function arity (" +
+                                         std::to_string(traits::arity) + ")"});
     }
 
     ToolMetadata metadata;
@@ -532,7 +529,8 @@ class ToolRegistry {
      */
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  nlohmann::json schema, ToolHandler handler) {
-        auto definition = detail::make_tool_definition(name, description, schema, std::move(handler));
+        auto definition =
+            detail::make_tool_definition(name, description, schema, std::move(handler));
         if (!definition) {
             return std::unexpected(definition.error());
         }

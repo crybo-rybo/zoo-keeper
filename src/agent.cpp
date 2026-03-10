@@ -372,10 +372,9 @@ struct Agent::Impl {
                     if (retry_count >= config.max_tool_retries) {
                         ZOO_LOG("error", "tool retries exhausted for '%s': %s", tc.name.c_str(),
                                 validation_error.message.c_str());
-                        return std::unexpected(
-                            Error{ErrorCode::ToolRetriesExhausted,
-                                  "Tool retries exhausted for '" + tc.name + "': " +
-                                      validation_error.message});
+                        return std::unexpected(Error{ErrorCode::ToolRetriesExhausted,
+                                                     "Tool retries exhausted for '" + tc.name +
+                                                         "': " + validation_error.message});
                     }
 
                     ++retry_count;
@@ -386,10 +385,9 @@ struct Agent::Impl {
                     std::string error_content = "Error: " + validation_error.message;
                     model->add_message(
                         Message::tool(error_content + "\nPlease correct the arguments.", tc.id));
-                    tool_invocations.push_back(
-                        ToolInvocation{tc.id, tc.name, tc.arguments.dump(),
-                                       ToolInvocationStatus::ValidationFailed, std::nullopt,
-                                       validation_error});
+                    tool_invocations.push_back(ToolInvocation{
+                        tc.id, tc.name, tc.arguments.dump(), ToolInvocationStatus::ValidationFailed,
+                        std::nullopt, validation_error});
                     continue;
                 }
 
@@ -411,8 +409,9 @@ struct Agent::Impl {
 
                 Message tool_msg = Message::tool(std::move(tool_result_str), tc.id);
                 model->add_message(tool_msg);
-                tool_invocations.push_back(ToolInvocation{
-                    tc.id, tc.name, tc.arguments.dump(), status, std::move(result_json), tool_error});
+                tool_invocations.push_back(ToolInvocation{tc.id, tc.name, tc.arguments.dump(),
+                                                          status, std::move(result_json),
+                                                          tool_error});
                 continue;
             }
 
@@ -557,8 +556,8 @@ Expected<void> Agent::register_tool(tools::ToolDefinition definition) {
 
 Expected<void> Agent::register_tool(const std::string& name, const std::string& description,
                                     nlohmann::json schema, tools::ToolHandler handler) {
-    auto definition = tools::detail::make_tool_definition(name, description, schema,
-                                                          std::move(handler));
+    auto definition =
+        tools::detail::make_tool_definition(name, description, schema, std::move(handler));
     if (!definition) {
         return std::unexpected(definition.error());
     }

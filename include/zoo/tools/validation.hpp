@@ -30,8 +30,8 @@ class ToolArgumentsValidator {
     Expected<void> validate(const ToolCall& tool_call, const ToolRegistry& registry) const {
         auto metadata = registry.get_tool_metadata(tool_call.name);
         if (!metadata) {
-            return std::unexpected(Error{ErrorCode::ToolNotFound,
-                                         "Tool not found: " + tool_call.name});
+            return std::unexpected(
+                Error{ErrorCode::ToolNotFound, "Tool not found: " + tool_call.name});
         }
 
         return validate(tool_call, *metadata);
@@ -46,8 +46,8 @@ class ToolArgumentsValidator {
      */
     Expected<void> validate(const ToolCall& tool_call, const ToolMetadata& metadata) const {
         if (!tool_call.arguments.is_object()) {
-            return std::unexpected(Error{ErrorCode::ToolValidationFailed,
-                                         "Tool arguments must be a JSON object"});
+            return std::unexpected(
+                Error{ErrorCode::ToolValidationFailed, "Tool arguments must be a JSON object"});
         }
 
         std::unordered_map<std::string_view, const ToolParameter*> parameters_by_name;
@@ -58,9 +58,8 @@ class ToolArgumentsValidator {
 
         for (const auto& parameter : metadata.parameters) {
             if (parameter.required && !tool_call.arguments.contains(parameter.name)) {
-                return std::unexpected(
-                    Error{ErrorCode::ToolValidationFailed,
-                          "Missing required argument: " + parameter.name});
+                return std::unexpected(Error{ErrorCode::ToolValidationFailed,
+                                             "Missing required argument: " + parameter.name});
             }
         }
 
@@ -68,17 +67,15 @@ class ToolArgumentsValidator {
             auto it = parameters_by_name.find(key);
             if (it == parameters_by_name.end()) {
                 return std::unexpected(
-                    Error{ErrorCode::ToolValidationFailed,
-                          "Unexpected argument: " + key});
+                    Error{ErrorCode::ToolValidationFailed, "Unexpected argument: " + key});
             }
 
             const ToolParameter& parameter = *it->second;
             if (!detail::json_matches_type(value, parameter.type)) {
-                return std::unexpected(
-                    Error{ErrorCode::ToolValidationFailed,
-                          "Argument '" + key + "' has wrong type: expected " +
-                              std::string(tool_value_type_name(parameter.type)) + ", got " +
-                              json_type_name(value)});
+                return std::unexpected(Error{ErrorCode::ToolValidationFailed,
+                                             "Argument '" + key + "' has wrong type: expected " +
+                                                 std::string(tool_value_type_name(parameter.type)) +
+                                                 ", got " + json_type_name(value)});
             }
 
             if (!parameter.enum_values.empty() && !matches_enum(value, parameter.enum_values)) {

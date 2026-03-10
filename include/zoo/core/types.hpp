@@ -369,12 +369,11 @@ enum class ToolInvocationStatus {
  * @brief Structured record of one attempted tool call during agent execution.
  */
 struct ToolInvocation {
-    std::string id; ///< Correlation identifier parsed from or derived for the tool call.
+    std::string id;   ///< Correlation identifier parsed from or derived for the tool call.
     std::string name; ///< Registered tool name the model attempted to invoke.
     std::string arguments_json; ///< Serialized arguments exactly as parsed from model output.
     ToolInvocationStatus status = ToolInvocationStatus::Succeeded; ///< Final outcome category.
-    std::optional<std::string>
-        result_json; ///< Serialized handler result when execution succeeded.
+    std::optional<std::string> result_json; ///< Serialized handler result when execution succeeded.
     std::optional<Error>
         error; ///< Validation or execution error details when the attempt did not succeed.
 
