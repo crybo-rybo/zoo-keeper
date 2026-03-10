@@ -12,6 +12,7 @@ add_executable(zoo_tests
     unit/test_tool_interceptor.cpp
     unit/test_batch.cpp
     unit/test_agent_mailbox.cpp
+    unit/test_agent_runtime.cpp
     unit/test_request_tracker.cpp
 )
 
@@ -28,6 +29,8 @@ target_include_directories(zoo_tests
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
 )
+
+target_compile_definitions(zoo_tests PRIVATE ZOO_TESTING_HOOKS)
 
 gtest_discover_tests(zoo_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

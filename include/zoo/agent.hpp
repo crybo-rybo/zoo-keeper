@@ -21,6 +21,16 @@
 
 namespace zoo {
 
+class Agent;
+
+#ifdef ZOO_TESTING_HOOKS
+namespace internal::agent {
+class AgentBackend;
+std::unique_ptr<Agent> make_test_agent(const Config& config,
+                                       std::unique_ptr<AgentBackend> backend);
+} // namespace internal::agent
+#endif
+
 /**
  * @brief Handle returned by `Agent::chat()` for request tracking and result retrieval.
  */
@@ -103,6 +113,10 @@ class Agent {
     /**
      * @brief Replaces the current system prompt on the underlying model.
      *
+     * This call blocks until the inference thread has applied the change. If a
+     * request is currently generating, the prompt update runs before the next
+     * queued request begins.
+     *
      * @param prompt New system prompt content.
      */
     void set_system_prompt(const std::string& prompt);
@@ -118,10 +132,10 @@ class Agent {
         return config_;
     }
 
-    /// Returns a snapshot of the underlying model conversation history.
+    /// Returns a history snapshot taken synchronously on the inference thread.
     std::vector<Message> get_history() const;
 
-    /// Clears the underlying model conversation history.
+    /// Clears history synchronously on the inference thread before later queued work.
     void clear_history();
 
     /**
@@ -212,6 +226,12 @@ class Agent {
 
   private:
     struct Impl;
+
+#ifdef ZOO_TESTING_HOOKS
+    friend std::unique_ptr<Agent>
+    internal::agent::make_test_agent(const Config& config,
+                                     std::unique_ptr<internal::agent::AgentBackend> backend);
+#endif
 
     Agent(Config config, std::unique_ptr<Impl> impl);
     Expected<void> register_tool(tools::ToolDefinition definition);

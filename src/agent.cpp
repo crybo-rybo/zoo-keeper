@@ -643,3 +643,14 @@ std::string Agent::build_tool_system_prompt(const std::string& base_prompt) cons
 }
 
 } // namespace zoo
+
+#ifdef ZOO_TESTING_HOOKS
+namespace zoo::internal::agent {
+
+std::unique_ptr<Agent> make_test_agent(const Config& config, std::unique_ptr<AgentBackend> backend) {
+    auto impl = std::make_unique<Agent::Impl>(config, std::move(backend));
+    return std::unique_ptr<Agent>(new Agent(config, std::move(impl)));
+}
+
+} // namespace zoo::internal::agent
+#endif
