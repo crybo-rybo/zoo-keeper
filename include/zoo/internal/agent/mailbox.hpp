@@ -78,9 +78,7 @@ class RuntimeMailbox {
      */
     std::optional<WorkItem> pop() {
         std::unique_lock<std::mutex> lock(mutex_);
-        cv_.wait(lock, [this] {
-            return !commands_.empty() || !requests_.empty() || shutdown_;
-        });
+        cv_.wait(lock, [this] { return !commands_.empty() || !requests_.empty() || shutdown_; });
 
         if (!commands_.empty()) {
             Command cmd = std::move(commands_.front());

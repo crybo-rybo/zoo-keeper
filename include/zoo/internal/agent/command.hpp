@@ -41,8 +41,8 @@ struct RefreshToolGrammarCmd {
 };
 
 /// Discriminated union of all control commands the runtime accepts.
-using Command = std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd,
-                             RefreshToolGrammarCmd>;
+using Command =
+    std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd, RefreshToolGrammarCmd>;
 
 /// Helper for exhaustive std::visit with overloaded lambdas.
 template <class... Ts> struct overloaded : Ts... {

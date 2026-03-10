@@ -23,10 +23,9 @@ namespace zoo::internal::agent {
  * so that test fakes avoid pulling in llama.cpp forward declarations.
  */
 struct GenerationResult {
-    std::string text;      ///< Raw generated text for the pass.
-    int prompt_tokens = 0; ///< Number of prompt tokens rendered for the pass.
-    bool tool_call_detected =
-        false; ///< Whether sentinel-based grammar mode emitted a tool call.
+    std::string text;                ///< Raw generated text for the pass.
+    int prompt_tokens = 0;           ///< Number of prompt tokens rendered for the pass.
+    bool tool_call_detected = false; ///< Whether sentinel-based grammar mode emitted a tool call.
 };
 
 /**
