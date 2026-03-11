@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ZOO_ENABLE_LOGGING` CMake option — enables `[zoo:level]` diagnostic output to stderr
 - `zoo/version.hpp` — compile-time version constants (`VERSION_MAJOR`, `VERSION_MINOR`, `VERSION_PATCH`, `VERSION_STRING`)
 - `CHANGELOG.md`
+- `docs/compatibility.md` — intended 1.x public API and deprecation policy
 - Inference safety cap: generation is bounded by `context_size` when `max_tokens = -1`
 - Exception safety: `inference_loop()` catches exceptions and fulfills promises with errors
 
@@ -21,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Config::request_queue_capacity` default changed from `0` (unbounded) to `64`
 - `Config::validate()` now validates sampling parameters and tool iteration limits
 - `ErrorCode::InvalidSamplingParams` (103) added for sampling validation errors
+- Build-tree CMake package config now links the full llama/ggml dependency set for actual consumers
+- CI now smoke-tests build-tree and installed-package CMake consumers
+- README/docs no longer hardcode a stale unit-test count
 
 ## [0.2.0] - 2026-03-07
 

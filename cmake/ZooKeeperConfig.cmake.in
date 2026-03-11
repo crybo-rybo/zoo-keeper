@@ -2,26 +2,35 @@
 
 include(CMakeFindDependencyMacro)
 
+# ggml-config.cmake references OpenMP::OpenMP_C even when the consumer only
+# enables CXX. Find OpenMP first and, if C language is not enabled, create a
+# stub so that ggml's set_target_properties succeeds.
+if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
+    find_dependency(OpenMP)
+    if(NOT TARGET OpenMP::OpenMP_C AND TARGET OpenMP::OpenMP_CXX)
+        add_library(OpenMP::OpenMP_C INTERFACE IMPORTED GLOBAL)
+        set_property(TARGET OpenMP::OpenMP_C PROPERTY
+            INTERFACE_LINK_LIBRARIES OpenMP::OpenMP_CXX)
+    endif()
+endif()
+
 find_dependency(llama CONFIG)
 find_dependency(nlohmann_json 3.11 CONFIG)
 
-include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperTargets.cmake")
-
-# llama is a private build dependency of zoo but consumers of the static library
-# still need it on the link line.  The export set intentionally omits it (llama
-# is not in our export set), so we append it here after find_dependency succeeds.
-if(TARGET ZooKeeper::zoo AND TARGET llama)
-    set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
+if(NOT TARGET ZooKeeper::llama AND TARGET llama)
+    add_library(ZooKeeper::llama INTERFACE IMPORTED)
+    set_property(TARGET ZooKeeper::llama PROPERTY
         INTERFACE_LINK_LIBRARIES llama
     )
 endif()
 
-# nlohmann/json headers are used in public zoo headers.  Rather than vendoring
-# the headers into the install tree we require consumers to provide the package.
-if(TARGET ZooKeeper::zoo AND TARGET nlohmann_json::nlohmann_json)
-    set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
+if(NOT TARGET ZooKeeper::nlohmann_json)
+    add_library(ZooKeeper::nlohmann_json INTERFACE IMPORTED)
+    set_property(TARGET ZooKeeper::nlohmann_json PROPERTY
         INTERFACE_LINK_LIBRARIES nlohmann_json::nlohmann_json
     )
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperTargets.cmake")
 
 check_required_components(ZooKeeper)

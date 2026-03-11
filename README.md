@@ -11,7 +11,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/C%2B%2B-23-blue" alt="C++23" />
-  <img src="https://img.shields.io/badge/tests-177%20passing-success" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-ctest%20passing-success" alt="Tests" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
 </p>
 
@@ -130,6 +130,8 @@ See [docs/architecture.md](docs/architecture.md) for the full threading model an
 | [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, and error handling |
 | [Examples](docs/examples.md) | Focused example programs for streaming, cancellation, tools, and error handling |
 | [Architecture](docs/architecture.md) | Layering, runtime ownership, threading model, and target structure |
+| [Compatibility](docs/compatibility.md) | Public API boundary, intended 1.x stability policy, and deprecation rules |
+| [Migration](MIGRATION.md) | Consumer-facing changes to move from `0.2.x` to `1.0` |
 | [API Reference](docs/building.md#api-reference) | Generate Doxygen locally or browse the published reference |
 
 Generate the API reference locally with:
@@ -141,7 +143,7 @@ cmake --build build --target zoo_docs
 
 ## Testing
 
-The default test suite currently covers `177` unit tests.
+The default build runs the full unit suite, and CI also smoke-tests build-tree and installed-package CMake consumers.
 
 ```bash
 ctest --test-dir build --output-on-failure

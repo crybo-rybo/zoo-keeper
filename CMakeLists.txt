@@ -39,6 +39,37 @@ configure_file(
     @ONLY
 )
 
+set(ZOO_BUILD_LLAMA_LINK_LIBRARIES
+    "$<TARGET_FILE:llama>"
+    "$<TARGET_FILE:ggml>"
+    "$<TARGET_FILE:ggml-base>"
+    "$<TARGET_FILE:ggml-cpu>"
+)
+if(TARGET ggml-blas)
+    list(APPEND ZOO_BUILD_LLAMA_LINK_LIBRARIES "$<TARGET_FILE:ggml-blas>")
+endif()
+if(TARGET ggml-metal)
+    list(APPEND ZOO_BUILD_LLAMA_LINK_LIBRARIES "$<TARGET_FILE:ggml-metal>")
+endif()
+if(UNIX)
+    list(APPEND ZOO_BUILD_LLAMA_LINK_LIBRARIES "m")
+endif()
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    list(APPEND ZOO_BUILD_LLAMA_LINK_LIBRARIES "${CMAKE_DL_LIBS}")
+endif()
+if(APPLE)
+    if(TARGET ggml-blas)
+        list(APPEND ZOO_BUILD_LLAMA_LINK_LIBRARIES "-framework Accelerate")
+    endif()
+    if(TARGET ggml-metal)
+        list(APPEND ZOO_BUILD_LLAMA_LINK_LIBRARIES
+            "-framework Foundation"
+            "-framework Metal"
+            "-framework MetalKit"
+        )
+    endif()
+endif()
+
 # Primary public library target
 add_library(zoo STATIC
     src/agent.cpp
@@ -58,10 +89,17 @@ target_include_directories(zoo PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(zoo PUBLIC cxx_std_23)
-# llama is only linked in the build tree — the installed config file adds llama
-# via find_dependency() + set_property() instead, sidestepping the requirement
-# that llama appear in ZooKeeper's CMake export set.
-target_link_libraries(zoo PRIVATE $<BUILD_INTERFACE:llama>)
+# nlohmann/json is part of the installed public header surface via
+# `include/zoo/core/json.hpp`. Keep the build-tree include path explicit for
+# subdirectory/FetchContent consumers, and publish the install-tree dependency
+# through the target interface so installed-package consumers inherit it.
+target_link_libraries(zoo PRIVATE
+    $<BUILD_INTERFACE:llama>
+    $<INSTALL_INTERFACE:ZooKeeper::llama>
+)
+set_property(TARGET zoo APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:ZooKeeper::nlohmann_json>"
+)
 
 if(ZOO_ENABLE_LOGGING)
     target_compile_definitions(zoo PRIVATE ZOO_LOGGING_ENABLED)
@@ -124,41 +162,24 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/version.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/zoo
 )
 
-# Build-tree config — allows find_package(ZooKeeper CONFIG) against the build
-# tree without requiring install.  We cannot use export(EXPORT) because llama
-# (a private dependency) is not in our export set, so we generate a config
-# that creates IMPORTED targets manually.
+include(CMakePackageConfigHelpers)
+set(ZOO_BUILD_ZOO_LOCATION "$<TARGET_FILE:zoo>")
+set(ZOO_BUILD_INTERFACE_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:zoo,INTERFACE_INCLUDE_DIRECTORIES>")
+set(ZOO_BUILD_GGML_OPENMP_ENABLED "${GGML_OPENMP_ENABLED}")
+set(ZOO_BUILD_GGML_BLAS_ENABLED "${GGML_BLAS}")
+set(ZOO_BUILD_BLAS_LIBRARIES "${BLAS_LIBRARIES}")
+set(ZOO_BUILD_BLAS_LINKER_FLAGS "${BLAS_LINKER_FLAGS}")
+configure_package_config_file(
+    cmake/ZooKeeperBuildTreeConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperBuildTreeConfig.cmake.in
+    INSTALL_DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+)
 file(GENERATE
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperConfig.cmake"
-    CONTENT [[# ZooKeeper build-tree package configuration.
-# Dependencies (llama, nlohmann_json) are resolved from the build tree.
-if(NOT TARGET ZooKeeper::zoo)
-    add_library(ZooKeeper::zoo STATIC IMPORTED)
-    set_target_properties(ZooKeeper::zoo PROPERTIES
-        IMPORTED_LOCATION "$<TARGET_FILE:zoo>"
-        INTERFACE_COMPILE_FEATURES "cxx_std_23"
-        INTERFACE_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:zoo,INTERFACE_INCLUDE_DIRECTORIES>"
-    )
-    if(TARGET llama)
-        set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
-            INTERFACE_LINK_LIBRARIES llama)
-    else()
-        find_package(llama CONFIG QUIET)
-        if(TARGET llama)
-            set_property(TARGET ZooKeeper::zoo APPEND PROPERTY
-                INTERFACE_LINK_LIBRARIES llama)
-        endif()
-    endif()
-
-    add_library(ZooKeeper::zoo_core INTERFACE IMPORTED)
-    set_property(TARGET ZooKeeper::zoo_core PROPERTY
-        INTERFACE_LINK_LIBRARIES ZooKeeper::zoo)
-endif()
-]]
+    INPUT "${CMAKE_CURRENT_BINARY_DIR}/ZooKeeperBuildTreeConfig.cmake.in"
 )
 
 # Install-tree config — uses find_dependency to locate llama and nlohmann_json.
-include(CMakePackageConfigHelpers)
 configure_package_config_file(
     cmake/ZooKeeperConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/cmake/ZooKeeperConfig.cmake
