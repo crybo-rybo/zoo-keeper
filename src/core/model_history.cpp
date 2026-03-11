@@ -114,8 +114,7 @@ void Model::rollback_last_message() noexcept {
         return;
     }
 
-    estimated_tokens_ -=
-        estimate_tokens(messages_.back().content) + kTemplateOverheadPerMessage;
+    estimated_tokens_ -= estimate_tokens(messages_.back().content) + kTemplateOverheadPerMessage;
     if (estimated_tokens_ < 0) {
         estimated_tokens_ = 0;
     }

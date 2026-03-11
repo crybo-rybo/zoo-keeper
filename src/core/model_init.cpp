@@ -6,8 +6,8 @@
 #include "zoo/core/model.hpp"
 
 #include <climits>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <llama.h>
 
 namespace zoo::core {
@@ -28,8 +28,8 @@ Expected<void> Model::initialize() {
     model_params.use_mmap = config_.use_mmap;
     model_params.use_mlock = config_.use_mlock;
 
-    auto llama_model = LlamaModelHandle(llama_model_load_from_file(config_.model_path.c_str(),
-                                                                   model_params));
+    auto llama_model =
+        LlamaModelHandle(llama_model_load_from_file(config_.model_path.c_str(), model_params));
     if (!llama_model) {
         return std::unexpected(Error{ErrorCode::ModelLoadFailed,
                                      "Failed to load model from path: " + config_.model_path});

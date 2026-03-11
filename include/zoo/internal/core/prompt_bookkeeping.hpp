@@ -13,8 +13,8 @@ enum class PromptHistoryMutation {
     Reset,
 };
 
-[[nodiscard]] inline bool history_mutation_requires_kv_reset(
-    PromptHistoryMutation mutation) noexcept {
+[[nodiscard]] inline bool
+history_mutation_requires_kv_reset(PromptHistoryMutation mutation) noexcept {
     return mutation != PromptHistoryMutation::Append;
 }
 

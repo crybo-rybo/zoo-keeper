@@ -6,10 +6,10 @@
 #include "zoo/internal/core/prompt_bookkeeping.hpp"
 #include <gtest/gtest.h>
 
-using zoo::core::PromptHistoryMutation;
 using zoo::core::commit_rendered_prompt;
 using zoo::core::history_mutation_requires_kv_reset;
 using zoo::core::note_history_mutation;
+using zoo::core::PromptHistoryMutation;
 using zoo::core::rendered_prompt_requires_kv_reset;
 
 TEST(PromptBookkeepingTest, AppendKeepsCommittedPromptLength) {
@@ -40,7 +40,8 @@ TEST(PromptBookkeepingTest, ResetClearsCommittedPromptLength) {
     bool cached_messages_dirty = false;
     int committed_prompt_len = 64;
 
-    note_history_mutation(PromptHistoryMutation::Reset, cached_messages_dirty, committed_prompt_len);
+    note_history_mutation(PromptHistoryMutation::Reset, cached_messages_dirty,
+                          committed_prompt_len);
 
     EXPECT_TRUE(cached_messages_dirty);
     EXPECT_EQ(committed_prompt_len, 0);

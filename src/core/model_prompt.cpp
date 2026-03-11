@@ -19,7 +19,8 @@ const std::vector<llama_chat_message>& Model::llama_messages() {
     prompt_state_.cached_llama_messages.clear();
     prompt_state_.cached_llama_messages.reserve(messages_.size());
     for (const auto& msg : messages_) {
-        prompt_state_.cached_llama_messages.push_back({role_to_string(msg.role), msg.content.c_str()});
+        prompt_state_.cached_llama_messages.push_back(
+            {role_to_string(msg.role), msg.content.c_str()});
     }
     prompt_state_.cached_messages_dirty = false;
     return prompt_state_.cached_llama_messages;
