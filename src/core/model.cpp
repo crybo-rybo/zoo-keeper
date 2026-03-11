@@ -5,6 +5,7 @@
 
 #include "zoo/core/model.hpp"
 #include "zoo/internal/core/batch.hpp"
+#include "zoo/internal/core/prompt_bookkeeping.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -163,8 +164,7 @@ Expected<void> Model::initialize() {
     }
 
     tmpl_ = llama_model_chat_template(llama_model_, nullptr);
-    formatted_.clear();
-    prev_len_ = 0;
+    prompt_state_ = {};
 
     if (!tmpl_) {
         return std::unexpected(
@@ -344,21 +344,22 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
 // Prompt Formatting
 // ============================================================================
 
-const std::vector<llama_chat_message>& Model::build_llama_messages() {
-    if (llama_msgs_cache_size_ == messages_.size()) {
-        return llama_msgs_cache_;
+const std::vector<llama_chat_message>& Model::llama_messages() {
+    if (!prompt_state_.cached_messages_dirty) {
+        return prompt_state_.cached_llama_messages;
     }
-    llama_msgs_cache_.clear();
-    llama_msgs_cache_.reserve(messages_.size());
+
+    prompt_state_.cached_llama_messages.clear();
+    prompt_state_.cached_llama_messages.reserve(messages_.size());
     for (const auto& msg : messages_) {
-        llama_msgs_cache_.push_back({role_to_string(msg.role), msg.content.c_str()});
+        prompt_state_.cached_llama_messages.push_back({role_to_string(msg.role), msg.content.c_str()});
     }
-    llama_msgs_cache_size_ = messages_.size();
-    return llama_msgs_cache_;
+    prompt_state_.cached_messages_dirty = false;
+    return prompt_state_.cached_llama_messages;
 }
 
-Expected<std::string> Model::format_prompt() {
-    const auto& llama_msgs = build_llama_messages();
+Expected<std::string> Model::render_prompt_delta() {
+    const auto& llama_msgs = llama_messages();
     int new_len =
         llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), true, nullptr, 0);
 
@@ -371,29 +372,30 @@ Expected<std::string> Model::format_prompt() {
         return std::string{};
     }
 
-    if (new_len > static_cast<int>(formatted_.size())) {
-        formatted_.resize(static_cast<size_t>(new_len));
+    if (new_len > static_cast<int>(prompt_state_.formatted_prompt.size())) {
+        prompt_state_.formatted_prompt.resize(static_cast<size_t>(new_len));
     }
 
     new_len = llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), true,
-                                        formatted_.data(), formatted_.size());
+                                        prompt_state_.formatted_prompt.data(),
+                                        prompt_state_.formatted_prompt.size());
     if (new_len < 0) {
         return std::unexpected(
             Error{ErrorCode::TemplateRenderFailed, "llama_chat_apply_template failed"});
     }
 
-    if (new_len < prev_len_)
+    if (rendered_prompt_requires_kv_reset(prompt_state_.committed_prompt_len, new_len))
         clear_kv_cache();
 
-    return std::string(formatted_.begin() + prev_len_, formatted_.begin() + new_len);
+    return std::string(prompt_state_.formatted_prompt.begin() + prompt_state_.committed_prompt_len,
+                       prompt_state_.formatted_prompt.begin() + new_len);
 }
 
 void Model::finalize_response() {
-    const auto& llama_msgs = build_llama_messages();
+    const auto& llama_msgs = llama_messages();
     int new_prev_len =
         llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), false, nullptr, 0);
-    if (new_prev_len > 0)
-        prev_len_ = new_prev_len;
+    commit_rendered_prompt(prompt_state_.committed_prompt_len, new_prev_len);
 }
 
 // ============================================================================
@@ -403,8 +405,25 @@ void Model::finalize_response() {
 void Model::clear_kv_cache() {
     if (ctx_) {
         llama_memory_clear(llama_get_memory(ctx_), false);
-        prev_len_ = 0;
     }
+    prompt_state_.committed_prompt_len = 0;
+}
+
+void Model::note_history_append() noexcept {
+    note_history_mutation(PromptHistoryMutation::Append, prompt_state_.cached_messages_dirty,
+                          prompt_state_.committed_prompt_len);
+}
+
+void Model::note_history_rewrite() noexcept {
+    note_history_mutation(PromptHistoryMutation::Rewrite, prompt_state_.cached_messages_dirty,
+                          prompt_state_.committed_prompt_len);
+    clear_kv_cache();
+}
+
+void Model::note_history_reset() noexcept {
+    note_history_mutation(PromptHistoryMutation::Reset, prompt_state_.cached_messages_dirty,
+                          prompt_state_.committed_prompt_len);
+    clear_kv_cache();
 }
 
 // ============================================================================
@@ -440,7 +459,7 @@ Expected<Response> Model::generate(const std::string& user_message,
         return TokenAction::Continue;
     };
 
-    auto prompt_result = format_prompt();
+    auto prompt_result = render_prompt_delta();
     if (!prompt_result) {
         messages_.pop_back();
         return std::unexpected(prompt_result.error());
@@ -507,7 +526,7 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
         rebuild_sampler_with_grammar();
     }
 
-    auto prompt_result = format_prompt();
+    auto prompt_result = render_prompt_delta();
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
     }
@@ -546,7 +565,7 @@ void Model::set_system_prompt(const std::string& prompt) {
     }
 
     estimated_tokens_ += estimate_tokens(prompt) + kTemplateOverheadPerMessage;
-    llama_msgs_cache_size_ = 0; // Invalidate — content changed even if size didn't
+    note_history_rewrite();
 }
 
 Expected<void> Model::add_message(const Message& message) {
@@ -557,6 +576,7 @@ Expected<void> Model::add_message(const Message& message) {
 
     messages_.push_back(message);
     estimated_tokens_ += estimate_tokens(message.content) + kTemplateOverheadPerMessage;
+    note_history_append();
     trim_history_to_fit();
     return {};
 }
@@ -568,7 +588,7 @@ std::vector<Message> Model::get_history() const {
 void Model::clear_history() {
     messages_.clear();
     estimated_tokens_ = 0;
-    clear_kv_cache();
+    note_history_reset();
 }
 
 // ============================================================================
@@ -744,7 +764,7 @@ void Model::trim_history_to_fit() {
 
     messages_.erase(messages_.begin() + static_cast<std::ptrdiff_t>(system_offset),
                     messages_.begin() + static_cast<std::ptrdiff_t>(erase_end));
-    clear_kv_cache();
+    note_history_rewrite();
 }
 
 } // namespace zoo::core

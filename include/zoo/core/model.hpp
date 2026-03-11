@@ -168,9 +168,15 @@ class Model {
                                         const std::optional<TokenCallback>& on_token = std::nullopt,
                                         const CancellationCallback& should_cancel = {});
     /// Renders the current conversation history through the active chat template.
-    Expected<std::string> format_prompt();
+    Expected<std::string> render_prompt_delta();
     /// Clears cached KV memory and resets incremental prompt bookkeeping.
     void clear_kv_cache();
+    /// Marks cached llama message views dirty after appending new history.
+    void note_history_append() noexcept;
+    /// Invalidates committed prompt state after rewriting retained history.
+    void note_history_rewrite() noexcept;
+    /// Resets all incremental prompt state after clearing retained history.
+    void note_history_reset() noexcept;
 
     /// Performs process-wide llama.cpp backend initialization exactly once.
     static void initialize_global();
@@ -186,11 +192,18 @@ class Model {
     size_t find_stop_sequence(const std::string& text,
                               const std::vector<std::string>& stop_sequences) const;
     /// Returns cached llama.cpp chat messages, rebuilding only when history has changed.
-    const std::vector<llama_chat_message>& build_llama_messages();
+    const std::vector<llama_chat_message>& llama_messages();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
     /// Trims the oldest retained conversation state to the configured history budget.
     void trim_history_to_fit();
+
+    struct PromptState {
+        int committed_prompt_len = 0;
+        std::vector<char> formatted_prompt;
+        std::vector<llama_chat_message> cached_llama_messages;
+        bool cached_messages_dirty = true;
+    };
 
     // Config
     Config config_;
@@ -209,17 +222,12 @@ class Model {
     bool grammar_active_ = false;
 
     // Incremental prompt state
-    int prev_len_ = 0;
-    std::vector<char> formatted_;
+    PromptState prompt_state_;
 
     // History state
     std::vector<Message> messages_;
     int estimated_tokens_ = 0;
     static constexpr int kTemplateOverheadPerMessage = 8;
-
-    // Cached llama_chat_message view (rebuilt when messages_ changes)
-    std::vector<llama_chat_message> llama_msgs_cache_;
-    size_t llama_msgs_cache_size_ = 0; ///< Message count when cache was last built.
 };
 
 } // namespace zoo::core
