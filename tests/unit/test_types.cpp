@@ -4,6 +4,7 @@
  */
 
 #include "zoo/core/types.hpp"
+#include "zoo/core/json.hpp"
 #include <gtest/gtest.h>
 
 TEST(RoleTest, RoleToString) {
@@ -161,6 +162,26 @@ TEST(SamplingParamsTest, ValidateNegativeRepeatLastN) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
 }
 
+TEST(SamplingParamsJsonTest, RoundTripsDefaultValues) {
+    const zoo::SamplingParams params;
+    const nlohmann::json json = params;
+
+    EXPECT_EQ(json.at("temperature"), 0.7f);
+    EXPECT_EQ(json.at("top_p"), 0.9f);
+    EXPECT_EQ(json.at("top_k"), 40);
+    EXPECT_EQ(json.at("repeat_penalty"), 1.1f);
+    EXPECT_EQ(json.at("repeat_last_n"), 64);
+    EXPECT_EQ(json.at("seed"), -1);
+
+    const auto round_trip = json.get<zoo::SamplingParams>();
+    EXPECT_EQ(round_trip, params);
+}
+
+TEST(SamplingParamsJsonTest, RejectsUnknownKeys) {
+    const nlohmann::json json = {{"temperature", 0.7f}, {"unsupported", true}};
+    EXPECT_THROW((void)json.get<zoo::SamplingParams>(), std::invalid_argument);
+}
+
 TEST(ConfigTest, ValidationSuccess) {
     zoo::Config config;
     config.model_path = "/path/to/model.gguf";
@@ -274,6 +295,79 @@ TEST(ConfigTest, EqualityHistoryBudget) {
     EXPECT_EQ(c1, c2);
     c2.max_history_messages = 32;
     EXPECT_NE(c1, c2);
+}
+
+TEST(ConfigJsonTest, RoundTripsSerializableFields) {
+    zoo::Config config;
+    config.model_path = "/tmp/model.gguf";
+    config.context_size = 4096;
+    config.n_gpu_layers = 12;
+    config.use_mmap = false;
+    config.use_mlock = true;
+    config.sampling.temperature = 0.2f;
+    config.sampling.top_p = 0.8f;
+    config.sampling.top_k = 12;
+    config.sampling.repeat_penalty = 1.3f;
+    config.sampling.repeat_last_n = 16;
+    config.sampling.seed = 7;
+    config.max_tokens = 256;
+    config.stop_sequences = {"</tool_call>", "User:"};
+    config.system_prompt = "You are concise.";
+    config.max_history_messages = 8;
+    config.request_queue_capacity = 4;
+    config.max_tool_iterations = 3;
+    config.max_tool_retries = 1;
+    config.on_token = [](std::string_view) { return zoo::TokenAction::Continue; };
+
+    const nlohmann::json json = config;
+    EXPECT_FALSE(json.contains("on_token"));
+    EXPECT_EQ(json.at("sampling").at("repeat_last_n"), 16);
+    EXPECT_EQ(json.at("request_queue_capacity"), 4u);
+    EXPECT_EQ(json.at("system_prompt"), "You are concise.");
+
+    const auto round_trip = json.get<zoo::Config>();
+    EXPECT_EQ(round_trip, config);
+    EXPECT_FALSE(round_trip.on_token.has_value());
+}
+
+TEST(ConfigJsonTest, OmitsUnsetSystemPrompt) {
+    zoo::Config config;
+    config.model_path = "/tmp/model.gguf";
+
+    const nlohmann::json json = config;
+    EXPECT_FALSE(json.contains("system_prompt"));
+}
+
+TEST(ConfigJsonTest, AppliesDefaultsToOmittedFields) {
+    const nlohmann::json json = {{"model_path", "/tmp/model.gguf"}};
+    const auto config = json.get<zoo::Config>();
+
+    EXPECT_EQ(config.model_path, "/tmp/model.gguf");
+    EXPECT_EQ(config.context_size, 8192);
+    EXPECT_EQ(config.max_tokens, -1);
+    EXPECT_EQ(config.request_queue_capacity, 64u);
+    EXPECT_FALSE(config.system_prompt.has_value());
+}
+
+TEST(ConfigJsonTest, RejectsMissingModelPath) {
+    const nlohmann::json json = {{"context_size", 4096}};
+    EXPECT_THROW((void)json.get<zoo::Config>(), std::invalid_argument);
+}
+
+TEST(ConfigJsonTest, RejectsUnknownTopLevelKeys) {
+    const nlohmann::json json = {{"model_path", "/tmp/model.gguf"}, {"tools", true}};
+    EXPECT_THROW((void)json.get<zoo::Config>(), std::invalid_argument);
+}
+
+TEST(ConfigJsonTest, RejectsUnknownSamplingKeys) {
+    const nlohmann::json json = {{"model_path", "/tmp/model.gguf"},
+                                 {"sampling", {{"temperature", 0.7f}, {"extra", 1}}}};
+    EXPECT_THROW((void)json.get<zoo::Config>(), std::invalid_argument);
+}
+
+TEST(ConfigJsonTest, RejectsTypeMismatches) {
+    const nlohmann::json json = {{"model_path", 42}};
+    EXPECT_THROW((void)json.get<zoo::Config>(), std::exception);
 }
 
 TEST(RoleValidationTest, EmptyHistoryAcceptsUser) {

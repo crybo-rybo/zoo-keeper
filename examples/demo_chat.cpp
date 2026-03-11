@@ -2,32 +2,18 @@
  * @file demo_chat.cpp
  * @brief Interactive CLI example for chatting with a locally hosted model.
  *
- * Configuration is loaded from JSON and optional example tools are registered
- * to demonstrate the agent tool loop end to end.
+ * Configuration is loaded from JSON via `zoo::Config` serialization helpers,
+ * and optional example tools are registered to demonstrate the agent tool loop
+ * end to end.
  *
  * Usage:
  *   ./demo_chat <config.json>
  *   ./demo_chat --help
  *
- * Example config.json:
- *   {
- *     "model_path": "models/llama-3-8b.gguf",
- *     "context_size": 8192,
- *     "max_tokens": -1,
- *     "n_gpu_layers": -1,
- *     "system_prompt": "You are a helpful AI assistant.",
- *     "sampling": {
- *       "temperature": 0.7,
- *       "top_p": 0.9,
- *       "top_k": 40,
- *       "repeat_penalty": 1.1,
- *       "seed": -1
- *     },
- *     "stop_sequences": [],
- *     "tools": true
- *   }
+ * See `examples/config.example.json` for a complete sample config.
  */
 
+#include <zoo/core/json.hpp>
 #include <zoo/zoo.hpp>
 
 #include <atomic>
@@ -37,6 +23,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 static std::atomic<bool> g_interrupted{false};
@@ -74,6 +61,23 @@ struct DemoConfig {
     bool tools_enabled = true;
 };
 
+/// Parses the example-only config wrapper while delegating core fields to `zoo::Config`.
+static void from_json(const nlohmann::json& j, DemoConfig& config) {
+    if (!j.is_object()) {
+        throw std::invalid_argument("Demo config must be a JSON object");
+    }
+
+    DemoConfig parsed;
+    nlohmann::json zoo_config_json = j;
+    if (auto it = j.find("tools"); it != j.end()) {
+        parsed.tools_enabled = it->get<bool>();
+        zoo_config_json.erase("tools");
+    }
+
+    parsed.zoo = zoo_config_json.get<zoo::Config>();
+    config = std::move(parsed);
+}
+
 /// Loads the demo configuration from a JSON file on disk.
 static DemoConfig load_config(const std::string& path) {
     std::ifstream file(path);
@@ -81,55 +85,11 @@ static DemoConfig load_config(const std::string& path) {
         throw std::runtime_error("Cannot open config file: " + path);
     }
 
-    auto j = nlohmann::json::parse(file);
-    DemoConfig dc;
-
-    dc.zoo.model_path = j.at("model_path").get<std::string>();
-    if (j.contains("context_size"))
-        dc.zoo.context_size = j["context_size"].get<int>();
-    if (j.contains("max_tokens"))
-        dc.zoo.max_tokens = j["max_tokens"].get<int>();
-    if (j.contains("n_gpu_layers"))
-        dc.zoo.n_gpu_layers = j["n_gpu_layers"].get<int>();
-    if (j.contains("use_mmap"))
-        dc.zoo.use_mmap = j["use_mmap"].get<bool>();
-    if (j.contains("use_mlock"))
-        dc.zoo.use_mlock = j["use_mlock"].get<bool>();
-    if (j.contains("system_prompt"))
-        dc.zoo.system_prompt = j["system_prompt"].get<std::string>();
-    if (j.contains("stop_sequences")) {
-        dc.zoo.stop_sequences = j["stop_sequences"].get<std::vector<std::string>>();
+    DemoConfig config = nlohmann::json::parse(file).get<DemoConfig>();
+    if (auto validation = config.zoo.validate(); !validation) {
+        throw std::runtime_error("Invalid Zoo config: " + validation.error().to_string());
     }
-    if (j.contains("tools")) {
-        dc.tools_enabled = j["tools"].get<bool>();
-    }
-    if (j.contains("max_tool_iterations")) {
-        dc.zoo.max_tool_iterations = j["max_tool_iterations"].get<int>();
-    }
-    if (j.contains("max_tool_retries")) {
-        dc.zoo.max_tool_retries = j["max_tool_retries"].get<int>();
-    }
-    if (j.contains("request_queue_capacity")) {
-        dc.zoo.request_queue_capacity = j["request_queue_capacity"].get<size_t>();
-    }
-
-    if (j.contains("sampling")) {
-        auto& s = j["sampling"];
-        if (s.contains("temperature"))
-            dc.zoo.sampling.temperature = s["temperature"].get<float>();
-        if (s.contains("top_p"))
-            dc.zoo.sampling.top_p = s["top_p"].get<float>();
-        if (s.contains("top_k"))
-            dc.zoo.sampling.top_k = s["top_k"].get<int>();
-        if (s.contains("repeat_penalty"))
-            dc.zoo.sampling.repeat_penalty = s["repeat_penalty"].get<float>();
-        if (s.contains("repeat_last_n"))
-            dc.zoo.sampling.repeat_last_n = s["repeat_last_n"].get<int>();
-        if (s.contains("seed"))
-            dc.zoo.sampling.seed = s["seed"].get<int>();
-    }
-
-    return dc;
+    return config;
 }
 
 // ============================================================================
@@ -179,20 +139,11 @@ static void print_usage(const char* prog) {
               << "Usage:\n"
               << "  " << prog << " <config.json>\n"
               << "  " << prog << " --help\n\n"
-              << "The config file is a JSON object with these fields:\n\n"
-              << "  model_path      (required) Path to GGUF model file\n"
-              << "  context_size    Context window size (default: 8192)\n"
-              << "  max_tokens      Max generation tokens, -1 = unlimited (default: -1)\n"
-              << "  n_gpu_layers    GPU layers to offload, -1 = all (default: -1)\n"
-              << "  use_mmap        Memory-map model file (default: true)\n"
-              << "  use_mlock       Lock model in RAM (default: false)\n"
-              << "  system_prompt   System prompt string\n"
-              << "  stop_sequences  Array of stop strings\n"
-              << "  tools           Enable example tools (default: true)\n"
-              << "  sampling        Object with: temperature, top_p, top_k,\n"
-              << "                  repeat_penalty, repeat_last_n, seed\n\n"
-              << "Example:\n"
-              << "  " << prog << " config.json\n";
+              << "Config files use the documented zoo::Config JSON shape plus one\n"
+              << "example-only boolean field:\n"
+              << "  tools           Enable the bundled example tools (default: true)\n\n"
+              << "See examples/config.example.json and docs/configuration.md for the\n"
+              << "full config contract.\n";
 }
 
 // ============================================================================

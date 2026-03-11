@@ -13,11 +13,19 @@ cmake --build build
 
 Available programs:
 
-- `demo_chat` -- interactive CLI chat loop
+- `demo_chat` -- interactive CLI chat loop driven by a JSON config file
 - `model_generate` -- synchronous `zoo::core::Model` usage
 - `error_handling` -- structured runtime error reporting
 - `stream_cancel` -- streaming output with cooperative cancellation
 - `manual_tool_schema` -- `Agent::register_tool(..., schema, handler)` with the supported schema subset
+
+## JSON Config Files
+
+The `demo_chat` executable loads `zoo::Config` from JSON through `zoo/core/json.hpp` and adds one example-only field:
+
+- `tools` -- enables or disables the bundled demo tools
+
+Use [`examples/config.example.json`](../examples/config.example.json) as the starting point. The library itself does not expand `~` or perform file-path normalization; `model_path` is read literally.
 
 ## Streaming Output
 
