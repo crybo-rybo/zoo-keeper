@@ -451,10 +451,7 @@ TEST(ToolCallInterceptorTest, SentinelPrefixSuppressedFromVisibleText) {
     // Grammar-constrained models emit <tool_call>{...}</tool_call>.
     // The <tool_call> prefix must not appear in visible text or the stream.
     std::vector<std::string> tokens = {
-        "<tool_call>",
-        "{\"name\": \"add\", \"arguments\": {\"a\": 3, \"b\": 4}}",
-        "</tool_call>"
-    };
+        "<tool_call>", "{\"name\": \"add\", \"arguments\": {\"a\": 3, \"b\": 4}}", "</tool_call>"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -470,11 +467,8 @@ TEST(ToolCallInterceptorTest, SentinelPrefixSuppressedFromVisibleText) {
 TEST(ToolCallInterceptorTest, TextBeforeSentinelRemainsVisible) {
     // Text before <tool_call> should be streamed; the tag and JSON should not.
     std::vector<std::string> tokens = {
-        "I'll use a tool: ",
-        "<tool_call>",
-        "{\"name\": \"multiply\", \"arguments\": {\"a\": 6.0, \"b\": 7.0}}",
-        "</tool_call>"
-    };
+        "I'll use a tool: ", "<tool_call>",
+        "{\"name\": \"multiply\", \"arguments\": {\"a\": 6.0, \"b\": 7.0}}", "</tool_call>"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
@@ -529,11 +523,7 @@ TEST(ToolCallInterceptorTest, PartialSentinelAtEOSFlushedAsVisible) {
 TEST(ToolCallInterceptorTest, SentinelWithWhitespaceBetweenTagAndJson) {
     // Grammar allows ws between <tool_call> and {; whitespace must be suppressed.
     std::vector<std::string> tokens = {
-        "<tool_call>",
-        " \n",
-        "{\"name\": \"get_time\", \"arguments\": {}}",
-        "\n</tool_call>"
-    };
+        "<tool_call>", " \n", "{\"name\": \"get_time\", \"arguments\": {}}", "\n</tool_call>"};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);

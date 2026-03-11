@@ -110,10 +110,14 @@ class ToolCallInterceptor {
     /// Dispatches token handling based on current state.
     TokenAction process_token(std::string_view token) {
         switch (state_) {
-        case State::Normal:         return process_normal(token);
-        case State::SentinelPrefix: return process_sentinel_prefix(token);
-        case State::TagMatched:     return process_tag_matched(token);
-        case State::Buffering:      return process_buffering(token);
+        case State::Normal:
+            return process_normal(token);
+        case State::SentinelPrefix:
+            return process_sentinel_prefix(token);
+        case State::TagMatched:
+            return process_tag_matched(token);
+        case State::Buffering:
+            return process_buffering(token);
         }
         return TokenAction::Continue;
     }
