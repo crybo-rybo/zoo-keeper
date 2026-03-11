@@ -1,5 +1,7 @@
 # Cleanup Roadmap
 
+> Status: Completed for 1.0. This is historical planning context, not current user-facing guidance.
+
 ## Purpose
 
 This roadmap turns the current repository audit into a concrete implementation plan focused on:

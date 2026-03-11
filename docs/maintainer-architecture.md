@@ -83,5 +83,6 @@ Maintain these invariants:
 
 - `architecture.md` explains the public layers, targets, and user-visible threading guarantees
 - `maintainer-architecture.md` explains private ownership and implementation seams
+- `maintainer-cmake-packaging.md` explains build-tree vs install-tree package config generation and usage
 
 If a document starts teaching private command types, mailbox structure, or backend adapter details to normal consumers, that content belongs here instead.

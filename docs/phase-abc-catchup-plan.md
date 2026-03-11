@@ -1,5 +1,7 @@
 # Phase A-C Catch-Up Plan
 
+> Status: Completed for 1.0. This document is retained as historical implementation context.
+
 ## Purpose
 
 This document captures the current state of roadmap compliance for the completed cleanup phases:

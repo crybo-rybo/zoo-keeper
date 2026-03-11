@@ -131,6 +131,7 @@ See [docs/architecture.md](docs/architecture.md) for the full threading model an
 | [Examples](docs/examples.md) | Focused example programs for streaming, cancellation, tools, and error handling |
 | [Architecture](docs/architecture.md) | Layering, runtime ownership, threading model, and target structure |
 | [Compatibility](docs/compatibility.md) | Public API boundary, intended 1.x stability policy, and deprecation rules |
+| [Migration](MIGRATION.md) | Consumer-facing changes to move from `0.2.x` to `1.0` |
 | [API Reference](docs/building.md#api-reference) | Generate Doxygen locally or browse the published reference |
 
 Generate the API reference locally with:

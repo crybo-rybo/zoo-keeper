@@ -1,5 +1,7 @@
 # Phase D: Model Decomposition and Prompt-State Cleanup
 
+> Status: Completed for 1.0. This document is retained as historical implementation context.
+
 ## Summary
 
 Phase D completes Epic 4 from the cleanup roadmap by restructuring `zoo::core::Model` around three goals:

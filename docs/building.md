@@ -208,3 +208,4 @@ Additional example executables are built alongside `demo_chat`:
 
 - [Getting Started](getting-started.md) -- first agent walkthrough
 - [Configuration](configuration.md) -- all Config struct fields
+- [Maintainer CMake Packaging Notes](maintainer-cmake-packaging.md) -- build-tree vs install-tree package config internals

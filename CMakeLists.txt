@@ -89,12 +89,16 @@ target_include_directories(zoo PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_features(zoo PUBLIC cxx_std_23)
-# nlohmann/json is header-only but part of the public build-tree include path;
-# llama remains a private link dependency that consumers inherit transitively
-# from the static library.
+# nlohmann/json is part of the installed public header surface via
+# `include/zoo/core/json.hpp`. Keep the build-tree include path explicit for
+# subdirectory/FetchContent consumers, and publish the install-tree dependency
+# through the target interface so installed-package consumers inherit it.
 target_link_libraries(zoo PRIVATE
     $<BUILD_INTERFACE:llama>
     $<INSTALL_INTERFACE:ZooKeeper::llama>
+)
+set_property(TARGET zoo APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:ZooKeeper::nlohmann_json>"
 )
 
 if(ZOO_ENABLE_LOGGING)
