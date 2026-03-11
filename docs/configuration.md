@@ -1,6 +1,37 @@
 # Configuration Reference
 
-All configuration is provided through the `zoo::Config` struct at Agent creation time. Configuration is immutable after the Agent is constructed.
+All runtime configuration is provided through `zoo::Config` at Agent or Model creation time. Configuration is immutable after the runtime object is constructed.
+
+## JSON Mapping
+
+Zoo-Keeper provides opt-in JSON serialization helpers for `zoo::Config` and `zoo::SamplingParams` in `zoo/core/json.hpp`.
+
+```cpp
+#include <zoo/core/json.hpp>
+
+#include <fstream>
+
+std::ifstream file("config.json");
+auto json = nlohmann::json::parse(file);
+zoo::Config config = json.get<zoo::Config>();
+
+if (auto validation = config.validate(); !validation) {
+    throw std::runtime_error(validation.error().to_string());
+}
+```
+
+The JSON mapping uses the same field names as the public structs and keeps `sampling` nested under the `sampling` key.
+
+Deserialization is intentionally strict:
+
+- `model_path` is required
+- unknown top-level config keys are rejected
+- unknown `sampling` keys are rejected
+- JSON type mismatches fail during parse
+
+Semantic validation remains separate. `from_json` handles known keys, defaults, and types; `Config::validate()` still checks runtime-valid values such as bounds and numeric ranges.
+
+`Config::to_json` omits `system_prompt` when unset and always omits `on_token`, because callbacks are transient and not serializable.
 
 ## Config Fields
 
@@ -68,7 +99,7 @@ Zoo-Keeper uses `llama_chat_apply_template()` to auto-detect the chat template f
 
 If the selected GGUF does not expose a chat template, model creation now fails fast with `TemplateRenderFailed` instead of deferring the failure to first inference.
 
-## Example: Custom Configuration
+## Example: In-Code Configuration
 
 ```cpp
 zoo::Config config;
@@ -92,6 +123,33 @@ config.stop_sequences = {"\n\n", "User:"};
 config.system_prompt = "You are a helpful AI assistant.";
 
 auto agent = std::move(*zoo::Agent::create(config));
+```
+
+## Example: JSON Configuration File
+
+```json
+{
+  "model_path": "path/to/model.gguf",
+  "context_size": 4096,
+  "max_tokens": 256,
+  "n_gpu_layers": 0,
+  "use_mmap": true,
+  "use_mlock": false,
+  "system_prompt": "You are a helpful AI assistant.",
+  "stop_sequences": [],
+  "max_history_messages": 64,
+  "request_queue_capacity": 64,
+  "max_tool_iterations": 5,
+  "max_tool_retries": 2,
+  "sampling": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "top_k": 40,
+    "repeat_penalty": 1.1,
+    "repeat_last_n": 64,
+    "seed": -1
+  }
+}
 ```
 
 ## Validation
