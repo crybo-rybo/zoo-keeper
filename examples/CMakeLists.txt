@@ -7,6 +7,7 @@ function(zoo_add_example target source)
             zoo
     )
     zoo_set_warnings(${target} PRIVATE)
+    zoo_enable_sanitizers(${target})
     install(TARGETS ${target}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
