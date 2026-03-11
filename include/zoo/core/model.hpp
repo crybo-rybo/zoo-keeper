@@ -142,6 +142,20 @@ class Model {
     }
 
   private:
+    struct LlamaModelDeleter {
+        void operator()(llama_model* model) const noexcept;
+    };
+    struct LlamaContextDeleter {
+        void operator()(llama_context* context) const noexcept;
+    };
+    struct LlamaSamplerDeleter {
+        void operator()(llama_sampler* sampler) const noexcept;
+    };
+
+    using LlamaModelHandle = std::unique_ptr<llama_model, LlamaModelDeleter>;
+    using LlamaContextHandle = std::unique_ptr<llama_context, LlamaContextDeleter>;
+    using LlamaSamplerHandle = std::unique_ptr<llama_sampler, LlamaSamplerDeleter>;
+
     /// Constructs an uninitialized model wrapper. Call `initialize()` before use.
     explicit Model(const Config& config);
 
@@ -181,7 +195,7 @@ class Model {
     /// Performs process-wide llama.cpp backend initialization exactly once.
     static void initialize_global();
     /// Builds the default sampler chain from the configured sampling parameters.
-    llama_sampler* create_sampler_chain();
+    LlamaSamplerHandle create_sampler_chain();
     /// Adds penalty, top-k, top-p, and temperature samplers to an existing chain.
     void add_sampling_stages(llama_sampler* chain) const;
     /// Adds a distribution or greedy sampler as the final selection stage.
@@ -209,9 +223,9 @@ class Model {
     Config config_;
 
     // llama.cpp state
-    llama_model* llama_model_ = nullptr;
-    llama_context* ctx_ = nullptr;
-    llama_sampler* sampler_ = nullptr;
+    LlamaModelHandle llama_model_;
+    LlamaContextHandle ctx_;
+    LlamaSamplerHandle sampler_;
     const llama_vocab* vocab_ = nullptr;
 
     int context_size_ = 0;

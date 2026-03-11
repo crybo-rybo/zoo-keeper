@@ -70,20 +70,25 @@ void Model::initialize_global() {
 
 Model::Model(const Config& config) : config_(config) {}
 
-Model::~Model() {
-    if (sampler_) {
-        llama_sampler_free(sampler_);
-        sampler_ = nullptr;
-    }
-    if (ctx_) {
-        llama_free(ctx_);
-        ctx_ = nullptr;
-    }
-    if (llama_model_) {
-        llama_model_free(llama_model_);
-        llama_model_ = nullptr;
+void Model::LlamaModelDeleter::operator()(llama_model* model) const noexcept {
+    if (model) {
+        llama_model_free(model);
     }
 }
+
+void Model::LlamaContextDeleter::operator()(llama_context* context) const noexcept {
+    if (context) {
+        llama_free(context);
+    }
+}
+
+void Model::LlamaSamplerDeleter::operator()(llama_sampler* sampler) const noexcept {
+    if (sampler) {
+        llama_sampler_free(sampler);
+    }
+}
+
+Model::~Model() = default;
 
 // ============================================================================
 // Factory
@@ -126,8 +131,9 @@ Expected<void> Model::initialize() {
     model_params.use_mmap = config_.use_mmap;
     model_params.use_mlock = config_.use_mlock;
 
-    llama_model_ = llama_model_load_from_file(config_.model_path.c_str(), model_params);
-    if (!llama_model_) {
+    auto llama_model = LlamaModelHandle(llama_model_load_from_file(config_.model_path.c_str(),
+                                                                   model_params));
+    if (!llama_model) {
         return std::unexpected(Error{ErrorCode::ModelLoadFailed,
                                      "Failed to load model from path: " + config_.model_path});
     }
@@ -143,33 +149,40 @@ Expected<void> Model::initialize() {
     ctx_params.type_k = GGML_TYPE_Q8_0;
     ctx_params.type_v = GGML_TYPE_Q8_0;
 
-    ctx_ = llama_init_from_model(llama_model_, ctx_params);
-    if (!ctx_) {
+    auto ctx = LlamaContextHandle(llama_init_from_model(llama_model.get(), ctx_params));
+    if (!ctx) {
         return std::unexpected(
             Error{ErrorCode::ContextCreationFailed, "Failed to create llama context"});
     }
 
-    context_size_ = static_cast<int>(llama_n_ctx(ctx_));
+    const int context_size = static_cast<int>(llama_n_ctx(ctx.get()));
 
-    vocab_ = llama_model_get_vocab(llama_model_);
-    if (!vocab_) {
+    const llama_vocab* vocab = llama_model_get_vocab(llama_model.get());
+    if (!vocab) {
         return std::unexpected(
             Error{ErrorCode::BackendInitFailed, "Failed to get model vocabulary"});
     }
 
-    sampler_ = create_sampler_chain();
-    if (!sampler_) {
+    auto sampler = create_sampler_chain();
+    if (!sampler) {
         return std::unexpected(
             Error{ErrorCode::BackendInitFailed, "Failed to create sampler chain"});
     }
 
-    tmpl_ = llama_model_chat_template(llama_model_, nullptr);
+    const char* tmpl = llama_model_chat_template(llama_model.get(), nullptr);
     prompt_state_ = {};
 
-    if (!tmpl_) {
+    if (!tmpl) {
         return std::unexpected(
             Error{ErrorCode::TemplateRenderFailed, "Model has no chat template"});
     }
+
+    llama_model_ = std::move(llama_model);
+    ctx_ = std::move(ctx);
+    sampler_ = std::move(sampler);
+    context_size_ = context_size;
+    vocab_ = vocab;
+    tmpl_ = tmpl;
 
     return {};
 }
@@ -182,7 +195,7 @@ Expected<std::vector<int>> Model::tokenize(const std::string& text) {
     static_assert(sizeof(int) == sizeof(llama_token));
     static_assert(alignof(int) == alignof(llama_token));
 
-    const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) == -1;
+    const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) == -1;
     const int32_t raw =
         llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, is_first, true);
     if (raw == INT32_MIN) {
@@ -215,8 +228,8 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     int token_count = 0;
     bool in_tool_call = false;
 
-    const int n_batch = static_cast<int>(llama_n_batch(ctx_));
-    const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) + 1;
+    const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
+    const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) + 1;
 
     // --- Chunked prefill ---
     auto chunks = compute_prefill_chunks(static_cast<int>(prompt_tokens.size()), n_batch);
@@ -243,7 +256,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         }
         batch.n_tokens = chunk.count;
 
-        int rc = llama_decode(ctx_, batch);
+        int rc = llama_decode(ctx_.get(), batch);
         llama_batch_free(batch);
         if (rc != 0) {
             return std::unexpected(
@@ -264,7 +277,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
                 Error{ErrorCode::RequestCancelled, "Request cancelled during generation"});
         }
 
-        new_token = llama_sampler_sample(sampler_, ctx_, -1);
+        new_token = llama_sampler_sample(sampler_.get(), ctx_.get(), -1);
         if (llama_vocab_is_eog(vocab_, new_token))
             break;
 
@@ -328,7 +341,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         ar_batch.logits[0] = true;
         ar_batch.n_tokens = 1;
 
-        int rc = llama_decode(ctx_, ar_batch);
+        int rc = llama_decode(ctx_.get(), ar_batch);
         if (rc != 0) {
             llama_batch_free(ar_batch);
             return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
@@ -404,7 +417,7 @@ void Model::finalize_response() {
 
 void Model::clear_kv_cache() {
     if (ctx_) {
-        llama_memory_clear(llama_get_memory(ctx_), false);
+        llama_memory_clear(llama_get_memory(ctx_.get()), false);
     }
     prompt_state_.committed_prompt_len = 0;
 }
@@ -632,21 +645,17 @@ void Model::clear_tool_grammar() noexcept {
         return;
     tool_grammar_str_.clear();
     grammar_active_ = false;
-
-    if (sampler_) {
-        llama_sampler_free(sampler_);
-    }
     sampler_ = create_sampler_chain();
 }
 
 bool Model::rebuild_sampler_with_grammar() {
     auto chain_params = llama_sampler_chain_default_params();
     chain_params.no_perf = false;
-    llama_sampler* chain = llama_sampler_chain_init(chain_params);
+    auto chain = LlamaSamplerHandle(llama_sampler_chain_init(chain_params));
     if (!chain)
         return false;
 
-    add_sampling_stages(chain);
+    add_sampling_stages(chain.get());
 
     // Lazy grammar sampler — activates when "<tool_call>" appears in output
     const char* trigger = "<tool_call>";
@@ -654,18 +663,14 @@ bool Model::rebuild_sampler_with_grammar() {
     auto* grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
         vocab_, tool_grammar_str_.c_str(), "root", trigger_patterns, 1, nullptr, 0);
     if (!grammar_sampler) {
-        llama_sampler_free(chain);
         return false;
     }
-    llama_sampler_chain_add(chain, grammar_sampler);
+    llama_sampler_chain_add(chain.get(), grammar_sampler);
 
-    add_dist_sampler(chain);
+    add_dist_sampler(chain.get());
 
     // Only replace the old sampler after the new one is fully built
-    if (sampler_) {
-        llama_sampler_free(sampler_);
-    }
-    sampler_ = chain;
+    sampler_ = std::move(chain);
     grammar_active_ = true;
     return true;
 }
@@ -703,15 +708,15 @@ void Model::add_dist_sampler(llama_sampler* chain) const {
     }
 }
 
-llama_sampler* Model::create_sampler_chain() {
+Model::LlamaSamplerHandle Model::create_sampler_chain() {
     auto chain_params = llama_sampler_chain_default_params();
     chain_params.no_perf = false;
-    llama_sampler* chain = llama_sampler_chain_init(chain_params);
+    auto chain = LlamaSamplerHandle(llama_sampler_chain_init(chain_params));
     if (!chain)
         return nullptr;
 
-    add_sampling_stages(chain);
-    add_dist_sampler(chain);
+    add_sampling_stages(chain.get());
+    add_dist_sampler(chain.get());
 
     return chain;
 }
