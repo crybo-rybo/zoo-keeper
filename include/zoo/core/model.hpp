@@ -142,6 +142,20 @@ class Model {
     }
 
   private:
+    struct LlamaModelDeleter {
+        void operator()(llama_model* model) const noexcept;
+    };
+    struct LlamaContextDeleter {
+        void operator()(llama_context* context) const noexcept;
+    };
+    struct LlamaSamplerDeleter {
+        void operator()(llama_sampler* sampler) const noexcept;
+    };
+
+    using LlamaModelHandle = std::unique_ptr<llama_model, LlamaModelDeleter>;
+    using LlamaContextHandle = std::unique_ptr<llama_context, LlamaContextDeleter>;
+    using LlamaSamplerHandle = std::unique_ptr<llama_sampler, LlamaSamplerDeleter>;
+
     /// Constructs an uninitialized model wrapper. Call `initialize()` before use.
     explicit Model(const Config& config);
 
@@ -168,37 +182,49 @@ class Model {
                                         const std::optional<TokenCallback>& on_token = std::nullopt,
                                         const CancellationCallback& should_cancel = {});
     /// Renders the current conversation history through the active chat template.
-    Expected<std::string> format_prompt();
+    Expected<std::string> render_prompt_delta();
     /// Clears cached KV memory and resets incremental prompt bookkeeping.
     void clear_kv_cache();
+    /// Marks cached llama message views dirty after appending new history.
+    void note_history_append() noexcept;
+    /// Invalidates committed prompt state after rewriting retained history.
+    void note_history_rewrite() noexcept;
+    /// Resets all incremental prompt state after clearing retained history.
+    void note_history_reset() noexcept;
 
     /// Performs process-wide llama.cpp backend initialization exactly once.
     static void initialize_global();
     /// Builds the default sampler chain from the configured sampling parameters.
-    llama_sampler* create_sampler_chain();
+    LlamaSamplerHandle create_sampler_chain();
     /// Adds penalty, top-k, top-p, and temperature samplers to an existing chain.
     void add_sampling_stages(llama_sampler* chain) const;
     /// Adds a distribution or greedy sampler as the final selection stage.
     void add_dist_sampler(llama_sampler* chain) const;
     /// Rebuilds the sampler chain so a lazy grammar activates on `<tool_call>`.
     bool rebuild_sampler_with_grammar();
-    /// Returns the length of a matching stop sequence suffix, or zero if none match.
-    size_t find_stop_sequence(const std::string& text,
-                              const std::vector<std::string>& stop_sequences) const;
     /// Returns cached llama.cpp chat messages, rebuilding only when history has changed.
-    const std::vector<llama_chat_message>& build_llama_messages();
+    const std::vector<llama_chat_message>& llama_messages();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
     /// Trims the oldest retained conversation state to the configured history budget.
     void trim_history_to_fit();
+    /// Removes the most recent message and invalidates incremental prompt state.
+    void rollback_last_message() noexcept;
+
+    struct PromptState {
+        int committed_prompt_len = 0;
+        std::vector<char> formatted_prompt;
+        std::vector<llama_chat_message> cached_llama_messages;
+        bool cached_messages_dirty = true;
+    };
 
     // Config
     Config config_;
 
     // llama.cpp state
-    llama_model* llama_model_ = nullptr;
-    llama_context* ctx_ = nullptr;
-    llama_sampler* sampler_ = nullptr;
+    LlamaModelHandle llama_model_;
+    LlamaContextHandle ctx_;
+    LlamaSamplerHandle sampler_;
     const llama_vocab* vocab_ = nullptr;
 
     int context_size_ = 0;
@@ -209,17 +235,12 @@ class Model {
     bool grammar_active_ = false;
 
     // Incremental prompt state
-    int prev_len_ = 0;
-    std::vector<char> formatted_;
+    PromptState prompt_state_;
 
     // History state
     std::vector<Message> messages_;
     int estimated_tokens_ = 0;
     static constexpr int kTemplateOverheadPerMessage = 8;
-
-    // Cached llama_chat_message view (rebuilt when messages_ changes)
-    std::vector<llama_chat_message> llama_msgs_cache_;
-    size_t llama_msgs_cache_size_ = 0; ///< Message count when cache was last built.
 };
 
 } // namespace zoo::core
