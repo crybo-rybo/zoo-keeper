@@ -19,7 +19,7 @@ endif()
 
 set(_zoo_build_llama_link_libraries "@ZOO_BUILD_LLAMA_LINK_LIBRARIES@")
 if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
-    list(APPEND _zoo_build_llama_link_libraries OpenMP::OpenMP_C OpenMP::OpenMP_CXX)
+    list(APPEND _zoo_build_llama_link_libraries OpenMP::OpenMP_CXX)
 endif()
 set(_zoo_build_blas_libraries "@ZOO_BUILD_BLAS_LIBRARIES@")
 if(_zoo_build_blas_libraries)
