@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(zoo-keeper VERSION 0.2.0 LANGUAGES CXX)
+project(zoo-keeper VERSION 1.0.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
