@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/zoo_keeper_logo.png" alt="Zoo-Keeper logo" width="220">
+</p>
+
 # Zoo-Keeper
 
 [![Tests](https://img.shields.io/badge/tests-139%20passing-success)]() [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue)]() [![License](https://img.shields.io/badge/license-MIT-green)]()
