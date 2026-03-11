@@ -3,8 +3,8 @@
  * @brief Unit tests for shared core value types and validation helpers.
  */
 
-#include "zoo/core/types.hpp"
 #include "zoo/core/json.hpp"
+#include "zoo/core/types.hpp"
 #include <gtest/gtest.h>
 
 TEST(RoleTest, RoleToString) {

@@ -55,9 +55,8 @@ inline void to_json(nlohmann::json& j, const SamplingParams& params) {
 }
 
 inline void from_json(const nlohmann::json& j, SamplingParams& params) {
-    static constexpr std::array<const char*, 6> kAllowedKeys = {"temperature", "top_p", "top_k",
-                                                                "repeat_penalty",
-                                                                "repeat_last_n", "seed"};
+    static constexpr std::array<const char*, 6> kAllowedKeys = {
+        "temperature", "top_p", "top_k", "repeat_penalty", "repeat_last_n", "seed"};
 
     detail::reject_unknown_keys(j, "sampling config", kAllowedKeys);
 
@@ -104,11 +103,19 @@ inline void to_json(nlohmann::json& j, const Config& config) {
 }
 
 inline void from_json(const nlohmann::json& j, Config& config) {
-    static constexpr std::array<const char*, 13> kAllowedKeys = {
-        "model_path",           "context_size",      "n_gpu_layers",         "use_mmap",
-        "use_mlock",            "sampling",          "max_tokens",           "stop_sequences",
-        "system_prompt",        "max_history_messages", "request_queue_capacity",
-        "max_tool_iterations",  "max_tool_retries"};
+    static constexpr std::array<const char*, 13> kAllowedKeys = {"model_path",
+                                                                 "context_size",
+                                                                 "n_gpu_layers",
+                                                                 "use_mmap",
+                                                                 "use_mlock",
+                                                                 "sampling",
+                                                                 "max_tokens",
+                                                                 "stop_sequences",
+                                                                 "system_prompt",
+                                                                 "max_history_messages",
+                                                                 "request_queue_capacity",
+                                                                 "max_tool_iterations",
+                                                                 "max_tool_retries"};
 
     detail::reject_unknown_keys(j, "config", kAllowedKeys);
 
