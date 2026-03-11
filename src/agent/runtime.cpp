@@ -289,15 +289,17 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::optional<tools::ToolCallInterceptor> interceptor;
 
         if (use_grammar_path) {
-            if (request.streaming_callback) {
-                callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
-                    (*request.streaming_callback)(token);
+            // Use the interceptor for sentinel suppression (<tool_call> prefix must not reach the
+            // user stream), but ignore its Stop signal — the grammar guarantees </tool_call> as
+            // the terminal token and parse_sentinel needs the complete text after generation.
+            interceptor.emplace(request.streaming_callback);
+            auto raw_cb = interceptor->make_callback();
+            TokenCallback suppress_cb =
+                [cb = std::move(raw_cb)](std::string_view token) mutable -> TokenAction {
+                    cb(token);
                     return TokenAction::Continue;
-                });
-            } else {
-                callback = make_metrics_callback(
-                    [](std::string_view) -> TokenAction { return TokenAction::Continue; });
-            }
+                };
+            callback = make_metrics_callback(std::move(suppress_cb));
         } else if (has_tools) {
             interceptor.emplace(request.streaming_callback);
             callback = make_metrics_callback(interceptor->make_callback());
@@ -328,6 +330,10 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
             auto sentinel_result = tools::ToolCallParser::parse_sentinel(generated->text);
             detected_tool_call = std::move(sentinel_result.tool_call);
             response_text = std::move(sentinel_result.text_before);
+        } else if (use_grammar_path) {
+            // No tool call — use the raw generated text (interceptor was used only for
+            // streaming suppression, not as the authoritative source of response text)
+            response_text = std::move(generated->text);
         } else if (interceptor) {
             auto intercept_result = interceptor->finalize();
             detected_tool_call = std::move(intercept_result.tool_call);
