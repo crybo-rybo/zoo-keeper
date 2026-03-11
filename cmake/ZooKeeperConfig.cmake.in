@@ -2,6 +2,18 @@
 
 include(CMakeFindDependencyMacro)
 
+# ggml-config.cmake references OpenMP::OpenMP_C even when the consumer only
+# enables CXX. Find OpenMP first and, if C language is not enabled, create a
+# stub so that ggml's set_target_properties succeeds.
+if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
+    find_dependency(OpenMP)
+    if(NOT TARGET OpenMP::OpenMP_C AND TARGET OpenMP::OpenMP_CXX)
+        add_library(OpenMP::OpenMP_C INTERFACE IMPORTED GLOBAL)
+        set_property(TARGET OpenMP::OpenMP_C PROPERTY
+            INTERFACE_LINK_LIBRARIES OpenMP::OpenMP_CXX)
+    endif()
+endif()
+
 find_dependency(llama CONFIG)
 find_dependency(nlohmann_json 3.11 CONFIG)
 
