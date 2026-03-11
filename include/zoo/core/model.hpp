@@ -202,15 +202,14 @@ class Model {
     void add_dist_sampler(llama_sampler* chain) const;
     /// Rebuilds the sampler chain so a lazy grammar activates on `<tool_call>`.
     bool rebuild_sampler_with_grammar();
-    /// Returns the length of a matching stop sequence suffix, or zero if none match.
-    size_t find_stop_sequence(const std::string& text,
-                              const std::vector<std::string>& stop_sequences) const;
     /// Returns cached llama.cpp chat messages, rebuilding only when history has changed.
     const std::vector<llama_chat_message>& llama_messages();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
     /// Trims the oldest retained conversation state to the configured history budget.
     void trim_history_to_fit();
+    /// Removes the most recent message and invalidates incremental prompt state.
+    void rollback_last_message() noexcept;
 
     struct PromptState {
         int committed_prompt_len = 0;

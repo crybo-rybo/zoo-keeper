@@ -1,0 +1,290 @@
+/**
+ * @file model_inference.cpp
+ * @brief Inference and response assembly for `zoo::core::Model`.
+ */
+
+#include "zoo/core/model.hpp"
+
+#include "zoo/internal/core/batch.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <exception>
+#include <llama.h>
+#include <string_view>
+
+namespace zoo::core {
+
+namespace {
+
+Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::string_view token) {
+    try {
+        return callback(token);
+    } catch (const std::exception& e) {
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Token callback threw an exception", e.what()});
+    } catch (...) {
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Token callback threw an unknown exception"});
+    }
+}
+
+size_t find_stop_sequence(const std::string& generated_text,
+                          const std::vector<std::string>& stop_sequences) {
+    for (const auto& stop_sequence : stop_sequences) {
+        if (stop_sequence.empty()) {
+            continue;
+        }
+        if (generated_text.size() >= stop_sequence.size() &&
+            generated_text.compare(generated_text.size() - stop_sequence.size(),
+                                   stop_sequence.size(), stop_sequence) == 0) {
+            return stop_sequence.size();
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens, int max_tokens,
+                                           const std::vector<std::string>& stop_sequences,
+                                           const std::optional<TokenCallback>& on_token,
+                                           const CancellationCallback& should_cancel) {
+    std::string generated_text;
+    const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
+    generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
+    int token_count = 0;
+    bool in_tool_call = false;
+
+    const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
+    const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) + 1;
+
+    auto chunks = compute_prefill_chunks(static_cast<int>(prompt_tokens.size()), n_batch);
+
+    for (const auto& chunk : chunks) {
+        if (should_cancel && should_cancel()) {
+            return std::unexpected(
+                Error{ErrorCode::RequestCancelled, "Request cancelled during prompt prefill"});
+        }
+
+        int n_ctx_used = base_pos + chunk.offset + chunk.count;
+        if (n_ctx_used > context_size_) {
+            return std::unexpected(
+                Error{ErrorCode::ContextWindowExceeded, "Prompt tokens exceed context size"});
+        }
+
+        llama_batch batch = llama_batch_init(chunk.count, 0, 1);
+        for (int i = 0; i < chunk.count; ++i) {
+            batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
+            batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
+        }
+        batch.n_tokens = chunk.count;
+
+        int rc = llama_decode(ctx_.get(), batch);
+        llama_batch_free(batch);
+        if (rc != 0) {
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to decode prefill batch"});
+        }
+    }
+
+    int current_pos = base_pos + static_cast<int>(prompt_tokens.size());
+    llama_token new_token;
+    llama_batch ar_batch = llama_batch_init(1, 0, 1);
+
+    while (true) {
+        if (should_cancel && should_cancel()) {
+            return std::unexpected(
+                Error{ErrorCode::RequestCancelled, "Request cancelled during generation"});
+        }
+
+        new_token = llama_sampler_sample(sampler_.get(), ctx_.get(), -1);
+        if (llama_vocab_is_eog(vocab_, new_token)) {
+            break;
+        }
+
+        char buff[256];
+        const int n = llama_token_to_piece(vocab_, new_token, buff, sizeof(buff), 0, true);
+        if (n < 0) {
+            return std::unexpected(Error{ErrorCode::Unknown, "Failed to convert token"});
+        }
+
+        generated_text.append(buff, static_cast<size_t>(n));
+        ++token_count;
+
+        if (grammar_active_ && !in_tool_call) {
+            static constexpr std::string_view kOpenTag = "<tool_call>";
+            const size_t check_start =
+                generated_text.size() > kOpenTag.size() + static_cast<size_t>(n)
+                    ? generated_text.size() - kOpenTag.size() - static_cast<size_t>(n)
+                    : 0;
+            if (generated_text.find(kOpenTag.data(), check_start) != std::string::npos) {
+                in_tool_call = true;
+            }
+        }
+
+        if (in_tool_call && generated_text.ends_with("</tool_call>")) {
+            break;
+        }
+
+        if (!stop_sequences.empty()) {
+            const size_t match_len = find_stop_sequence(generated_text, stop_sequences);
+            if (match_len > 0) {
+                generated_text.resize(generated_text.size() - match_len);
+                break;
+            }
+        }
+
+        if (on_token && !in_tool_call) {
+            auto action =
+                invoke_token_callback(*on_token, std::string_view(buff, static_cast<size_t>(n)));
+            if (!action) {
+                return std::unexpected(action.error());
+            }
+            if (*action == TokenAction::Stop) {
+                break;
+            }
+        }
+
+        if (token_count >= effective_max || current_pos >= context_size_) {
+            break;
+        }
+
+        ar_batch.token[0] = new_token;
+        ar_batch.pos[0] = static_cast<llama_pos>(current_pos);
+        ar_batch.n_seq_id[0] = 1;
+        ar_batch.seq_id[0][0] = 0;
+        ar_batch.logits[0] = true;
+        ar_batch.n_tokens = 1;
+
+        int rc = llama_decode(ctx_.get(), ar_batch);
+        if (rc != 0) {
+            llama_batch_free(ar_batch);
+            return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
+        }
+        ++current_pos;
+    }
+
+    llama_batch_free(ar_batch);
+    return generated_text;
+}
+
+Expected<Response> Model::generate(const std::string& user_message,
+                                   std::optional<TokenCallback> on_token,
+                                   CancellationCallback should_cancel) {
+    auto start_time = std::chrono::steady_clock::now();
+
+    auto add_result = add_message(Message::user(user_message));
+    if (!add_result) {
+        return std::unexpected(add_result.error());
+    }
+
+    std::chrono::steady_clock::time_point first_token_time;
+    bool first_token_received = false;
+    int completion_tokens = 0;
+
+    const std::optional<TokenCallback> effective_callback =
+        on_token ? std::move(on_token) : config_.on_token;
+
+    auto wrapped_callback = [&](std::string_view token) -> TokenAction {
+        if (!first_token_received) {
+            first_token_time = std::chrono::steady_clock::now();
+            first_token_received = true;
+        }
+        ++completion_tokens;
+        if (effective_callback) {
+            return (*effective_callback)(token);
+        }
+        return TokenAction::Continue;
+    };
+
+    auto prompt_result = render_prompt_delta();
+    if (!prompt_result) {
+        rollback_last_message();
+        return std::unexpected(prompt_result.error());
+    }
+
+    auto tokens_result = tokenize(*prompt_result);
+    if (!tokens_result) {
+        rollback_last_message();
+        return std::unexpected(tokens_result.error());
+    }
+
+    const int prompt_tokens = static_cast<int>(tokens_result->size());
+
+    auto generate_result =
+        run_inference(*tokens_result, config_.max_tokens, config_.stop_sequences,
+                      std::optional<TokenCallback>(wrapped_callback), should_cancel);
+
+    if (!generate_result) {
+        rollback_last_message();
+        return std::unexpected(generate_result.error());
+    }
+
+    std::string generated_text = std::move(*generate_result);
+    messages_.push_back(Message::assistant(generated_text));
+    estimated_tokens_ += estimate_tokens(generated_text) + kTemplateOverheadPerMessage;
+    note_history_append();
+    finalize_response();
+
+    auto end_time = std::chrono::steady_clock::now();
+
+    Response response;
+    response.text = std::move(generated_text);
+    response.usage.prompt_tokens = prompt_tokens;
+    response.usage.completion_tokens = completion_tokens;
+    response.usage.total_tokens = prompt_tokens + completion_tokens;
+
+    response.metrics.latency_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+    if (first_token_received) {
+        response.metrics.time_to_first_token_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(first_token_time - start_time);
+        auto generation_time =
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - first_token_time);
+        if (generation_time.count() > 0) {
+            response.metrics.tokens_per_second =
+                (completion_tokens * 1000.0) / generation_time.count();
+        }
+    }
+
+    return response;
+}
+
+Expected<Model::GenerationResult>
+Model::generate_from_history(std::optional<TokenCallback> on_token,
+                             CancellationCallback should_cancel) {
+    if (grammar_active_) {
+        rebuild_sampler_with_grammar();
+    }
+
+    auto prompt_result = render_prompt_delta();
+    if (!prompt_result) {
+        return std::unexpected(prompt_result.error());
+    }
+
+    auto tokens_result = tokenize(*prompt_result);
+    if (!tokens_result) {
+        return std::unexpected(tokens_result.error());
+    }
+
+    const int prompt_tokens = static_cast<int>(tokens_result->size());
+
+    auto text_result = run_inference(*tokens_result, config_.max_tokens, config_.stop_sequences,
+                                     on_token, should_cancel);
+
+    if (!text_result) {
+        return std::unexpected(text_result.error());
+    }
+
+    const bool tool_detected =
+        grammar_active_ && (text_result->find("<tool_call>") != std::string::npos);
+
+    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
+}
+
+} // namespace zoo::core

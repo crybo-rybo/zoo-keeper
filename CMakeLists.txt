@@ -45,6 +45,11 @@ add_library(zoo STATIC
     src/agent/backend_model.cpp
     src/agent/runtime.cpp
     src/core/model.cpp
+    src/core/model_init.cpp
+    src/core/model_inference.cpp
+    src/core/model_prompt.cpp
+    src/core/model_history.cpp
+    src/core/model_sampling.cpp
 )
 target_include_directories(zoo PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
