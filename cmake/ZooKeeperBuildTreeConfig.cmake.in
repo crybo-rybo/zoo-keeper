@@ -1,10 +1,29 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
+    find_dependency(OpenMP)
+endif()
+
+if("@ZOO_BUILD_GGML_BLAS_ENABLED@" STREQUAL "ON")
+    find_dependency(BLAS)
+endif()
+
 if(NOT TARGET ZooKeeper::nlohmann_json)
     add_library(ZooKeeper::nlohmann_json INTERFACE IMPORTED)
     set_property(TARGET ZooKeeper::nlohmann_json PROPERTY
         INTERFACE_INCLUDE_DIRECTORIES "@json_SOURCE_DIR@/include"
     )
+endif()
+
+set(_zoo_build_llama_link_libraries "@ZOO_BUILD_LLAMA_LINK_LIBRARIES@")
+if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
+    list(APPEND _zoo_build_llama_link_libraries OpenMP::OpenMP_C OpenMP::OpenMP_CXX)
+endif()
+set(_zoo_build_blas_libraries "@ZOO_BUILD_BLAS_LIBRARIES@")
+if(_zoo_build_blas_libraries)
+    list(APPEND _zoo_build_llama_link_libraries ${_zoo_build_blas_libraries})
 endif()
 
 if(NOT TARGET ZooKeeper::zoo)
@@ -20,8 +39,14 @@ endif()
 if(NOT TARGET ZooKeeper::llama)
     add_library(ZooKeeper::llama INTERFACE IMPORTED)
     set_property(TARGET ZooKeeper::llama PROPERTY
-        INTERFACE_LINK_LIBRARIES "@ZOO_BUILD_LLAMA_LINK_LIBRARIES@"
+        INTERFACE_LINK_LIBRARIES "${_zoo_build_llama_link_libraries}"
     )
+    set(_zoo_build_blas_linker_flags "@ZOO_BUILD_BLAS_LINKER_FLAGS@")
+    if(_zoo_build_blas_linker_flags)
+        set_property(TARGET ZooKeeper::llama PROPERTY
+            INTERFACE_LINK_OPTIONS "${_zoo_build_blas_linker_flags}"
+        )
+    endif()
 endif()
 
 if(NOT TARGET ZooKeeper::zoo_core)
