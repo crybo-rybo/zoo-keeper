@@ -1,92 +1,103 @@
-# Phase D: Core Model File Decomposition
+# Phase D: Model Decomposition and Prompt-State Cleanup
 
-## Context
+## Summary
 
-`src/core/model.cpp` is a 750-line monolithic file mixing initialization, tokenization, sampling, inference, prompt formatting, grammar handling, history management, and KV cache operations. Phase D (Epic 4) decomposes it into focused files, adds RAII resource wrappers, and extracts testable pure-logic helpers. The public `Model` API remains unchanged.
+Phase D completes Epic 4 from the cleanup roadmap by restructuring `zoo::core::Model` around three goals:
 
-## Slice 1: RAII Wrappers (Issue 4.2)
+- split `src/core/model.cpp` into smaller responsibility-focused translation units,
+- replace manual llama resource cleanup with model-private RAII ownership,
+- centralize incremental prompt rendering and KV-cache invalidation so the rules are explicit and testable.
 
-Do this first — it changes member types in `model.hpp` that all subsequent `.cpp` files compile against.
+The public `Model` API stays unchanged. No new public installed headers are added.
 
-### New files
-- **`include/zoo/internal/core/raii.hpp`** — Deleter structs + `unique_ptr` aliases (forward-declares llama types, no `<llama.h>`)
-  ```cpp
-  struct LlamaModelDeleter   { void operator()(llama_model* p) const noexcept; };
-  struct LlamaContextDeleter { void operator()(llama_context* p) const noexcept; };
-  struct LlamaSamplerDeleter { void operator()(llama_sampler* p) const noexcept; };
-  using UniqueLlamaModel   = std::unique_ptr<llama_model, LlamaModelDeleter>;
-  using UniqueLlamaContext  = std::unique_ptr<llama_context, LlamaContextDeleter>;
-  using UniqueLlamaSampler  = std::unique_ptr<llama_sampler, LlamaSamplerDeleter>;
-  ```
-- **`src/core/raii.cpp`** — 3 one-liner deleter implementations calling `llama_model_free`, `llama_free`, `llama_sampler_free`
+## Key Changes
 
-### Changes to existing files
-- **`include/zoo/core/model.hpp`**: `#include "zoo/internal/core/raii.hpp"`, replace raw pointers with RAII types, destructor becomes `= default`
-- **`src/core/model.cpp`**: Replace manual cleanup in destructor, change raw assignments to `.reset()`, sampler swap in `rebuild_sampler_with_grammar` uses move assignment
-- **`CMakeLists.txt`**: Add `src/core/raii.cpp` to `add_library(zoo ...)`
+### 1. Resource ownership: keep it model-private and install-safe
 
-### Notes
-- `vocab_` stays raw — it's a non-owning borrowed pointer from `llama_model_get_vocab`
-- Reverse declaration order of members (model, ctx, sampler) gives correct destruction order (sampler first)
+- Replace the owning raw members for `llama_model`, `llama_context`, and `llama_sampler` with `std::unique_ptr` members using private custom deleters declared inside `include/zoo/core/model.hpp`.
+- Keep `vocab_` and `tmpl_` as borrowed non-owning pointers.
+- Define the deleter call operators and `Model::~Model()` out-of-line in the slimmed `src/core/model.cpp`, after including `<llama.h>`.
+- Do not add `raii.hpp` or `raii.cpp`. If a separate file is needed after implementation starts, use a domain name such as `model_resources.cpp`, not a generic RAII file.
+- Update initialization and grammar-rebuild paths to construct new handles first and only replace the active member after success, preserving current failure behavior.
 
-## Slice 2: File Split (Issue 4.1)
+### 2. Prompt/KV bookkeeping: make the state explicit
 
-Split model.cpp into focused files. Each implements Model member methods and includes `model.hpp` + `<llama.h>`.
+- Replace the current ad hoc prompt state fields with one private `PromptState` grouping inside `Model`.
+- `PromptState` owns:
+  - committed prompt prefix length,
+  - formatted prompt buffer,
+  - cached `llama_chat_message` view,
+  - explicit cache invalidation state based on a dirty flag or revision counter.
+- Rename internal-only prompt helpers for clarity:
+  - `format_prompt()` -> `render_prompt_delta()`
+  - `prev_len_` -> `committed_prompt_len_`
+  - `formatted_` -> `formatted_prompt_`
+- Make `src/core/model_prompt.cpp` the only place that mutates prompt checkpoint or message-cache state.
+- Use explicit invalidation rules:
+  - any history content change marks cached llama messages dirty,
+  - any history shrink or reset clears the KV cache and resets committed prompt length,
+  - `finalize_response()` is the only path that advances the committed prompt checkpoint after a successful turn.
+- Keep behavior unchanged for generation, rollback on failure, and tool-loop usage.
 
-| New file | Methods moved | Rationale |
-|----------|--------------|-----------|
-| `src/core/model.cpp` (slimmed, ~100 lines) | `initialize_global()`, `g_init_flag`, constructor, `~Model() = default`, `Model::load()` | Core lifecycle |
-| `src/core/model_init.cpp` | `initialize()`, `tokenize()` | Backend setup + tokenization |
-| `src/core/model_inference.cpp` | `run_inference()`, `generate()`, `generate_from_history()` | Generation pipeline (tight call chain) |
-| `src/core/model_prompt.cpp` | `build_llama_messages()`, `format_prompt()`, `finalize_response()`, `clear_kv_cache()` | Prompt delta + KV cache state |
-| `src/core/model_history.cpp` | `set_system_prompt()`, `add_message()`, `get_history()`, `clear_history()`, `context_size()`, `estimated_tokens()`, `is_context_exceeded()`, `estimate_tokens()`, `find_stop_sequence()`, `trim_history_to_fit()` | History & context bookkeeping |
-| `src/core/model_sampling.cpp` | `set_tool_grammar()`, `clear_tool_grammar()`, `rebuild_sampler_with_grammar()`, `create_sampler_chain()`, `add_sampling_stages()`, `add_dist_sampler()` | Sampler chain + grammar |
+### 3. File decomposition: split by responsibility, not mechanically
 
-### Static helper relocation
-- `make_sampler_seed()` → anonymous namespace in `model_sampling.cpp` (only caller: `add_dist_sampler`)
-- `invoke_token_callback()` → anonymous namespace in `model_inference.cpp` (only caller: `run_inference`)
-- `g_init_flag` + `initialize_global()` stay in slimmed `model.cpp` (called by `initialize()` in `model_init.cpp` via the Model member function)
+- `src/core/model.cpp`
+  - one-time backend init,
+  - constructor,
+  - destructor,
+  - factory `load()`,
+  - private deleter definitions.
+- `src/core/model_init.cpp`
+  - `initialize()`,
+  - `tokenize()`.
+- `src/core/model_inference.cpp`
+  - `run_inference()`,
+  - `generate()`,
+  - `generate_from_history()`,
+  - token-callback helper,
+  - stop-sequence helper if it remains inference-local.
+- `src/core/model_prompt.cpp`
+  - prompt-state helper logic,
+  - cached llama-message view rebuild,
+  - `render_prompt_delta()`,
+  - `finalize_response()`,
+  - `clear_kv_cache()`.
+- `src/core/model_history.cpp`
+  - `set_system_prompt()`,
+  - `add_message()`,
+  - `get_history()`,
+  - `clear_history()`,
+  - `estimate_tokens()`,
+  - `trim_history_to_fit()`,
+  - context bookkeeping accessors.
+- `src/core/model_sampling.cpp`
+  - sampler-chain construction,
+  - grammar sampler rebuild,
+  - sampler-seed helper.
 
-### CMake update
-```cmake
-add_library(zoo STATIC
-    src/agent.cpp
-    src/agent/backend_model.cpp
-    src/agent/runtime.cpp
-    src/core/model.cpp
-    src/core/model_init.cpp
-    src/core/model_inference.cpp
-    src/core/model_prompt.cpp
-    src/core/model_history.cpp
-    src/core/model_sampling.cpp
-    src/core/raii.cpp
-)
-```
+Only add a private helper header if it is shared by multiple `.cpp` files or directly unit-tested. Do not make any public header depend on a non-installed internal header.
 
-## Slice 3: Extract Pure-Logic Helpers + Tests (Issue 4.3)
+### 4. Tests and verification
 
-Extract testable free functions following the `batch.hpp` pattern (inline, header-only, no llama dependency).
+- Add focused unit coverage for the extracted prompt bookkeeping helper or state machine:
+  - same-size content mutation invalidates cached llama messages,
+  - shorter rendered prompt forces KV reset,
+  - `finalize_response()` advances committed prompt length only after successful rendering,
+  - clearing history resets prompt checkpoint state.
+- Keep `find_stop_sequence` extraction optional. If it is extracted naturally during the split, add a small unit test; do not make it the core deliverable for Issue 4.3.
+- Do not add a permanent `history_trim.hpp` unless trim-boundary logic is genuinely reused and worth testing independently.
+- Update `tests/CMakeLists.txt` only for new targeted tests that directly support Phase D.
+- Verification:
+  - `cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON`
+  - `cmake --build build -j4`
+  - `ctest --test-dir build --output-on-failure`
+  - `cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON`
+  - `cmake --build build -j4`
+  - `ctest --test-dir build --output-on-failure`
 
-### New internal headers
-- **`include/zoo/internal/core/stop_sequence.hpp`** — `find_stop_sequence(string_view text, vector<string> stops) -> size_t`
-  - Currently a `const` Model method with no member access — pure function
-- **`include/zoo/internal/core/history_trim.hpp`** — `compute_history_trim(vector<Message>, size_t max) -> optional<TrimResult>`
-  - Extracts the index-computation logic from `trim_history_to_fit()`; Model method calls it and applies the result
+## Assumptions
 
-### New test files
-- **`tests/unit/test_stop_sequence.cpp`** — suffix matching, empty sequences, no match, multiple matches
-- **`tests/unit/test_history_trim.cpp`** — boundary conditions, system prompt preservation, role-boundary alignment
-
-### Changes
-- `model_history.cpp`: call extracted free functions instead of inline logic
-- `model_inference.cpp`: call `find_stop_sequence` from internal header instead of Model method
-- `model.hpp`: remove `find_stop_sequence` from private methods (it becomes a free function)
-- `tests/CMakeLists.txt`: add both new test files to `zoo_tests`
-
-## Verification
-
-1. **Build**: `cmake -B build -DZOO_BUILD_TESTS=ON && cmake --build build`
-2. **Run tests**: `ctest --test-dir build` — all existing tests pass, new tests included
-3. **Sanitizers**: `cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build`
-4. **Verify no public API change**: Examples still compile without modification
-5. **Verify no installed header change**: `include/zoo/internal/core/raii.hpp` and other internal headers are already excluded from install
+- Public `zoo::core::Model` behavior and signatures remain stable through Phase D.
+- Internal names may change for clarity; no new public API is introduced.
+- No new installed headers are added.
+- Descriptive domain names are preferred over generic utility names; avoid `raii.*`.
