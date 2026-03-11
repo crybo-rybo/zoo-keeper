@@ -102,6 +102,41 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
+  package-consumer-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install package dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nlohmann-json3-dev
+
+      - name: Configure producer build
+        run: cmake -B build
+
+      - name: Build producer library
+        run: cmake --build build -j$(nproc)
+
+      - name: Smoke test build-tree package consumer
+        run: |
+          cmake -S tests/packaging/cmake_consumer -B build/package-buildtree \
+            -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/build"
+          cmake --build build/package-buildtree -j$(nproc)
+
+      - name: Install package to temp prefix
+        run: cmake --install build --prefix "${RUNNER_TEMP}/zoo-install"
+
+      - name: Smoke test install-tree package consumer
+        run: |
+          cmake -S tests/packaging/cmake_consumer -B build/package-installtree \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/zoo-install"
+          cmake --build build/package-installtree -j$(nproc)
+
   sanitizers:
     runs-on: ubuntu-latest
 

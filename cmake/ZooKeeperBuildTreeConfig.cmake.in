@@ -1,0 +1,27 @@
+@PACKAGE_INIT@
+
+if(NOT TARGET ZooKeeper::zoo)
+    add_library(ZooKeeper::zoo STATIC IMPORTED)
+    set_target_properties(ZooKeeper::zoo PROPERTIES
+        IMPORTED_LOCATION "@ZOO_BUILD_ZOO_LOCATION@"
+        INTERFACE_COMPILE_FEATURES "cxx_std_23"
+        INTERFACE_INCLUDE_DIRECTORIES "@ZOO_BUILD_INTERFACE_INCLUDE_DIRECTORIES@"
+        INTERFACE_LINK_LIBRARIES "ZooKeeper::llama"
+    )
+endif()
+
+if(NOT TARGET ZooKeeper::llama)
+    add_library(ZooKeeper::llama INTERFACE IMPORTED)
+    set_property(TARGET ZooKeeper::llama PROPERTY
+        INTERFACE_LINK_LIBRARIES "@ZOO_BUILD_LLAMA_LINK_LIBRARIES@"
+    )
+endif()
+
+if(NOT TARGET ZooKeeper::zoo_core)
+    add_library(ZooKeeper::zoo_core INTERFACE IMPORTED)
+    set_property(TARGET ZooKeeper::zoo_core PROPERTY
+        INTERFACE_LINK_LIBRARIES ZooKeeper::zoo
+    )
+endif()
+
+check_required_components(ZooKeeper)

@@ -373,13 +373,13 @@ The work is organized into epics. Each epic is broken into concrete issues with 
 4. Epic 2 — Tooling API Unification and Contract Hardening
 5. Add tests for deterministic tool ordering and explicit tool event/result types
 
-Detailed execution doc: [phase-b-implementation-plan.md](phase-b-implementation-plan.md)
+Detailed execution notes: [phase-abc-catchup-plan.md](phase-abc-catchup-plan.md)
 
 ### Phase C — Simplify the async runtime
 6. Epic 3 — Agent Runtime Simplification
 7. Expand unit-test coverage for agent orchestration behavior
 
-Detailed execution doc: [phase-c-implementation-plan.md](phase-c-implementation-plan.md)
+Detailed execution notes: [phase-abc-catchup-plan.md](phase-abc-catchup-plan.md)
 
 ### Phase D — Decompose the model implementation
 8. Epic 4 — Core Model File Decomposition

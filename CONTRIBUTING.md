@@ -36,6 +36,19 @@
   ctest --test-dir build --output-on-failure -L integration
   ```
 
+- Smoke-test package consumers when changing CMake/export/install behavior:
+
+  ```bash
+  cmake -S tests/packaging/cmake_consumer -B build/package-buildtree \
+      -DCMAKE_PREFIX_PATH="$PWD/build"
+  cmake --build build/package-buildtree -j4
+
+  cmake --install build --prefix /tmp/zoo-install
+  cmake -S tests/packaging/cmake_consumer -B build/package-installtree \
+      -DCMAKE_PREFIX_PATH="/tmp/zoo-install;/path/to/nlohmann_json"
+  cmake --build build/package-installtree -j4
+  ```
+
 - Check formatting:
 
   ```bash
