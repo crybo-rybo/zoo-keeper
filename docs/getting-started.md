@@ -4,7 +4,7 @@ This guide walks you through setting up Zoo-Keeper and building your first AI ag
 
 ## Prerequisites
 
-- **C++23 compiler**: GCC 13+, Clang 16+
+- **C++23 compiler**: macOS uses Clang 16+; Linux uses GCC 13+ or Clang 18+
 - **CMake 3.18+**
 - **Git** (for submodules)
 - **macOS or Linux**
@@ -24,7 +24,7 @@ git submodule update --init --recursive
 
 ```bash
 cmake -B build -DZOO_BUILD_EXAMPLES=ON
-cmake --build build -j$(nproc)
+cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 ```
 
 See [building.md](building.md) for platform-specific setup (Metal, CUDA), integration tests, and package-install usage.

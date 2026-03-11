@@ -15,7 +15,7 @@ The following are not part of the compatibility contract:
 - headers under `include/zoo/internal/`
 - implementation files under `src/`
 - private CMake/package plumbing
-- audit notes and execution-plan documents such as `docs/cleanup-roadmap.md` and `docs/phase-*`
+- internal audit notes and temporary planning documents under `docs/` that are not part of the published user-facing reference set
 
 ## Intended 1.x Guarantees
 

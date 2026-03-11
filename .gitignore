@@ -2,6 +2,7 @@
 .cache/**
 .claude/**
 .idea/**
+.agents/**
 build/**
 build-san/**
 cmake-build-*/

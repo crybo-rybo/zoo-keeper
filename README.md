@@ -11,8 +11,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/C%2B%2B-23-blue" alt="C++23" />
-  <img src="https://img.shields.io/badge/tests-ctest%20passing-success" alt="Tests" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
+  <img src="https://img.shields.io/badge/tests-ctest%20passing-success" alt="Tests" />
 </p>
 
 ## About

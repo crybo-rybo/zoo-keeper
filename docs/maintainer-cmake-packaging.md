@@ -106,7 +106,7 @@ The install-tree config does not need this extra `file(GENERATE ...)` step becau
 
 ## Build-Tree Config: What It Does
 
-Source template: [cmake/ZooKeeperBuildTreeConfig.cmake.in](/Users/conorrybacki/Programs/zoo-keeper/cmake/ZooKeeperBuildTreeConfig.cmake.in)
+Source template: [cmake/ZooKeeperBuildTreeConfig.cmake.in](../cmake/ZooKeeperBuildTreeConfig.cmake.in)
 
 This file creates imported targets that point back into the producer build tree:
 
@@ -143,11 +143,11 @@ Use this when:
 - you want to smoke-test packaging without installing first
 - you want a separate consumer project to point directly at an existing producer build directory
 
-This is what the packaging smoke test under [`tests/packaging/cmake_consumer`](/Users/conorrybacki/Programs/zoo-keeper/tests/packaging/cmake_consumer) exercises in CI for the build-tree case.
+This is what the packaging smoke test under [`tests/packaging/cmake_consumer`](../tests/packaging/cmake_consumer) exercises in CI for the build-tree case.
 
 ## Install-Tree Config: What It Does
 
-Source template: [cmake/ZooKeeperConfig.cmake.in](/Users/conorrybacki/Programs/zoo-keeper/cmake/ZooKeeperConfig.cmake.in)
+Source template: [cmake/ZooKeeperConfig.cmake.in](../cmake/ZooKeeperConfig.cmake.in)
 
 This file assumes the project has already been installed and that exported targets exist under the install prefix.
 
@@ -242,4 +242,4 @@ If a package consumer fails, check these in order:
 
 - [building.md](building.md) -- user-facing build and install guidance
 - [compatibility.md](compatibility.md) -- supported public packaging boundary
-- [tests/packaging/cmake_consumer/CMakeLists.txt](/Users/conorrybacki/Programs/zoo-keeper/tests/packaging/cmake_consumer/CMakeLists.txt) -- minimal smoke consumer
+- [tests/packaging/cmake_consumer/CMakeLists.txt](../tests/packaging/cmake_consumer/CMakeLists.txt) -- minimal smoke consumer

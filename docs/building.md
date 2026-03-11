@@ -6,7 +6,7 @@
 git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
 cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
-cmake --build build -j$(nproc)
+cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 ctest --test-dir build
 ```
 
@@ -21,7 +21,7 @@ ctest --test-dir build
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
 | `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
-| `ZOO_ENABLE_SANITIZERS` | ASan/TSan/UBSan | OFF |
+| `ZOO_ENABLE_SANITIZERS` | ASan + UBSan | OFF |
 | `ZOO_ENABLE_LOGGING` | Emit runtime diagnostic logs to stderr | OFF |
 
 ## Platform-Specific Setup
@@ -78,7 +78,7 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
 All FetchContent dependencies are downloaded automatically during CMake configuration.
-Installed-package consumers are different: Zoo-Keeper's installed CMake package expects a discoverable `nlohmann_json` package because the public headers include `<nlohmann/json.hpp>`.
+Installed-package consumers are different: Zoo-Keeper installs llama's CMake package into the same prefix, but still expects a discoverable `nlohmann_json` package because the public headers include `<nlohmann/json.hpp>`.
 
 ## Running Tests
 
@@ -87,7 +87,7 @@ Installed-package consumers are different: Zoo-Keeper's installed CMake package 
 ctest --test-dir build
 
 # Specific test suite
-ctest --test-dir build -R ModelTest
+ctest --test-dir build -R ToolRegistryTest
 
 # Verbose output
 ctest --test-dir build --output-on-failure --verbose
@@ -96,6 +96,8 @@ ctest --test-dir build --output-on-failure --verbose
 ## Integration Tests
 
 The integration target exercises the concrete `Model` and `Agent` layers. Two failure-path tests run using vendored fixtures. Optional live smoke tests run when a real GGUF path is provided.
+
+`ZOO_BUILD_INTEGRATION_TESTS` is only effective when `ZOO_BUILD_TESTS=ON`, because the integration suite is added from `tests/CMakeLists.txt`.
 
 ```bash
 cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON \
@@ -122,7 +124,7 @@ cmake --build build
 ctest --test-dir build
 ```
 
-GitHub Actions also captures an `lcov` report and uploads it as a workflow artifact and to Codecov on every `main` push and pull request.
+GitHub Actions also captures an `lcov` report and uploads it as a workflow artifact. Upload to Codecov runs only when `CODECOV_TOKEN` is available in CI.
 
 ## API Reference
 
