@@ -102,9 +102,9 @@ All callbacks (`on_token`, tool handlers) execute on the **inference thread**. T
 | `zoo` | STATIC | llama (private, build-tree only) | Primary public runtime target containing the Model and Agent implementations |
 | `zoo_core` | INTERFACE | zoo | Compatibility target that forwards to `zoo` for existing consumers |
 
-Namespaced aliases `ZooKeeper::zoo` and `ZooKeeper::zoo_core` are available in all consumption modes (FetchContent, subdirectory, installed package) and are the recommended link targets for consumers.
+`ZooKeeper::zoo` is the recommended link target for consumers and is available in all consumption modes (FetchContent, subdirectory, installed package). `ZooKeeper::zoo_core` is a compatibility-only alias that forwards to `zoo` — it exists for existing consumers but should not be used in new projects.
 
-For installed-package consumers, the `ZooKeeperConfig.cmake` file locates llama via `find_dependency(llama CONFIG)` and attaches it to the imported target automatically.
+For installed-package consumers, the `ZooKeeperConfig.cmake` file locates `llama` and `nlohmann_json` via `find_dependency(...)` and attaches them to the imported target automatically. `llama` is installed alongside Zoo-Keeper in the same prefix; `nlohmann_json` must be discoverable separately because Zoo-Keeper no longer copies its headers into the install tree.
 
 ## See Also
 

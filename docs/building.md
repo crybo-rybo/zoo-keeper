@@ -78,6 +78,7 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
 All FetchContent dependencies are downloaded automatically during CMake configuration.
+Installed-package consumers are different: Zoo-Keeper's installed CMake package expects a discoverable `nlohmann_json` package because the public headers include `<nlohmann/json.hpp>`.
 
 ## Running Tests
 
@@ -171,11 +172,22 @@ find_package(ZooKeeper CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 ```
 
+Make sure `nlohmann_json` is also installed and discoverable via `CMAKE_PREFIX_PATH` or `nlohmann_json_DIR`. `ZooKeeperConfig.cmake` resolves it transitively with `find_dependency(nlohmann_json CONFIG)`, so consumers do not need a separate `target_link_libraries(... nlohmann_json::nlohmann_json)` line.
+
+Example:
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH="/opt/zoo-keeper;/opt/nlohmann_json"
+```
+
 ### pkg-config
 
 ```bash
 pkg-config --cflags --libs zoo-keeper
 ```
+
+The `zoo-keeper.pc` file declares a dependency on `nlohmann_json`. If `pkg-config` cannot resolve it, install the `nlohmann_json` pkg-config package and make sure its `.pc` directory is on `PKG_CONFIG_PATH` alongside Zoo-Keeper's.
 
 ## Running the Demo
 
