@@ -443,93 +443,14 @@ TEST(ToolCallInterceptorTest, FullTextIncludesNonToolJson) {
     EXPECT_EQ(result.full_text, result.visible_text);
 }
 
-// ============================================================================
-// Sentinel tag (<tool_call>) suppression
-// ============================================================================
-
-TEST(ToolCallInterceptorTest, SentinelPrefixSuppressedFromVisibleText) {
-    // Grammar-constrained models emit <tool_call>{...}</tool_call>.
-    // The <tool_call> prefix must not appear in visible text or the stream.
-    std::vector<std::string> tokens = {
-        "<tool_call>", "{\"name\": \"add\", \"arguments\": {\"a\": 3, \"b\": 4}}", "</tool_call>"};
-
-    std::string streamed;
-    auto result = simulate_tokens(tokens, &streamed);
-
-    ASSERT_TRUE(result.tool_call.has_value());
-    EXPECT_EQ(result.tool_call->name, "add");
-    EXPECT_EQ(result.tool_call->arguments["a"], 3);
-    EXPECT_EQ(result.tool_call->arguments["b"], 4);
-    EXPECT_TRUE(streamed.empty());
-    EXPECT_TRUE(result.visible_text.empty());
-}
-
-TEST(ToolCallInterceptorTest, TextBeforeSentinelRemainsVisible) {
-    // Text before <tool_call> should be streamed; the tag and JSON should not.
-    std::vector<std::string> tokens = {
-        "I'll use a tool: ", "<tool_call>",
-        "{\"name\": \"multiply\", \"arguments\": {\"a\": 6.0, \"b\": 7.0}}", "</tool_call>"};
-
-    std::string streamed;
-    auto result = simulate_tokens(tokens, &streamed);
-
-    ASSERT_TRUE(result.tool_call.has_value());
-    EXPECT_EQ(result.tool_call->name, "multiply");
-    EXPECT_EQ(streamed, "I'll use a tool: ");
-    EXPECT_EQ(result.visible_text, "I'll use a tool: ");
-}
-
-TEST(ToolCallInterceptorTest, SentinelSplitAcrossTokens) {
-    // <tool_call> arriving one character at a time must still be suppressed.
-    std::string sentinel = "<tool_call>";
-    std::vector<std::string> tokens;
-    for (char c : sentinel) {
-        tokens.emplace_back(1, c);
-    }
-    tokens.push_back("{\"name\": \"ping\", \"arguments\": {}}");
-
-    std::string streamed;
-    auto result = simulate_tokens(tokens, &streamed);
-
-    ASSERT_TRUE(result.tool_call.has_value());
-    EXPECT_EQ(result.tool_call->name, "ping");
-    EXPECT_TRUE(streamed.empty());
-    EXPECT_TRUE(result.visible_text.empty());
-}
-
-TEST(ToolCallInterceptorTest, AngleBracketThatIsNotSentinelPassesThrough) {
-    // A '<' that does not begin '<tool_call>' should be emitted as visible text.
-    std::vector<std::string> tokens = {"2 < 3 is true."};
+TEST(ToolCallInterceptorTest, LiteralToolCallTagPassesThroughAsText) {
+    std::vector<std::string> tokens = {"Show the tag <tool_call> literally."};
 
     std::string streamed;
     auto result = simulate_tokens(tokens, &streamed);
 
     EXPECT_FALSE(result.tool_call.has_value());
-    EXPECT_EQ(streamed, "2 < 3 is true.");
-    EXPECT_EQ(result.visible_text, "2 < 3 is true.");
-}
-
-TEST(ToolCallInterceptorTest, PartialSentinelAtEOSFlushedAsVisible) {
-    // If generation ends mid-sentinel (e.g. just "<tool_ca"), emit as visible.
-    std::vector<std::string> tokens = {"Hello ", "<tool_ca"};
-
-    std::string streamed;
-    auto result = simulate_tokens(tokens, &streamed);
-
-    EXPECT_FALSE(result.tool_call.has_value());
-    EXPECT_EQ(result.visible_text, "Hello <tool_ca");
-}
-
-TEST(ToolCallInterceptorTest, SentinelWithWhitespaceBetweenTagAndJson) {
-    // Grammar allows ws between <tool_call> and {; whitespace must be suppressed.
-    std::vector<std::string> tokens = {
-        "<tool_call>", " \n", "{\"name\": \"get_time\", \"arguments\": {}}", "\n</tool_call>"};
-
-    std::string streamed;
-    auto result = simulate_tokens(tokens, &streamed);
-
-    ASSERT_TRUE(result.tool_call.has_value());
-    EXPECT_EQ(result.tool_call->name, "get_time");
-    EXPECT_TRUE(streamed.empty());
-    EXPECT_TRUE(result.visible_text.empty());
+    EXPECT_EQ(streamed, "Show the tag <tool_call> literally.");
+    EXPECT_EQ(result.visible_text, streamed);
+    EXPECT_EQ(result.full_text, streamed);
 }

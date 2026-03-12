@@ -289,44 +289,9 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::optional<tools::ToolCallInterceptor> interceptor;
 
         if (use_grammar_path) {
-            // Sentinel-only filter: suppress <tool_call>...</tool_call> from the user stream.
-            // The ToolCallInterceptor must NOT be used here — it buffers on bare '{' to detect
-            // heuristic tool calls, which incorrectly delays streaming of code blocks and any
-            // other content that contains braces. In grammar mode, tool calls are always wrapped
-            // in <tool_call> tags, so we only need to watch for that exact prefix.
             if (request.streaming_callback) {
-                struct SentinelFilter {
-                    bool suppressing = false;
-                    std::string prefix_buf;
-                };
-                auto filter = std::make_shared<SentinelFilter>();
-                callback = make_metrics_callback([&user_cb = *request.streaming_callback,
-                                                  filter](std::string_view token) -> TokenAction {
-                    if (filter->suppressing)
-                        return TokenAction::Continue;
-                    static constexpr std::string_view kTag = "<tool_call>";
-                    for (size_t i = 0; i < token.size(); ++i) {
-                        if (filter->suppressing)
-                            break;
-                        char c = token[i];
-                        std::string candidate = filter->prefix_buf + c;
-                        if (candidate == kTag) {
-                            filter->suppressing = true;
-                            filter->prefix_buf.clear();
-                        } else if (kTag.starts_with(std::string_view(candidate))) {
-                            filter->prefix_buf = std::move(candidate);
-                        } else {
-                            if (!filter->prefix_buf.empty()) {
-                                user_cb(filter->prefix_buf);
-                                filter->prefix_buf.clear();
-                            }
-                            if (c == '<') {
-                                filter->prefix_buf = "<";
-                            } else {
-                                user_cb(std::string_view(&c, 1));
-                            }
-                        }
-                    }
+                callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
+                    (*request.streaming_callback)(token);
                     return TokenAction::Continue;
                 });
             } else {

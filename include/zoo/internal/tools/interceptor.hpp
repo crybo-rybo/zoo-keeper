@@ -79,12 +79,6 @@ class ToolCallInterceptor {
             return result;
         }
 
-        // Partial sentinel prefix buffered but never completed — treat as visible text
-        if (state_ == State::SentinelPrefix && !sentinel_buf_.empty()) {
-            visible_text_ += sentinel_buf_;
-            sentinel_buf_.clear();
-        }
-
         if (state_ == State::Buffering) {
             // Generation ended while buffering — check if buffer is a complete tool call
             auto parse_result = ToolCallParser::parse(buffer_);
@@ -103,26 +97,17 @@ class ToolCallInterceptor {
     }
 
   private:
-    enum class State { Normal, SentinelPrefix, TagMatched, Buffering };
+    enum class State { Normal, Buffering };
 
-    static constexpr std::string_view kOpenTag = "<tool_call>";
-
-    /// Dispatches token handling based on current state.
+    /// Dispatches token handling based on whether JSON buffering is active.
     TokenAction process_token(std::string_view token) {
-        switch (state_) {
-        case State::Normal:
+        if (state_ == State::Normal) {
             return process_normal(token);
-        case State::SentinelPrefix:
-            return process_sentinel_prefix(token);
-        case State::TagMatched:
-            return process_tag_matched(token);
-        case State::Buffering:
-            return process_buffering(token);
         }
-        return TokenAction::Continue;
+        return process_buffering(token);
     }
 
-    /// Streams normal text until a potential JSON object or sentinel tag begins.
+    /// Streams normal text until a potential JSON object begins.
     TokenAction process_normal(std::string_view token) {
         for (size_t i = 0; i < token.size(); ++i) {
             if (token[i] == '{') {
@@ -137,60 +122,11 @@ class ToolCallInterceptor {
                 buffer_.clear();
                 return process_buffering(token.substr(i));
             }
-            if (token[i] == '<') {
-                // Flush everything before '<' to the user
-                if (i > 0) {
-                    auto prefix = token.substr(0, i);
-                    visible_text_.append(prefix.data(), prefix.size());
-                    emit(prefix);
-                }
-                state_ = State::SentinelPrefix;
-                sentinel_buf_ = "<";
-                return process_sentinel_prefix(token.substr(i + 1));
-            }
         }
 
         // No trigger found — pass entire token through
         visible_text_.append(token.data(), token.size());
         emit(token);
-        return TokenAction::Continue;
-    }
-
-    /// Accumulates characters to determine whether a '<tool_call>' tag is forming.
-    /// Suppresses the accumulated prefix if it matches; flushes it as visible text otherwise.
-    TokenAction process_sentinel_prefix(std::string_view token) {
-        for (size_t i = 0; i < token.size(); ++i) {
-            sentinel_buf_ += token[i];
-            if (sentinel_buf_ == kOpenTag) {
-                sentinel_buf_.clear();
-                state_ = State::TagMatched;
-                return process_tag_matched(token.substr(i + 1));
-            }
-            if (!kOpenTag.starts_with(std::string_view(sentinel_buf_))) {
-                // Not a match — emit what was buffered and resume normal processing
-                visible_text_ += sentinel_buf_;
-                emit(sentinel_buf_);
-                sentinel_buf_.clear();
-                state_ = State::Normal;
-                return process_normal(token.substr(i + 1));
-            }
-        }
-        return TokenAction::Continue;
-    }
-
-    /// Silently discards whitespace between '<tool_call>' and the opening '{'.
-    TokenAction process_tag_matched(std::string_view token) {
-        for (size_t i = 0; i < token.size(); ++i) {
-            if (token[i] == '{') {
-                state_ = State::Buffering;
-                brace_depth_ = 0;
-                buffer_.clear();
-                in_string_ = false;
-                escape_next_ = false;
-                return process_buffering(token.substr(i));
-            }
-            // Suppress whitespace (and anything else) between the tag and the JSON object
-        }
         return TokenAction::Continue;
     }
 
@@ -265,7 +201,6 @@ class ToolCallInterceptor {
 
     State state_ = State::Normal;
     std::string buffer_;
-    std::string sentinel_buf_;
     std::string visible_text_;
     std::string full_text_;
     int brace_depth_ = 0;
