@@ -109,7 +109,6 @@ class ToolCallInterceptor {
 
     /// Streams normal text until a potential JSON object begins.
     TokenAction process_normal(std::string_view token) {
-        // Scan each character for the start of a potential JSON object
         for (size_t i = 0; i < token.size(); ++i) {
             if (token[i] == '{') {
                 // Flush everything before the '{' to the user
@@ -118,17 +117,14 @@ class ToolCallInterceptor {
                     visible_text_.append(prefix.data(), prefix.size());
                     emit(prefix);
                 }
-
-                // Start buffering from '{'
                 state_ = State::Buffering;
                 brace_depth_ = 0;
                 buffer_.clear();
-                auto remainder = token.substr(i);
-                return process_buffering(remainder);
+                return process_buffering(token.substr(i));
             }
         }
 
-        // No '{' found — pass entire token through
+        // No trigger found — pass entire token through
         visible_text_.append(token.data(), token.size());
         emit(token);
         return TokenAction::Continue;

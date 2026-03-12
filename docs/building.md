@@ -6,7 +6,7 @@
 git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
 cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
-cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+cmake --build build
 ctest --test-dir build
 ```
 

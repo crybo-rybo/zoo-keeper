@@ -7,6 +7,7 @@ add_executable(zoo_tests
     unit/test_tool_registry.cpp
     unit/test_tool_parser.cpp
     unit/test_sentinel_parser.cpp
+    unit/test_sentinel_stream_filter.cpp
     unit/test_grammar_builder.cpp
     unit/test_error_recovery.cpp
     unit/test_tool_interceptor.cpp

@@ -6,6 +6,7 @@
 #include "zoo/core/model.hpp"
 
 #include "zoo/internal/core/batch.hpp"
+#include "zoo/internal/tools/sentinel_stream_filter.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -55,6 +56,11 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
     bool in_tool_call = false;
+    bool stopped_by_callback = false;
+    std::optional<tools::SentinelStreamFilter> stream_filter;
+    if (grammar_active_ && on_token) {
+        stream_filter.emplace();
+    }
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
     const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) + 1;
@@ -126,10 +132,6 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             }
         }
 
-        if (in_tool_call && generated_text.ends_with("</tool_call>")) {
-            break;
-        }
-
         if (!stop_sequences.empty()) {
             const size_t match_len = find_stop_sequence(generated_text, stop_sequences);
             if (match_len > 0) {
@@ -138,15 +140,29 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             }
         }
 
-        if (on_token && !in_tool_call) {
-            auto action =
-                invoke_token_callback(*on_token, std::string_view(buff, static_cast<size_t>(n)));
-            if (!action) {
-                return std::unexpected(action.error());
+        if (on_token) {
+            std::string visible_chunk;
+            if (stream_filter) {
+                visible_chunk =
+                    stream_filter->consume(std::string_view(buff, static_cast<size_t>(n)));
+            } else {
+                visible_chunk.assign(buff, static_cast<size_t>(n));
             }
-            if (*action == TokenAction::Stop) {
-                break;
+
+            if (!visible_chunk.empty()) {
+                auto action = invoke_token_callback(*on_token, visible_chunk);
+                if (!action) {
+                    return std::unexpected(action.error());
+                }
+                if (*action == TokenAction::Stop) {
+                    stopped_by_callback = true;
+                    break;
+                }
             }
+        }
+
+        if (in_tool_call && generated_text.ends_with("</tool_call>")) {
+            break;
         }
 
         if (token_count >= effective_max || current_pos >= context_size_) {
@@ -169,6 +185,17 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     }
 
     llama_batch_free(ar_batch);
+
+    if (on_token && stream_filter && !stopped_by_callback) {
+        std::string trailing = stream_filter->finalize();
+        if (!trailing.empty()) {
+            auto action = invoke_token_callback(*on_token, trailing);
+            if (!action) {
+                return std::unexpected(action.error());
+            }
+        }
+    }
+
     return generated_text;
 }
 

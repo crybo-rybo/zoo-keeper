@@ -442,3 +442,15 @@ TEST(ToolCallInterceptorTest, FullTextIncludesNonToolJson) {
     EXPECT_EQ(result.full_text, "Prefix {\"info\": 99} suffix");
     EXPECT_EQ(result.full_text, result.visible_text);
 }
+
+TEST(ToolCallInterceptorTest, LiteralToolCallTagPassesThroughAsText) {
+    std::vector<std::string> tokens = {"Show the tag <tool_call> literally."};
+
+    std::string streamed;
+    auto result = simulate_tokens(tokens, &streamed);
+
+    EXPECT_FALSE(result.tool_call.has_value());
+    EXPECT_EQ(streamed, "Show the tag <tool_call> literally.");
+    EXPECT_EQ(result.visible_text, streamed);
+    EXPECT_EQ(result.full_text, streamed);
+}
