@@ -42,6 +42,9 @@ class ModelBackend final : public AgentBackend {
     void clear_history() override {
         model_->clear_history();
     }
+    void replace_messages(std::vector<Message> messages) override {
+        model_->replace_messages(std::move(messages));
+    }
 
     bool set_tool_grammar(const std::string& grammar_str) override {
         return model_->set_tool_grammar(grammar_str);

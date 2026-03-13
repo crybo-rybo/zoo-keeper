@@ -33,12 +33,14 @@ TEST(RuntimeMailboxTest, PopsRequestsInSubmissionOrder) {
     auto first = mailbox.pop();
     ASSERT_TRUE(first.has_value());
     EXPECT_EQ(as_request(*first).id, 1u);
-    EXPECT_EQ(as_request(*first).message.content, "first");
+    ASSERT_EQ(as_request(*first).messages.size(), 1u);
+    EXPECT_EQ(as_request(*first).messages.front().content, "first");
 
     auto second = mailbox.pop();
     ASSERT_TRUE(second.has_value());
     EXPECT_EQ(as_request(*second).id, 2u);
-    EXPECT_EQ(as_request(*second).message.content, "second");
+    ASSERT_EQ(as_request(*second).messages.size(), 1u);
+    EXPECT_EQ(as_request(*second).messages.front().content, "second");
 }
 
 TEST(RuntimeMailboxTest, RejectsRequestsPastCapacity) {

@@ -40,6 +40,11 @@ RequestHandle Agent::chat(Message message,
     return impl_->runtime.chat(std::move(message), std::move(callback));
 }
 
+RequestHandle Agent::complete(std::vector<Message> messages,
+                              std::optional<std::function<void(std::string_view)>> callback) {
+    return impl_->runtime.complete(std::move(messages), std::move(callback));
+}
+
 void Agent::cancel(RequestId id) {
     impl_->runtime.cancel(id);
 }

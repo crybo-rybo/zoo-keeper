@@ -115,6 +115,18 @@ class Model {
     std::vector<Message> get_history() const;
     /// Clears conversation history, token estimates, and cached KV state.
     void clear_history();
+    /**
+     * @brief Replaces the retained message history without flushing the KV cache.
+     *
+     * Sets the message list and resets the committed prompt position to zero so
+     * the next generation re-renders from scratch, but does not call
+     * `llama_memory_clear`.  Stale KV entries from the previous history are
+     * overwritten when the next full prompt is decoded, or are ignored by causal
+     * masking for positions beyond the new prompt length.
+     *
+     * @param messages Replacement message list.
+     */
+    void replace_messages(std::vector<Message> messages);
 
     /**
      * @brief Enables grammar-constrained tool calling for future generations.

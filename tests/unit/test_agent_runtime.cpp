@@ -119,6 +119,12 @@ class FakeBackend final : public AgentBackend {
         operations_.push_back("clear_tool_grammar");
     }
 
+    void replace_messages(std::vector<Message> messages) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        history_ = std::move(messages);
+        operations_.push_back("replace_messages");
+    }
+
   private:
     mutable std::mutex mutex_;
     mutable std::vector<std::string> operations_;
@@ -615,6 +621,53 @@ TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
 
     const auto operations = backend_ptr->operations();
     EXPECT_LT(index_of(operations, "clear_history"), index_of(operations, "add:user:second"));
+}
+
+TEST(AgentRuntimeTest, CompleteUsesScopedHistoryAndRestoresPersistentHistory) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    runtime.set_system_prompt("persistent prompt");
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"persistent reply", 0, false});
+    });
+
+    auto first = runtime.chat(Message::user("persistent user"));
+    auto first_result = first.future.get();
+    ASSERT_TRUE(first_result.has_value());
+    EXPECT_EQ(first_result->text, "persistent reply");
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"scoped reply", 0, false});
+    });
+
+    auto scoped =
+        runtime.complete({Message::system("request prompt"), Message::user("request user")});
+    auto scoped_result = scoped.future.get();
+    ASSERT_TRUE(scoped_result.has_value());
+    EXPECT_EQ(scoped_result->text, "scoped reply");
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].role, zoo::Role::System);
+    EXPECT_EQ(history[0].content, "persistent prompt");
+    EXPECT_EQ(history[1].role, zoo::Role::User);
+    EXPECT_EQ(history[1].content, "persistent user");
+    EXPECT_EQ(history[2].role, zoo::Role::Assistant);
+    EXPECT_EQ(history[2].content, "persistent reply");
+}
+
+TEST(AgentRuntimeTest, CompleteRejectsEmptyMessageHistory) {
+    auto backend = std::make_unique<FakeBackend>();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    auto handle = runtime.complete({});
+    auto result = handle.future.get();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidMessageSequence);
 }
 
 TEST(AgentRuntimeTest, BuildToolSystemPromptUsesPublishedGrammarSnapshot) {

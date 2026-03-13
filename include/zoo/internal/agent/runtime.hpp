@@ -35,6 +35,10 @@ class AgentRuntime {
     chat(Message message,
          std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
 
+    RequestHandle
+    complete(std::vector<Message> messages,
+             std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+
     void cancel(RequestId id);
     void set_system_prompt(const std::string& prompt);
     void stop();

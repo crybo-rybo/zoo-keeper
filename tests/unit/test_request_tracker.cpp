@@ -29,6 +29,21 @@ TEST(RequestTrackerTest, CancelSetsSharedCancellationFlag) {
     EXPECT_TRUE(prepared.request.cancelled->load(std::memory_order_acquire));
 }
 
+TEST(RequestTrackerTest, PrepareVectorPayloadPreservesMessagesAndHistoryMode) {
+    zoo::internal::agent::RequestTracker tracker;
+
+    std::vector<zoo::Message> messages = {zoo::Message::system("prompt"),
+                                          zoo::Message::user("hello")};
+    auto prepared =
+        tracker.prepare(std::move(messages), zoo::internal::agent::HistoryMode::Replace);
+
+    EXPECT_EQ(prepared.request.id, 1u);
+    EXPECT_EQ(prepared.request.history_mode, zoo::internal::agent::HistoryMode::Replace);
+    ASSERT_EQ(prepared.request.messages.size(), 2u);
+    EXPECT_EQ(prepared.request.messages[0], zoo::Message::system("prompt"));
+    EXPECT_EQ(prepared.request.messages[1], zoo::Message::user("hello"));
+}
+
 TEST(RequestTrackerTest, FailResolvesFutureWithErrorAndCleansUpState) {
     zoo::internal::agent::RequestTracker tracker;
 

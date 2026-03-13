@@ -54,7 +54,7 @@ int main() {
     // 3. Set a system prompt
     agent->set_system_prompt("You are a helpful AI assistant.");
 
-    // 4. Chat -- chat() returns a RequestHandle; call .future.get() to block
+    // 4. Submit a stateful chat turn -- RequestHandle::future blocks for completion
     auto handle = agent->chat(zoo::Message::user("Hello!"));
     auto response = handle.future.get();
 
@@ -79,6 +79,8 @@ The primary entry point for agentic behavior. Created via the `Agent::create()` 
 | `create(config)` | Factory: validate config, load model, start inference thread |
 | `chat(message)` | Submit a message, returns `RequestHandle` (holds `.id` and `.future`) |
 | `chat(message, callback)` | Chat with per-token streaming callback |
+| `complete(messages)` | Submit a stateless request-scoped history without mutating retained history |
+| `complete(messages, callback)` | Stateless completion with per-token streaming callback |
 | `cancel(id)` | Cancel a pending request by ID |
 | `set_system_prompt(text)` | Set or update the system prompt |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |

@@ -22,7 +22,7 @@
 namespace zoo {
 
 /**
- * @brief Handle returned by `Agent::chat()` for request tracking and result retrieval.
+ * @brief Handle returned by `Agent::chat()` or `Agent::complete()` for tracking and results.
  */
 struct RequestHandle {
     RequestId id;                           ///< Request identifier accepted by the agent.
@@ -91,12 +91,29 @@ class Agent {
          std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
 
     /**
+     * @brief Queues a stateless completion against the supplied full message history.
+     *
+     * The request executes using only the provided messages and does not mutate
+     * the agent-global retained history. Registered tools, grammar state, and
+     * cancellation behavior remain shared with the agent instance.
+     *
+     * @param messages Full conversation history for one request-scoped completion.
+     * @param callback Optional callback that receives streamed visible text.
+     * @return Handle containing the request id and result future. If the agent
+     *         is not running or the queue rejects the request, the future is
+     *         resolved immediately with an error.
+     */
+    RequestHandle
+    complete(std::vector<Message> messages,
+             std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+
+    /**
      * @brief Requests cancellation of a queued or running request.
      *
      * Cancellation is cooperative. Requests that have already completed or have
      * been cleaned up are unaffected.
      *
-     * @param id Request identifier returned by `chat()`.
+     * @param id Request identifier returned by `chat()` or `complete()`.
      */
     void cancel(RequestId id);
 
