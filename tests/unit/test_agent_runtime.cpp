@@ -119,6 +119,12 @@ class FakeBackend final : public AgentBackend {
         operations_.push_back("clear_tool_grammar");
     }
 
+    void replace_messages(std::vector<Message> messages) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        history_ = std::move(messages);
+        operations_.push_back("replace_messages");
+    }
+
   private:
     mutable std::mutex mutex_;
     mutable std::vector<std::string> operations_;

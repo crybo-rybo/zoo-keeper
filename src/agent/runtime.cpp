@@ -50,13 +50,13 @@ Expected<void> load_history(AgentBackend& backend, const std::vector<Message>& m
     return {};
 }
 
-void restore_history(AgentBackend& backend, const std::vector<Message>& messages) {
-    backend.clear_history();
-    for (const auto& message : messages) {
-        auto add_result = backend.add_message(message);
-        assert(add_result.has_value());
-        (void)add_result;
-    }
+void restore_history(AgentBackend& backend, std::vector<Message> messages) {
+    // Use replace_messages rather than clear_history() + add_message() to avoid
+    // a redundant KV-cache flush.  The next generation will re-render from
+    // position zero and naturally overwrite any stale entries left by the
+    // scoped inference; entries beyond the restored prompt length are harmless
+    // because causal attention never reaches them.
+    backend.replace_messages(std::move(messages));
 }
 
 } // namespace

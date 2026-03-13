@@ -48,6 +48,25 @@ class AgentBackend {
     virtual std::vector<Message> get_history() const = 0;
     virtual void clear_history() = 0;
 
+    /**
+     * @brief Replaces the retained message history without flushing the KV cache.
+     *
+     * Unlike `clear_history()` followed by repeated `add_message()` calls, this
+     * method sets the message list atomically and resets the committed prompt
+     * position to zero so the next generation re-renders from scratch.  The KV
+     * cache is intentionally left intact: when the caller renders the first
+     * generation after `replace_messages`, the full prompt is processed starting
+     * at position zero, which naturally overwrites any stale cached entries from
+     * the previous history.  Stale entries at positions beyond the new prompt
+     * length are never referenced due to causal attention masking.
+     *
+     * Use this when restoring a previously snapshotted history so that the
+     * redundant KV-cache flush from `clear_history` is avoided.
+     *
+     * @param messages Replacement message list.
+     */
+    virtual void replace_messages(std::vector<Message> messages) = 0;
+
     virtual bool set_tool_grammar(const std::string& grammar_str) = 0;
     virtual void clear_tool_grammar() = 0;
 };
