@@ -34,7 +34,7 @@ The goal is not to be a giant framework. The goal is to give you a small number 
 | Surface | Use it when you need | What it gives you |
 |--------|-----------------------|-------------------|
 | `zoo::core::Model` | Direct, single-threaded control | Model loading, tokenization, generation, history, KV-cache management |
-| `zoo::Agent` | Async chat, streaming, and tool orchestration | Request queue, inference thread, cancellation, tool loop, `RequestHandle`, structured tool invocation tracking |
+| `zoo::Agent` | Async chat, stateless completion, streaming, and tool orchestration | Request queue, inference thread, cancellation, tool loop, `RequestHandle`, structured tool invocation tracking |
 
 ## Quick Start
 

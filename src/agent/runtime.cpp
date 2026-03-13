@@ -12,11 +12,54 @@
 #include "zoo/tools/validation.hpp"
 #include <cassert>
 #include <chrono>
+#include <functional>
 #include <thread>
 #include <unordered_map>
 #include <variant>
 
 namespace zoo::internal::agent {
+
+namespace {
+
+class ScopeExit {
+  public:
+    explicit ScopeExit(std::function<void()> callback) : callback_(std::move(callback)) {}
+
+    ScopeExit(const ScopeExit&) = delete;
+    ScopeExit& operator=(const ScopeExit&) = delete;
+    ScopeExit(ScopeExit&&) noexcept = default;
+    ScopeExit& operator=(ScopeExit&&) noexcept = default;
+
+    ~ScopeExit() {
+        if (callback_) {
+            callback_();
+        }
+    }
+
+  private:
+    std::function<void()> callback_;
+};
+
+Expected<void> load_history(AgentBackend& backend, const std::vector<Message>& messages) {
+    backend.clear_history();
+    for (const auto& message : messages) {
+        if (auto add_result = backend.add_message(message); !add_result) {
+            return std::unexpected(add_result.error());
+        }
+    }
+    return {};
+}
+
+void restore_history(AgentBackend& backend, const std::vector<Message>& messages) {
+    backend.clear_history();
+    for (const auto& message : messages) {
+        auto add_result = backend.add_message(message);
+        assert(add_result.has_value());
+        (void)add_result;
+    }
+}
+
+} // namespace
 
 AgentRuntime::AgentRuntime(const Config& cfg, std::unique_ptr<AgentBackend> backend)
     : config_(cfg), backend_(std::move(backend)), request_mailbox_(cfg.request_queue_capacity) {
@@ -31,6 +74,33 @@ RequestHandle AgentRuntime::chat(Message message,
                                  std::optional<std::function<void(std::string_view)>> callback) {
     auto prepared = request_tracker_.prepare(std::move(message), std::move(callback));
     RequestHandle handle{prepared.request.id, std::move(prepared.future)};
+
+    if (!running_.load(std::memory_order_acquire)) {
+        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+        return handle;
+    }
+
+    if (!request_mailbox_.push_request(std::move(prepared.request))) {
+        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
+                                               "Request queue is full or agent is shutting down"});
+        return handle;
+    }
+
+    return handle;
+}
+
+RequestHandle
+AgentRuntime::complete(std::vector<Message> messages,
+                       std::optional<std::function<void(std::string_view)>> callback) {
+    auto prepared =
+        request_tracker_.prepare(std::move(messages), HistoryMode::Replace, std::move(callback));
+    RequestHandle handle{prepared.request.id, std::move(prepared.future)};
+
+    if (prepared.request.messages.empty()) {
+        request_tracker_.fail(handle.id, Error{ErrorCode::InvalidMessageSequence,
+                                               "Request must include at least one message"});
+        return handle;
+    }
 
     if (!running_.load(std::memory_order_acquire)) {
         request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
@@ -243,9 +313,28 @@ void AgentRuntime::handle_command(Command& cmd) {
 Expected<Response> AgentRuntime::process_request(const Request& request) {
     auto start_time = std::chrono::steady_clock::now();
 
-    auto add_result = backend_->add_message(request.message);
-    if (!add_result) {
-        return std::unexpected(add_result.error());
+    std::optional<std::vector<Message>> original_history;
+    std::optional<ScopeExit> restore_history_guard;
+
+    if (request.history_mode == HistoryMode::Replace) {
+        original_history = backend_->get_history();
+        restore_history_guard.emplace(
+            [this, &original_history] { restore_history(*backend_, *original_history); });
+
+        if (auto load_result = load_history(*backend_, request.messages); !load_result) {
+            return std::unexpected(load_result.error());
+        }
+    } else {
+        if (request.messages.size() != 1u) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidMessageSequence,
+                      "Stateful chat requests must include exactly one message"});
+        }
+
+        auto add_result = backend_->add_message(request.messages.front());
+        if (!add_result) {
+            return std::unexpected(add_result.error());
+        }
     }
 
     std::chrono::steady_clock::time_point first_token_time;

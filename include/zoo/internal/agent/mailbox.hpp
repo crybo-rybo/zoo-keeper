@@ -1,6 +1,6 @@
 /**
  * @file mailbox.hpp
- * @brief Dual-lane mailbox for agent chat requests and control commands.
+ * @brief Dual-lane mailbox for agent requests and control commands.
  */
 
 #pragma once
@@ -16,7 +16,7 @@
 
 namespace zoo::internal::agent {
 
-/// A single item popped from the mailbox: either a chat request or a control command.
+/// A single item popped from the mailbox: either a queued request or a control command.
 using WorkItem = std::variant<Request, Command>;
 
 /**

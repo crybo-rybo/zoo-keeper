@@ -137,3 +137,31 @@ TEST_F(LiveModelIntegrationTest, AgentChatsAndStreams) {
     EXPECT_EQ(history[1].role, zoo::Role::User);
     EXPECT_EQ(history.back().role, zoo::Role::Assistant);
 }
+
+TEST_F(LiveModelIntegrationTest, AgentCompleteDoesNotMutatePersistentHistory) {
+    auto agent_result = zoo::Agent::create(config());
+    ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
+
+    auto& agent = *agent_result;
+    agent->set_system_prompt("Reply briefly.");
+
+    auto persistent = agent->chat(zoo::Message::user("Say hello in one short sentence."));
+    auto persistent_response = persistent.future.get();
+    ASSERT_TRUE(persistent_response.has_value()) << persistent_response.error().to_string();
+
+    const auto before = agent->get_history();
+    ASSERT_GE(before.size(), 3u);
+
+    std::string streamed;
+    auto scoped = agent->complete({zoo::Message::system("Reply in exactly three words."),
+                                   zoo::Message::user("Say hello politely.")},
+                                  [&](std::string_view token) { streamed.append(token); });
+
+    auto scoped_response = scoped.future.get();
+    ASSERT_TRUE(scoped_response.has_value()) << scoped_response.error().to_string();
+    EXPECT_FALSE(scoped_response->text.empty());
+    EXPECT_FALSE(streamed.empty());
+
+    const auto after = agent->get_history();
+    EXPECT_EQ(after, before);
+}

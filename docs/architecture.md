@@ -18,12 +18,12 @@ Use `Model` when you want direct, single-threaded inference without the agent ru
 
 ### `zoo::Agent`
 
-Use `Agent` when you want queued asynchronous requests, streaming callbacks, cancellation, and model-driven tool execution. `Agent` is the primary high-level runtime surface for most consumers.
+Use `Agent` when you want queued asynchronous requests, streaming callbacks, cancellation, model-driven tool execution, and a choice between stateful `chat(...)` requests and stateless request-scoped `complete(...)` requests. `Agent` is the primary high-level runtime surface for most consumers.
 
 ## Public Threading Guarantees
 
 - `zoo::Agent` owns a background inference thread.
-- Requests are submitted from the calling thread and resolved through `RequestHandle::future`.
+- Requests are submitted from the calling thread through `chat(...)` or `complete(...)` and resolved through `RequestHandle::future`.
 - Model state is owned by the inference thread while the agent is running.
 - Streaming callbacks and tool handlers execute on the inference thread.
 

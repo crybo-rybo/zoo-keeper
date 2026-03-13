@@ -46,6 +46,25 @@ class RequestTracker {
             std::move(future)};
     }
 
+    PreparedRequest
+    prepare(std::vector<Message> messages, HistoryMode history_mode,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
+        auto promise = std::make_shared<std::promise<Expected<Response>>>();
+        auto future = promise->get_future();
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        RequestId id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            requests_.emplace(id, State{promise, cancelled});
+        }
+
+        return PreparedRequest{
+            Request(std::move(messages), history_mode, std::move(callback), promise, id,
+                    cancelled),
+            std::move(future)};
+    }
+
     /**
      * @brief Requests cooperative cancellation for a tracked request.
      */
