@@ -60,8 +60,7 @@ class RequestTracker {
         }
 
         return PreparedRequest{
-            Request(std::move(messages), history_mode, std::move(callback), promise, id,
-                    cancelled),
+            Request(std::move(messages), history_mode, std::move(callback), promise, id, cancelled),
             std::move(future)};
     }
 
