@@ -14,7 +14,12 @@ if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
     endif()
 endif()
 
-find_dependency(llama CONFIG)
+set(_zoo_cmake_package_root "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/cmake")
+find_dependency(llama CONFIG
+    HINTS
+        "${_zoo_cmake_package_root}/llama"
+)
+unset(_zoo_cmake_package_root)
 find_dependency(nlohmann_json 3.11 CONFIG)
 
 if(NOT TARGET ZooKeeper::llama AND TARGET llama)
