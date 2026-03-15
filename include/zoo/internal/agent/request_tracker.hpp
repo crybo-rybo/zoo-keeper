@@ -65,6 +65,40 @@ class RequestTracker {
     }
 
     /**
+     * @brief Allocates a request id and shared state for one extraction request (stateful).
+     *
+     * @param message User message to append before extraction.
+     * @param extraction_schema JSON Schema constraining the generation output.
+     * @param callback Optional streaming callback.
+     * @return Prepared request with its result future.
+     */
+    PreparedRequest
+    prepare(Message message, nlohmann::json extraction_schema,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
+        auto prepared = prepare(std::move(message), std::move(callback));
+        prepared.request.extraction_schema = std::move(extraction_schema);
+        return prepared;
+    }
+
+    /**
+     * @brief Allocates a request id and shared state for one extraction request (stateless).
+     *
+     * @param messages Full conversation history for the scoped extraction.
+     * @param history_mode History management policy for the request.
+     * @param extraction_schema JSON Schema constraining the generation output.
+     * @param callback Optional streaming callback.
+     * @return Prepared request with its result future.
+     */
+    PreparedRequest
+    prepare(std::vector<Message> messages, HistoryMode history_mode,
+            nlohmann::json extraction_schema,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
+        auto prepared = prepare(std::move(messages), history_mode, std::move(callback));
+        prepared.request.extraction_schema = std::move(extraction_schema);
+        return prepared;
+    }
+
+    /**
      * @brief Requests cooperative cancellation for a tracked request.
      */
     void cancel(RequestId id) {

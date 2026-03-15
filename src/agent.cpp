@@ -45,6 +45,16 @@ RequestHandle Agent::complete(std::vector<Message> messages,
     return impl_->runtime.complete(std::move(messages), std::move(callback));
 }
 
+RequestHandle Agent::extract(const nlohmann::json& output_schema, Message message,
+                             std::optional<std::function<void(std::string_view)>> callback) {
+    return impl_->runtime.extract(output_schema, std::move(message), std::move(callback));
+}
+
+RequestHandle Agent::extract(const nlohmann::json& output_schema, std::vector<Message> messages,
+                             std::optional<std::function<void(std::string_view)>> callback) {
+    return impl_->runtime.extract(output_schema, std::move(messages), std::move(callback));
+}
+
 void Agent::cancel(RequestId id) {
     impl_->runtime.cancel(id);
 }

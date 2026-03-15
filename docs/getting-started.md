@@ -81,6 +81,8 @@ The primary entry point for agentic behavior. Created via the `Agent::create()` 
 | `chat(message, callback)` | Chat with per-token streaming callback |
 | `complete(messages)` | Submit a stateless request-scoped history without mutating retained history |
 | `complete(messages, callback)` | Stateless completion with per-token streaming callback |
+| `extract(schema, message)` | Submit a grammar-constrained extraction; result in `response->extracted_data` |
+| `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |
 | `set_system_prompt(text)` | Set or update the system prompt |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
@@ -128,6 +130,7 @@ Returned from `chat()` via `std::future`. Contains:
 - `usage` -- token counts (prompt, completion, total)
 - `metrics` -- latency, time-to-first-token, tokens/sec
 - `tool_invocations` -- explicit tool attempts including name, arguments, result, and error outcome
+- `extracted_data` -- structured JSON result from `extract()` calls; `std::nullopt` for `chat()` and `complete()`
 
 ### Error Handling
 

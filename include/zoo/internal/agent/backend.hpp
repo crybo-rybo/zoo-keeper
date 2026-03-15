@@ -67,7 +67,27 @@ class AgentBackend {
      */
     virtual void replace_messages(std::vector<Message> messages) = 0;
 
+    /**
+     * @brief Enables lazy grammar-constrained generation for tool calls.
+     *
+     * Grammar activates only after the `<tool_call>` sentinel is emitted.
+     *
+     * @param grammar_str GBNF grammar string rooted at `root`.
+     * @return `true` when the sampler chain was rebuilt successfully.
+     */
     virtual bool set_tool_grammar(const std::string& grammar_str) = 0;
+
+    /**
+     * @brief Enables immediate grammar-constrained generation for schema output.
+     *
+     * Grammar is active from the first generated token; no sentinel required.
+     *
+     * @param grammar_str GBNF grammar string rooted at `root`.
+     * @return `true` when the sampler chain was rebuilt successfully.
+     */
+    virtual bool set_schema_grammar(const std::string& grammar_str) = 0;
+
+    /// Disables any active grammar and restores the default sampler chain.
     virtual void clear_tool_grammar() = 0;
 };
 

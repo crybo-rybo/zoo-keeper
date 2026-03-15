@@ -12,6 +12,7 @@
 #include <future>
 #include <initializer_list>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -108,12 +109,44 @@ class Agent {
              std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
 
     /**
+     * @brief Queues a structured extraction request (stateful).
+     *
+     * Appends the user message to the conversation history and constrains
+     * generation to produce JSON matching the supplied schema. The response
+     * includes `extracted_data` with the parsed JSON.
+     *
+     * @param output_schema JSON Schema describing the desired output structure.
+     * @param message User message to append before generation.
+     * @param callback Optional callback that receives streamed text.
+     * @return Handle containing the request id and result future.
+     */
+    RequestHandle
+    extract(const nlohmann::json& output_schema, Message message,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+
+    /**
+     * @brief Queues a structured extraction request (stateless).
+     *
+     * Uses the provided messages without mutating agent history and constrains
+     * generation to produce JSON matching the supplied schema. The response
+     * includes `extracted_data` with the parsed JSON.
+     *
+     * @param output_schema JSON Schema describing the desired output structure.
+     * @param messages Full conversation history for one request-scoped extraction.
+     * @param callback Optional callback that receives streamed text.
+     * @return Handle containing the request id and result future.
+     */
+    RequestHandle
+    extract(const nlohmann::json& output_schema, std::vector<Message> messages,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+
+    /**
      * @brief Requests cancellation of a queued or running request.
      *
      * Cancellation is cooperative. Requests that have already completed or have
      * been cleaned up are unaffected.
      *
-     * @param id Request identifier returned by `chat()` or `complete()`.
+     * @param id Request identifier returned by `chat()`, `complete()`, or `extract()`.
      */
     void cancel(RequestId id);
 

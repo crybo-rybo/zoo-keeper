@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 
 add_executable(zoo_integration_tests
     test_model_agent.cpp
+    test_extract.cpp
 )
 
 target_link_libraries(zoo_integration_tests

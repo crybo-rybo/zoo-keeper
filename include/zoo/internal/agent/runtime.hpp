@@ -11,6 +11,7 @@
 #include "zoo/agent.hpp"
 #include <atomic>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <thread>
 
 namespace zoo::internal::agent {
@@ -39,6 +40,14 @@ class AgentRuntime {
     complete(std::vector<Message> messages,
              std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
 
+    RequestHandle
+    extract(const nlohmann::json& output_schema, Message message,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+
+    RequestHandle
+    extract(const nlohmann::json& output_schema, std::vector<Message> messages,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+
     void cancel(RequestId id);
     void set_system_prompt(const std::string& prompt);
     void stop();
@@ -56,6 +65,7 @@ class AgentRuntime {
     void handle_request(Request& request);
     void handle_command(Command& cmd);
     Expected<Response> process_request(const Request& request);
+    Expected<Response> process_extraction_request(const Request& request);
 
     void fail_pending(const Error& error);
     static void resolve_command_on_shutdown(Command& cmd);

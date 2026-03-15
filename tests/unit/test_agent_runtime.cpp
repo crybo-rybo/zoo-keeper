@@ -113,6 +113,13 @@ class FakeBackend final : public AgentBackend {
         return tool_grammar_supported_;
     }
 
+    bool set_schema_grammar(const std::string& grammar_str) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        operations_.push_back("set_schema_grammar");
+        (void)grammar_str;
+        return true;
+    }
+
     void clear_tool_grammar() override {
         std::lock_guard<std::mutex> lock(mutex_);
         last_tool_grammar_.clear();

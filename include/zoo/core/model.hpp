@@ -131,15 +131,32 @@ class Model {
     /**
      * @brief Enables grammar-constrained tool calling for future generations.
      *
+     * Uses lazy grammar activation triggered by `<tool_call>` sentinel.
+     *
      * @param grammar_str GBNF grammar string rooted at `root`.
      * @return `true` when the sampler chain was rebuilt successfully.
      */
     bool set_tool_grammar(const std::string& grammar_str);
-    /// Disables grammar-constrained tool calling and restores the default sampler chain.
+
+    /**
+     * @brief Enables grammar-constrained schema output for future generations.
+     *
+     * Uses non-lazy (immediate) grammar activation from the first token.
+     *
+     * @param grammar_str GBNF grammar string rooted at `root`.
+     * @return `true` when the sampler chain was rebuilt successfully.
+     */
+    bool set_schema_grammar(const std::string& grammar_str);
+
+    /// Disables any active grammar and restores the default sampler chain.
     void clear_tool_grammar() noexcept;
     /// Returns whether tool grammar constraints are currently active.
     bool has_tool_grammar() const noexcept {
-        return grammar_active_;
+        return grammar_mode_ == GrammarMode::ToolCall;
+    }
+    /// Returns whether schema grammar constraints are currently active.
+    bool has_schema_grammar() const noexcept {
+        return grammar_mode_ == GrammarMode::Schema;
     }
 
     /// Returns the configured context window size.
@@ -214,6 +231,8 @@ class Model {
     void add_dist_sampler(llama_sampler* chain) const;
     /// Rebuilds the sampler chain so a lazy grammar activates on `<tool_call>`.
     bool rebuild_sampler_with_grammar();
+    /// Rebuilds the sampler chain with an immediately-active grammar for schema output.
+    bool rebuild_sampler_with_schema_grammar();
     /// Returns cached llama.cpp chat messages, rebuilding only when history has changed.
     const std::vector<llama_chat_message>& llama_messages();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
@@ -242,9 +261,18 @@ class Model {
     int context_size_ = 0;
     const char* tmpl_ = nullptr;
 
-    // Tool grammar state
+    // Grammar state
+    /**
+     * @brief Distinguishes between no grammar, lazy tool-call grammar, and
+     *        immediate schema-output grammar.
+     */
+    enum class GrammarMode {
+        None,     ///< No grammar constraint active.
+        ToolCall, ///< Lazy grammar activated on the `<tool_call>` sentinel.
+        Schema    ///< Immediate grammar active from the first generated token.
+    };
     std::string tool_grammar_str_;
-    bool grammar_active_ = false;
+    GrammarMode grammar_mode_ = GrammarMode::None;
 
     // Incremental prompt state
     PromptState prompt_state_;

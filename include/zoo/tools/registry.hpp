@@ -411,6 +411,25 @@ normalize_manual_tool_metadata(const std::string& name, const std::string& descr
     return metadata;
 }
 
+/**
+ * @brief Normalizes a JSON Schema object into a parameter vector.
+ *
+ * Same validation logic as manual tool registration, but without requiring
+ * a tool name or description context. Uses "schema" as the context name
+ * for error messages.
+ *
+ * @param schema JSON Schema object with type "object".
+ * @return Normalized parameter vector in canonical order (required first, then optional).
+ */
+[[nodiscard]] inline Expected<std::vector<ToolParameter>>
+normalize_schema(const nlohmann::json& schema) {
+    auto result = normalize_manual_tool_metadata("schema", "", schema);
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+    return std::move(result->parameters);
+}
+
 template <typename Tuple, size_t... Is>
 std::vector<ToolParameter> build_typed_parameters_impl(const std::vector<std::string>& param_names,
                                                        std::index_sequence<Is...>) {
