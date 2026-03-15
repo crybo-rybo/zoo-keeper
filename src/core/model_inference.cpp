@@ -311,9 +311,8 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
         return std::unexpected(text_result.error());
     }
 
-    const bool tool_detected =
-        (grammar_mode_ == GrammarMode::ToolCall) &&
-        (text_result->find("<tool_call>") != std::string::npos);
+    const bool tool_detected = (grammar_mode_ == GrammarMode::ToolCall) &&
+                               (text_result->find("<tool_call>") != std::string::npos);
 
     return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
 }

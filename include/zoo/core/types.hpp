@@ -137,8 +137,9 @@ enum class ErrorCode {
     ToolValidationFailed = 506, ///< A parsed tool call failed schema-based argument validation.
 
     // Extraction errors (600-699)
-    InvalidOutputSchema = 600, ///< A supplied output schema is malformed or uses unsupported constructs.
-    ExtractionFailed = 601,    ///< Structured extraction from model output failed.
+    InvalidOutputSchema =
+        600, ///< A supplied output schema is malformed or uses unsupported constructs.
+    ExtractionFailed = 601, ///< Structured extraction from model output failed.
 
     Unknown = 999 ///< Fallback code for uncategorized failures.
 };

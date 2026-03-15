@@ -124,14 +124,13 @@ RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema, Message
     if (!params) {
         auto prepared = request_tracker_.prepare(std::move(message), std::move(callback));
         RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-        request_tracker_.fail(
-            handle.id,
-            Error{ErrorCode::InvalidOutputSchema, params.error().message});
+        request_tracker_.fail(handle.id,
+                              Error{ErrorCode::InvalidOutputSchema, params.error().message});
         return handle;
     }
 
-    auto prepared = request_tracker_.prepare(
-        std::move(message), nlohmann::json(output_schema), std::move(callback));
+    auto prepared = request_tracker_.prepare(std::move(message), nlohmann::json(output_schema),
+                                             std::move(callback));
     RequestHandle handle{prepared.request.id, std::move(prepared.future)};
 
     if (!running_.load(std::memory_order_acquire)) {
@@ -148,24 +147,22 @@ RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema, Message
     return handle;
 }
 
-RequestHandle
-AgentRuntime::extract(const nlohmann::json& output_schema, std::vector<Message> messages,
-                      std::optional<std::function<void(std::string_view)>> callback) {
+RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema,
+                                    std::vector<Message> messages,
+                                    std::optional<std::function<void(std::string_view)>> callback) {
     // Validate schema upfront on the calling thread (fail fast)
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
-        auto prepared = request_tracker_.prepare(
-            std::move(messages), HistoryMode::Replace, std::move(callback));
+        auto prepared = request_tracker_.prepare(std::move(messages), HistoryMode::Replace,
+                                                 std::move(callback));
         RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-        request_tracker_.fail(
-            handle.id,
-            Error{ErrorCode::InvalidOutputSchema, params.error().message});
+        request_tracker_.fail(handle.id,
+                              Error{ErrorCode::InvalidOutputSchema, params.error().message});
         return handle;
     }
 
-    auto prepared = request_tracker_.prepare(
-        std::move(messages), HistoryMode::Replace,
-        nlohmann::json(output_schema), std::move(callback));
+    auto prepared = request_tracker_.prepare(std::move(messages), HistoryMode::Replace,
+                                             nlohmann::json(output_schema), std::move(callback));
     RequestHandle handle{prepared.request.id, std::move(prepared.future)};
 
     if (prepared.request.messages.empty()) {
@@ -606,8 +603,7 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
     // Normalize schema and build GBNF grammar
     auto params = tools::detail::normalize_schema(*request.extraction_schema);
     if (!params) {
-        return std::unexpected(
-            Error{ErrorCode::InvalidOutputSchema, params.error().message});
+        return std::unexpected(Error{ErrorCode::InvalidOutputSchema, params.error().message});
     }
 
     std::string grammar_str = tools::GrammarBuilder::build_schema(*params);

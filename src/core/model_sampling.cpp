@@ -91,8 +91,7 @@ bool Model::rebuild_sampler_with_schema_grammar() {
 
     add_sampling_stages(chain.get());
 
-    auto* grammar_sampler =
-        llama_sampler_init_grammar(vocab_, tool_grammar_str_.c_str(), "root");
+    auto* grammar_sampler = llama_sampler_init_grammar(vocab_, tool_grammar_str_.c_str(), "root");
     if (!grammar_sampler) {
         return false;
     }

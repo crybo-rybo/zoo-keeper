@@ -166,10 +166,9 @@ validate_json_against_schema(const nlohmann::json& data,
         }
 
         if (!detail::json_matches_type(value, found->type)) {
-            return std::unexpected(
-                Error{ErrorCode::ToolValidationFailed,
-                      "Field '" + key + "' has wrong type: expected " +
-                          std::string(tool_value_type_name(found->type))});
+            return std::unexpected(Error{ErrorCode::ToolValidationFailed,
+                                         "Field '" + key + "' has wrong type: expected " +
+                                             std::string(tool_value_type_name(found->type))});
         }
 
         if (!found->enum_values.empty()) {

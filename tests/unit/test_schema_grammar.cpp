@@ -96,7 +96,10 @@ TEST(SchemaGrammarTest, BooleanType) {
 
 TEST(SchemaGrammarTest, EnumConstrainedValues) {
     std::vector<ToolParameter> params = {
-        {"color", ToolValueType::String, true, "",
+        {"color",
+         ToolValueType::String,
+         true,
+         "",
          {nlohmann::json("red"), nlohmann::json("green"), nlohmann::json("blue")}},
     };
 

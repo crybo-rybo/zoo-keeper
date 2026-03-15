@@ -67,8 +67,7 @@ class GrammarBuilder {
         std::string grammar;
         const std::string prefix = "schema-0";
 
-        grammar += "root ::= " + literal("{") + " ws " + prefix + "-args ws " +
-                   literal("}") + "\n";
+        grammar += "root ::= " + literal("{") + " ws " + prefix + "-args ws " + literal("}") + "\n";
 
         append_prefixed_parameter_rules(grammar, prefix, parameters);
 
@@ -80,8 +79,8 @@ class GrammarBuilder {
         } else if (required_count == 0) {
             grammar += prefix + "-start-0";
         } else {
-            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " +
-                       prefix + "-cont-" + std::to_string(required_count);
+            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " + prefix +
+                       "-cont-" + std::to_string(required_count);
         }
         grammar += "\n";
 
@@ -123,8 +122,8 @@ class GrammarBuilder {
         } else if (required_count == 0) {
             grammar += prefix + "-start-0";
         } else {
-            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " +
-                       prefix + "-cont-" + std::to_string(required_count);
+            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " + prefix +
+                       "-cont-" + std::to_string(required_count);
         }
         grammar += "\n";
 
@@ -133,8 +132,7 @@ class GrammarBuilder {
         }
     }
 
-    static void append_prefixed_parameter_rules(std::string& grammar,
-                                                const std::string& prefix,
+    static void append_prefixed_parameter_rules(std::string& grammar, const std::string& prefix,
                                                 const std::vector<ToolParameter>& parameters) {
         for (size_t param_index = 0; param_index < parameters.size(); ++param_index) {
             const auto& parameter = parameters[param_index];
@@ -160,8 +158,7 @@ class GrammarBuilder {
         }
     }
 
-    static void append_prefixed_optional_rules(std::string& grammar,
-                                               const std::string& prefix,
+    static void append_prefixed_optional_rules(std::string& grammar, const std::string& prefix,
                                                const std::vector<ToolParameter>& parameters,
                                                size_t start_index) {
         for (size_t index = start_index; index <= parameters.size(); ++index) {
@@ -178,10 +175,10 @@ class GrammarBuilder {
             const std::string next_cont = prefix + "-cont-" + std::to_string(index + 1);
             const std::string next_start = prefix + "-start-" + std::to_string(index + 1);
 
-            grammar += start_r + " ::= ws | " + param_r + " " + next_cont + " | " +
-                       next_start + "\n";
-            grammar += cont_r + " ::= ws | ws " + literal(",") + " ws " +
-                       param_r + " " + next_cont + " | " + next_cont + "\n";
+            grammar +=
+                start_r + " ::= ws | " + param_r + " " + next_cont + " | " + next_start + "\n";
+            grammar += cont_r + " ::= ws | ws " + literal(",") + " ws " + param_r + " " +
+                       next_cont + " | " + next_cont + "\n";
         }
     }
 
@@ -193,8 +190,8 @@ class GrammarBuilder {
         return count;
     }
 
-    static std::string build_prefixed_required_sequence(const std::string& prefix,
-                                                        size_t begin, size_t end) {
+    static std::string build_prefixed_required_sequence(const std::string& prefix, size_t begin,
+                                                        size_t end) {
         std::string sequence;
         for (size_t index = begin; index < end; ++index) {
             if (!sequence.empty()) {
