@@ -18,9 +18,12 @@
 
 namespace zoo::internal::agent {
 
+/**
+ * @brief Specifies whether a request appends to or replaces the agent's retained history.
+ */
 enum class HistoryMode {
-    Append,
-    Replace,
+    Append,  ///< New messages are appended to the existing conversation history.
+    Replace, ///< The provided message list replaces the existing history for this request.
 };
 
 /**

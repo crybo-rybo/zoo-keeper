@@ -13,7 +13,7 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **`Agent::extract(output_schema, messages, callback)`** — stateless variant that operates on a provided message history without mutating agent state, mirroring the `chat()` / `complete()` pattern.
 - **`GrammarBuilder::build_schema(parameters)`** — generates a GBNF grammar for a standalone JSON schema (no `<tool_call>` sentinel wrapping). Shares the same parameter/optional/enum rule generation logic as the tool grammar builder via refactored prefix-parameterized helpers.
 - **`validate_json_against_schema(data, parameters)`** — free function in `zoo::tools` that validates a JSON object against a `ToolParameter` vector without requiring a `ToolCall` or `ToolRegistry`.
-- **`detail::normalize_schema(schema)`** — public helper that normalizes a JSON Schema into a `vector<ToolParameter>`, extracted from the existing `normalize_manual_tool_metadata()`.
+- **`detail::normalize_schema(schema)`** — internal helper in `zoo::tools::detail` that normalizes a JSON Schema into a `vector<ToolParameter>`, extracted from the existing `normalize_manual_tool_metadata()`.
 - **`Model::set_schema_grammar(grammar_str)`** — enables non-lazy (immediately active) grammar constraints for schema output, using `llama_sampler_init_grammar()` instead of the lazy sentinel-triggered `llama_sampler_init_grammar_lazy_patterns()` used for tool calling.
 - **`AgentBackend::set_schema_grammar(grammar_str)`** — virtual method on the internal backend seam, enabling test fakes to observe schema grammar setup.
 - **`Response::extracted_data`** — new `std::optional<nlohmann::json>` field on `Response`, populated only by `extract()` calls.

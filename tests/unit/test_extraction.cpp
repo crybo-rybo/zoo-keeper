@@ -407,6 +407,23 @@ TEST(ExtractionTest, ExtractionRequestRoutesWithoutToolLoop) {
     EXPECT_EQ(gen_count, 1);
 }
 
+TEST(ExtractionTest, ValidJsonButWrongTypesReturnsError) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            GenerationResult{R"({"name": 42, "age": "not_a_number"})", 10, false});
+    });
+
+    auto handle = runtime.extract(simple_schema(), Message::user("extract"));
+    auto result = handle.future.get();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ExtractionFailed);
+}
+
 TEST(ExtractionTest, MalformedJsonOutputReturnsError) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();

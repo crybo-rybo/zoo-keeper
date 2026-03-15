@@ -146,7 +146,7 @@ class Agent {
      * Cancellation is cooperative. Requests that have already completed or have
      * been cleaned up are unaffected.
      *
-     * @param id Request identifier returned by `chat()` or `complete()`.
+     * @param id Request identifier returned by `chat()`, `complete()`, or `extract()`.
      */
     void cancel(RequestId id);
 

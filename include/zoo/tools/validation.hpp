@@ -133,7 +133,8 @@ class ToolArgumentsValidator {
  *
  * @param data JSON object to validate.
  * @param parameters Normalized parameter schema to validate against.
- * @return Empty success when the data satisfies the schema.
+ * @return Empty success when the data satisfies the schema, or a
+ *         `ToolValidationFailed` error identifying the first constraint violation.
  */
 [[nodiscard]] inline Expected<void>
 validate_json_against_schema(const nlohmann::json& data,

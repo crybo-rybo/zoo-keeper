@@ -639,11 +639,6 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
 
     // Set schema grammar, restore previous grammar on exit
     const bool had_tool_grammar = tool_grammar_active_.load(std::memory_order_acquire);
-    std::string saved_tool_grammar;
-    if (had_tool_grammar) {
-        // We don't have direct access to the grammar string, but we can
-        // rebuild it from tool metadata after extraction completes.
-    }
 
     if (!backend_->set_schema_grammar(grammar_str)) {
         return std::unexpected(
@@ -655,9 +650,11 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
         if (had_tool_grammar) {
             auto metadata = tool_registry_.get_all_tool_metadata();
             auto tool_grammar = tools::GrammarBuilder::build(metadata);
+            bool restored = false;
             if (!tool_grammar.empty()) {
-                backend_->set_tool_grammar(tool_grammar);
+                restored = backend_->set_tool_grammar(tool_grammar);
             }
+            tool_grammar_active_.store(restored, std::memory_order_release);
         }
     });
 

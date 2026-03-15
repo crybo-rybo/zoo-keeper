@@ -262,7 +262,15 @@ class Model {
     const char* tmpl_ = nullptr;
 
     // Grammar state
-    enum class GrammarMode { None, ToolCall, Schema };
+    /**
+     * @brief Distinguishes between no grammar, lazy tool-call grammar, and
+     *        immediate schema-output grammar.
+     */
+    enum class GrammarMode {
+        None,     ///< No grammar constraint active.
+        ToolCall, ///< Lazy grammar activated on the `<tool_call>` sentinel.
+        Schema    ///< Immediate grammar active from the first generated token.
+    };
     std::string tool_grammar_str_;
     GrammarMode grammar_mode_ = GrammarMode::None;
 
