@@ -49,9 +49,55 @@ class GrammarBuilder {
         return grammar;
     }
 
+    /**
+     * @brief Builds a grammar for a standalone JSON schema (no tool-call sentinels).
+     *
+     * @param parameters Normalized parameter vector describing the output schema.
+     * @return A GBNF grammar rooted at `root`, or an empty string when no
+     *         parameters are provided.
+     */
+    static std::string build_schema(const std::vector<ToolParameter>& parameters) {
+        if (parameters.empty()) {
+            std::string grammar;
+            grammar += "root ::= " + literal("{") + " ws " + literal("}") + "\n";
+            grammar += primitive_rules();
+            return grammar;
+        }
+
+        std::string grammar;
+        const std::string prefix = "schema-0";
+
+        grammar += "root ::= " + literal("{") + " ws " + prefix + "-args ws " +
+                   literal("}") + "\n";
+
+        append_prefixed_parameter_rules(grammar, prefix, parameters);
+
+        const size_t required_count = count_required_prefix(parameters);
+
+        grammar += prefix + "-args ::= ";
+        if (required_count == parameters.size()) {
+            grammar += build_prefixed_required_sequence(prefix, 0, required_count);
+        } else if (required_count == 0) {
+            grammar += prefix + "-start-0";
+        } else {
+            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " +
+                       prefix + "-cont-" + std::to_string(required_count);
+        }
+        grammar += "\n";
+
+        if (required_count < parameters.size()) {
+            append_prefixed_optional_rules(grammar, prefix, parameters, required_count);
+        }
+
+        grammar += primitive_rules();
+        return grammar;
+    }
+
   private:
     static void append_tool_rules(std::string& grammar, size_t tool_index,
                                   const ToolMetadata& tool) {
+        const std::string prefix = "tool-" + std::to_string(tool_index);
+
         grammar += tool_rule_name(tool_index) + " ::= " + literal("{") + " ws " +
                    json_string_literal("name") + " ws " + literal(":") + " ws " +
                    json_string_literal(tool.name) + " ws " + literal(",") + " ws " +
@@ -59,7 +105,7 @@ class GrammarBuilder {
                    literal("{") + " ws ";
 
         if (!tool.parameters.empty()) {
-            grammar += args_rule_name(tool_index) + " ws ";
+            grammar += prefix + "-args ws ";
         }
 
         grammar += literal("}") + " ws " + literal("}") + "\n";
@@ -69,39 +115,41 @@ class GrammarBuilder {
         }
 
         const size_t required_count = count_required_prefix(tool.parameters);
-        append_parameter_rules(grammar, tool_index, tool);
+        append_prefixed_parameter_rules(grammar, prefix, tool.parameters);
 
-        grammar += args_rule_name(tool_index) + " ::= ";
+        grammar += prefix + "-args ::= ";
         if (required_count == tool.parameters.size()) {
-            grammar += build_required_sequence(tool_index, 0, required_count);
+            grammar += build_prefixed_required_sequence(prefix, 0, required_count);
         } else if (required_count == 0) {
-            grammar += start_rule_name(tool_index, 0);
+            grammar += prefix + "-start-0";
         } else {
-            grammar += build_required_sequence(tool_index, 0, required_count) + " " +
-                       cont_rule_name(tool_index, required_count);
+            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " +
+                       prefix + "-cont-" + std::to_string(required_count);
         }
         grammar += "\n";
 
         if (required_count < tool.parameters.size()) {
-            append_optional_rules(grammar, tool_index, tool.parameters, required_count);
+            append_prefixed_optional_rules(grammar, prefix, tool.parameters, required_count);
         }
     }
 
-    static void append_parameter_rules(std::string& grammar, size_t tool_index,
-                                       const ToolMetadata& tool) {
-        for (size_t param_index = 0; param_index < tool.parameters.size(); ++param_index) {
-            const auto& parameter = tool.parameters[param_index];
-            grammar += param_rule_name(tool_index, param_index) +
-                       " ::= " + json_string_literal(parameter.name) + " ws " + literal(":") +
-                       " ws ";
+    static void append_prefixed_parameter_rules(std::string& grammar,
+                                                const std::string& prefix,
+                                                const std::vector<ToolParameter>& parameters) {
+        for (size_t param_index = 0; param_index < parameters.size(); ++param_index) {
+            const auto& parameter = parameters[param_index];
+            const std::string p_rule = prefix + "-param-" + std::to_string(param_index);
+            grammar += p_rule + " ::= " + json_string_literal(parameter.name) + " ws " +
+                       literal(":") + " ws ";
 
             if (parameter.enum_values.empty()) {
                 grammar += primitive_rule_name(parameter.type) + "\n";
                 continue;
             }
 
-            grammar += enum_rule_name(tool_index, param_index) + "\n";
-            grammar += enum_rule_name(tool_index, param_index) + " ::= ";
+            const std::string e_rule = prefix + "-enum-" + std::to_string(param_index);
+            grammar += e_rule + "\n";
+            grammar += e_rule + " ::= ";
             for (size_t enum_index = 0; enum_index < parameter.enum_values.size(); ++enum_index) {
                 if (enum_index > 0) {
                     grammar += " | ";
@@ -112,24 +160,28 @@ class GrammarBuilder {
         }
     }
 
-    static void append_optional_rules(std::string& grammar, size_t tool_index,
-                                      const std::vector<ToolParameter>& parameters,
-                                      size_t start_index) {
+    static void append_prefixed_optional_rules(std::string& grammar,
+                                               const std::string& prefix,
+                                               const std::vector<ToolParameter>& parameters,
+                                               size_t start_index) {
         for (size_t index = start_index; index <= parameters.size(); ++index) {
+            const std::string start_r = prefix + "-start-" + std::to_string(index);
+            const std::string cont_r = prefix + "-cont-" + std::to_string(index);
+            const std::string param_r = prefix + "-param-" + std::to_string(index);
+
             if (index == parameters.size()) {
-                grammar += start_rule_name(tool_index, index) + " ::= ws\n";
-                grammar += cont_rule_name(tool_index, index) + " ::= ws\n";
+                grammar += start_r + " ::= ws\n";
+                grammar += cont_r + " ::= ws\n";
                 continue;
             }
 
-            grammar += start_rule_name(tool_index, index) + " ::= ws | " +
-                       param_rule_name(tool_index, index) + " " +
-                       cont_rule_name(tool_index, index + 1) + " | " +
-                       start_rule_name(tool_index, index + 1) + "\n";
-            grammar += cont_rule_name(tool_index, index) + " ::= ws | ws " + literal(",") + " ws " +
-                       param_rule_name(tool_index, index) + " " +
-                       cont_rule_name(tool_index, index + 1) + " | " +
-                       cont_rule_name(tool_index, index + 1) + "\n";
+            const std::string next_cont = prefix + "-cont-" + std::to_string(index + 1);
+            const std::string next_start = prefix + "-start-" + std::to_string(index + 1);
+
+            grammar += start_r + " ::= ws | " + param_r + " " + next_cont + " | " +
+                       next_start + "\n";
+            grammar += cont_r + " ::= ws | ws " + literal(",") + " ws " +
+                       param_r + " " + next_cont + " | " + next_cont + "\n";
         }
     }
 
@@ -141,13 +193,14 @@ class GrammarBuilder {
         return count;
     }
 
-    static std::string build_required_sequence(size_t tool_index, size_t begin, size_t end) {
+    static std::string build_prefixed_required_sequence(const std::string& prefix,
+                                                        size_t begin, size_t end) {
         std::string sequence;
         for (size_t index = begin; index < end; ++index) {
             if (!sequence.empty()) {
                 sequence += " ws " + literal(",") + " ws ";
             }
-            sequence += param_rule_name(tool_index, index);
+            sequence += prefix + "-param-" + std::to_string(index);
         }
         return sequence;
     }
@@ -175,26 +228,6 @@ class GrammarBuilder {
 
     static std::string tool_rule_name(size_t tool_index) {
         return "tool-" + std::to_string(tool_index);
-    }
-
-    static std::string args_rule_name(size_t tool_index) {
-        return "tool-" + std::to_string(tool_index) + "-args";
-    }
-
-    static std::string param_rule_name(size_t tool_index, size_t param_index) {
-        return "tool-" + std::to_string(tool_index) + "-param-" + std::to_string(param_index);
-    }
-
-    static std::string enum_rule_name(size_t tool_index, size_t param_index) {
-        return "tool-" + std::to_string(tool_index) + "-enum-" + std::to_string(param_index);
-    }
-
-    static std::string start_rule_name(size_t tool_index, size_t param_index) {
-        return "tool-" + std::to_string(tool_index) + "-start-" + std::to_string(param_index);
-    }
-
-    static std::string cont_rule_name(size_t tool_index, size_t param_index) {
-        return "tool-" + std::to_string(tool_index) + "-cont-" + std::to_string(param_index);
     }
 
     static std::string json_string_literal(const std::string& value) {

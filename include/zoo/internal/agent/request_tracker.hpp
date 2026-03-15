@@ -64,6 +64,23 @@ class RequestTracker {
             std::move(future)};
     }
 
+    PreparedRequest
+    prepare(Message message, nlohmann::json extraction_schema,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
+        auto prepared = prepare(std::move(message), std::move(callback));
+        prepared.request.extraction_schema = std::move(extraction_schema);
+        return prepared;
+    }
+
+    PreparedRequest
+    prepare(std::vector<Message> messages, HistoryMode history_mode,
+            nlohmann::json extraction_schema,
+            std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
+        auto prepared = prepare(std::move(messages), history_mode, std::move(callback));
+        prepared.request.extraction_schema = std::move(extraction_schema);
+        return prepared;
+    }
+
     /**
      * @brief Requests cooperative cancellation for a tracked request.
      */

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <expected>
 #include <functional>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <vector>
@@ -134,6 +135,10 @@ enum class ErrorCode {
     ToolLoopLimitReached = 504, ///< The agent exceeded its tool-iteration budget.
     InvalidToolSchema = 505,    ///< A manually supplied tool schema uses an unsupported construct.
     ToolValidationFailed = 506, ///< A parsed tool call failed schema-based argument validation.
+
+    // Extraction errors (600-699)
+    InvalidOutputSchema = 600, ///< A supplied output schema is malformed or uses unsupported constructs.
+    ExtractionFailed = 601,    ///< Structured extraction from model output failed.
 
     Unknown = 999 ///< Fallback code for uncategorized failures.
 };
@@ -403,6 +408,8 @@ struct Response {
     Metrics metrics;  ///< Latency and throughput data.
     std::vector<ToolInvocation>
         tool_invocations; ///< Explicit tool invocation attempts recorded during the agentic loop.
+    std::optional<nlohmann::json>
+        extracted_data; ///< Parsed structured output from `extract()` calls, nullopt otherwise.
 
     /// Compares two responses field-by-field.
     bool operator==(const Response& other) const = default;

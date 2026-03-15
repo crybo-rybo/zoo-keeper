@@ -55,10 +55,11 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
+    const bool is_tool_grammar = grammar_mode_ == GrammarMode::ToolCall;
     bool in_tool_call = false;
     bool stopped_by_callback = false;
     std::optional<tools::SentinelStreamFilter> stream_filter;
-    if (grammar_active_ && on_token) {
+    if (is_tool_grammar && on_token) {
         stream_filter.emplace();
     }
 
@@ -121,7 +122,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         generated_text.append(buff, static_cast<size_t>(n));
         ++token_count;
 
-        if (grammar_active_ && !in_tool_call) {
+        if (is_tool_grammar && !in_tool_call) {
             static constexpr std::string_view kOpenTag = "<tool_call>";
             const size_t check_start =
                 generated_text.size() > kOpenTag.size() + static_cast<size_t>(n)
@@ -285,8 +286,10 @@ Expected<Response> Model::generate(const std::string& user_message,
 Expected<Model::GenerationResult>
 Model::generate_from_history(std::optional<TokenCallback> on_token,
                              CancellationCallback should_cancel) {
-    if (grammar_active_) {
+    if (grammar_mode_ == GrammarMode::ToolCall) {
         rebuild_sampler_with_grammar();
+    } else if (grammar_mode_ == GrammarMode::Schema) {
+        rebuild_sampler_with_schema_grammar();
     }
 
     auto prompt_result = render_prompt_delta();
@@ -309,7 +312,8 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
     }
 
     const bool tool_detected =
-        grammar_active_ && (text_result->find("<tool_call>") != std::string::npos);
+        (grammar_mode_ == GrammarMode::ToolCall) &&
+        (text_result->find("<tool_call>") != std::string::npos);
 
     return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
 }

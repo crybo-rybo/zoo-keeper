@@ -128,4 +128,66 @@ class ToolArgumentsValidator {
     }
 };
 
+/**
+ * @brief Validates a JSON object against a parameter vector without needing a ToolCall or registry.
+ *
+ * @param data JSON object to validate.
+ * @param parameters Normalized parameter schema to validate against.
+ * @return Empty success when the data satisfies the schema.
+ */
+[[nodiscard]] inline Expected<void>
+validate_json_against_schema(const nlohmann::json& data,
+                             const std::vector<ToolParameter>& parameters) {
+    if (!data.is_object()) {
+        return std::unexpected(
+            Error{ErrorCode::ToolValidationFailed, "Data must be a JSON object"});
+    }
+
+    for (const auto& parameter : parameters) {
+        if (parameter.required && !data.contains(parameter.name)) {
+            return std::unexpected(Error{ErrorCode::ToolValidationFailed,
+                                         "Missing required field: " + parameter.name});
+        }
+    }
+
+    for (const auto& [key, value] : data.items()) {
+        const ToolParameter* found = nullptr;
+        for (const auto& parameter : parameters) {
+            if (parameter.name == key) {
+                found = &parameter;
+                break;
+            }
+        }
+
+        if (!found) {
+            return std::unexpected(
+                Error{ErrorCode::ToolValidationFailed, "Unexpected field: " + key});
+        }
+
+        if (!detail::json_matches_type(value, found->type)) {
+            return std::unexpected(
+                Error{ErrorCode::ToolValidationFailed,
+                      "Field '" + key + "' has wrong type: expected " +
+                          std::string(tool_value_type_name(found->type))});
+        }
+
+        if (!found->enum_values.empty()) {
+            bool matched = false;
+            for (const auto& enum_value : found->enum_values) {
+                if (enum_value == value) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                return std::unexpected(
+                    Error{ErrorCode::ToolValidationFailed,
+                          "Field '" + key + "' must match one of the registered enum values"});
+            }
+        }
+    }
+
+    return {};
+}
+
 } // namespace zoo::tools

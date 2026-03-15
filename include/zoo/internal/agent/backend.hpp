@@ -68,6 +68,7 @@ class AgentBackend {
     virtual void replace_messages(std::vector<Message> messages) = 0;
 
     virtual bool set_tool_grammar(const std::string& grammar_str) = 0;
+    virtual bool set_schema_grammar(const std::string& grammar_str) = 0;
     virtual void clear_tool_grammar() = 0;
 };
 

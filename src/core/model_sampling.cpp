@@ -40,13 +40,18 @@ bool Model::set_tool_grammar(const std::string& grammar_str) {
     return rebuild_sampler_with_grammar();
 }
 
+bool Model::set_schema_grammar(const std::string& grammar_str) {
+    tool_grammar_str_ = grammar_str;
+    return rebuild_sampler_with_schema_grammar();
+}
+
 void Model::clear_tool_grammar() noexcept {
-    if (!grammar_active_) {
+    if (grammar_mode_ == GrammarMode::None) {
         return;
     }
 
     tool_grammar_str_.clear();
-    grammar_active_ = false;
+    grammar_mode_ = GrammarMode::None;
     sampler_ = create_sampler_chain();
 }
 
@@ -72,7 +77,31 @@ bool Model::rebuild_sampler_with_grammar() {
     add_dist_sampler(chain.get());
 
     sampler_ = std::move(chain);
-    grammar_active_ = true;
+    grammar_mode_ = GrammarMode::ToolCall;
+    return true;
+}
+
+bool Model::rebuild_sampler_with_schema_grammar() {
+    auto chain_params = llama_sampler_chain_default_params();
+    chain_params.no_perf = false;
+    auto chain = LlamaSamplerHandle(llama_sampler_chain_init(chain_params));
+    if (!chain) {
+        return false;
+    }
+
+    add_sampling_stages(chain.get());
+
+    auto* grammar_sampler =
+        llama_sampler_init_grammar(vocab_, tool_grammar_str_.c_str(), "root");
+    if (!grammar_sampler) {
+        return false;
+    }
+    llama_sampler_chain_add(chain.get(), grammar_sampler);
+
+    add_dist_sampler(chain.get());
+
+    sampler_ = std::move(chain);
+    grammar_mode_ = GrammarMode::Schema;
     return true;
 }
 

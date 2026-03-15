@@ -5,6 +5,38 @@ All notable changes to Zoo-Keeper will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-03-14
+
+### Added
+
+- **`Agent::extract(output_schema, message, callback)`** — stateful structured extraction API. Constrains model generation to produce JSON conforming to a caller-supplied JSON Schema, parses the output, validates it against the schema, and returns the result via a new `Response::extracted_data` field. Reuses the existing grammar and validation infrastructure with a simplified single-pass flow (no tool loop).
+- **`Agent::extract(output_schema, messages, callback)`** — stateless variant that operates on a provided message history without mutating agent state, mirroring the `chat()` / `complete()` pattern.
+- **`GrammarBuilder::build_schema(parameters)`** — generates a GBNF grammar for a standalone JSON schema (no `<tool_call>` sentinel wrapping). Shares the same parameter/optional/enum rule generation logic as the tool grammar builder via refactored prefix-parameterized helpers.
+- **`validate_json_against_schema(data, parameters)`** — free function in `zoo::tools` that validates a JSON object against a `ToolParameter` vector without requiring a `ToolCall` or `ToolRegistry`.
+- **`detail::normalize_schema(schema)`** — public helper that normalizes a JSON Schema into a `vector<ToolParameter>`, extracted from the existing `normalize_manual_tool_metadata()`.
+- **`Model::set_schema_grammar(grammar_str)`** — enables non-lazy (immediately active) grammar constraints for schema output, using `llama_sampler_init_grammar()` instead of the lazy sentinel-triggered `llama_sampler_init_grammar_lazy_patterns()` used for tool calling.
+- **`AgentBackend::set_schema_grammar(grammar_str)`** — virtual method on the internal backend seam, enabling test fakes to observe schema grammar setup.
+- **`Response::extracted_data`** — new `std::optional<nlohmann::json>` field on `Response`, populated only by `extract()` calls.
+- **`ErrorCode::InvalidOutputSchema` (600)** and **`ErrorCode::ExtractionFailed` (601)** — new error codes for extraction-specific failures.
+- **`Request::extraction_schema`** — internal field on the request payload for routing extraction requests through the runtime.
+- **`RequestTracker::prepare` extraction overloads** — accept an extraction schema alongside messages and callbacks.
+
+### Changed
+
+- `Model` grammar state replaced: `bool grammar_active_` → `GrammarMode` enum (`None`, `ToolCall`, `Schema`) to distinguish lazy (tool) from immediate (schema) grammar activation.
+- `GrammarBuilder` internals refactored: rule-generation helpers are now prefix-parameterized (`append_prefixed_parameter_rules`, `append_prefixed_optional_rules`, `build_prefixed_required_sequence`), shared by both `build()` and `build_schema()`.
+- `model_inference.cpp`: `<tool_call>` sentinel detection is now gated on `GrammarMode::ToolCall`, preventing false tool-call detection during schema-constrained generation.
+- `generate_from_history()` dispatches grammar rebuild to `rebuild_sampler_with_grammar()` or `rebuild_sampler_with_schema_grammar()` based on the active grammar mode.
+- `AgentRuntime::process_request()` dispatches to `process_extraction_request()` when the request carries an extraction schema.
+- CMake project version bumped to 1.0.3.
+
+### Tests
+
+- **10 new schema grammar tests** (`test_schema_grammar.cpp`): empty params, no sentinels, single required property, mixed required/optional, all primitive types (integer, number, string, boolean), enum constraints, all-optional properties, and comparison with tool grammar output.
+- **10 new extraction tests** (`test_extraction.cpp`): valid JSON extraction, invalid schema rejection, grammar setup/restore, tool grammar restoration after extraction, streaming callbacks, cancellation, stateful and stateless modes, single-pass routing (no tool loop), malformed JSON output error, and `extracted_data` is `nullopt` on normal `chat()` responses.
+- Existing `FakeBackend` in `test_agent_runtime.cpp` updated with `set_schema_grammar` override.
+- All 218 tests pass (previously 198).
+
 ## [1.0.2] - 2026-03-14
 
 ### Changed
@@ -60,5 +92,7 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - C++23 required
 - Windows is not supported
 
+[1.0.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/crybo-rybo/zoo-keeper/releases/tag/v1.0.0

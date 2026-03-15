@@ -9,6 +9,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -32,6 +33,7 @@ struct Request {
     std::shared_ptr<std::promise<Expected<Response>>> promise;
     RequestId id = 0;
     std::shared_ptr<std::atomic<bool>> cancelled;
+    std::optional<nlohmann::json> extraction_schema;
 
     Request(Message msg,
             std::optional<std::function<void(std::string_view)>> callback = std::nullopt)

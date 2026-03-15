@@ -50,6 +50,10 @@ class ModelBackend final : public AgentBackend {
         return model_->set_tool_grammar(grammar_str);
     }
 
+    bool set_schema_grammar(const std::string& grammar_str) override {
+        return model_->set_schema_grammar(grammar_str);
+    }
+
     void clear_tool_grammar() override {
         model_->clear_tool_grammar();
     }
