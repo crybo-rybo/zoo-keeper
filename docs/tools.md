@@ -93,6 +93,8 @@ The runtime normalizes supported schemas into one internal representation and us
 - deterministic schema export,
 - grammar-constrained tool calling.
 
+The same schema subset is accepted by `Agent::extract()` for grammar-constrained structured output. See [Structured Output](extract.md) for details.
+
 ## Validation and Retries
 
 Every detected tool call is validated against the normalized registered schema, including grammar-constrained calls.
@@ -165,5 +167,6 @@ if (response) {
 ## See Also
 
 - [Getting Started](getting-started.md) -- basic Agent setup
+- [Structured Output](extract.md) -- grammar-constrained extraction using the same schema subset
 - [Examples](examples.md) -- complete usage snippets
 - [Architecture](architecture.md) -- runtime structure and threading model

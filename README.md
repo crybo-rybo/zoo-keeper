@@ -85,6 +85,7 @@ int main() {
 
 - **Async inference** with per-token streaming callbacks and cancellable requests
 - **Structured tool calling** with typed registration, manual schema registration, validation, and explicit `tool_invocations`
+- **Grammar-constrained structured output** via `extract()` — enforce a JSON Schema at the sampler level with no retry loops
 - **Conversation management** with system prompts, history tracking, and incremental prompt/KV-cache handling
 - **Deterministic tool metadata** for schema and grammar generation
 - **Concrete response metadata** including token usage and latency metrics
@@ -128,6 +129,7 @@ See [docs/architecture.md](docs/architecture.md) for the full threading model an
 | [Building](docs/building.md) | CMake usage, platform setup, sanitizers, coverage, install/package details |
 | [Configuration](docs/configuration.md) | Runtime config, sampling parameters, generation limits, and history budgets |
 | [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, and error handling |
+| [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless, error codes |
 | [Examples](docs/examples.md) | Focused example programs for streaming, cancellation, tools, and error handling |
 | [Architecture](docs/architecture.md) | Layering, runtime ownership, threading model, and target structure |
 | [Compatibility](docs/compatibility.md) | Public API boundary, intended 1.x stability policy, and deprecation rules |
