@@ -75,6 +75,8 @@ add_library(zoo STATIC
     src/agent.cpp
     src/agent/backend_model.cpp
     src/agent/runtime.cpp
+    src/agent/runtime_tool_loop.cpp
+    src/agent/runtime_extraction.cpp
     src/core/model.cpp
     src/core/model_init.cpp
     src/core/model_inference.cpp
