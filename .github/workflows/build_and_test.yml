@@ -93,14 +93,11 @@ jobs:
           echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
           echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
-      - name: Configure CMake
-        run: cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
-
       - name: Build
-        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+        run: scripts/build -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: scripts/test
 
   package-consumer-smoke:
     runs-on: ubuntu-latest
@@ -146,14 +143,11 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Configure CMake with sanitizers
-        run: cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
+      - name: Build with sanitizers
+        run: scripts/build -DZOO_ENABLE_SANITIZERS=ON
 
       - name: Run tests under sanitizers
-        run: ctest --test-dir build --output-on-failure
+        run: scripts/test
 
   coverage:
     runs-on: ubuntu-latest
@@ -169,14 +163,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lcov
 
-      - name: Configure CMake with coverage
-        run: cmake -B build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
+      - name: Build with coverage
+        run: scripts/build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_INTEGRATION_TESTS=ON
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: scripts/test
 
       - name: Capture coverage
         run: |
