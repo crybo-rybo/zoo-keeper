@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run clang-format on all C++ source and header files.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+find src include tests -type f \( -name '*.cpp' -o -name '*.hpp' \) | xargs clang-format -i
+echo "Formatting complete."
