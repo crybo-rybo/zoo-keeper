@@ -79,10 +79,23 @@ Maintain these invariants:
 - grammar emission must not depend on unstable container iteration
 - tool-loop observability should use explicit domain types such as `ToolInvocation`, not overloaded chat-history messages
 
+## Runtime Implementation Split
+
+The `AgentRuntime` implementation is split across three files by responsibility:
+
+| File | Responsibility |
+|------|----------------|
+| `src/agent/runtime.cpp` | Lifecycle, request submission, inference loop dispatch, command handling, shutdown |
+| `src/agent/runtime_tool_loop.cpp` | Agentic tool loop (generate → detect → execute → re-generate) |
+| `src/agent/runtime_extraction.cpp` | Schema-constrained structured output extraction |
+
+Shared helpers (`ScopeExit`, `load_history`, `restore_history`) live in `include/zoo/internal/agent/runtime_helpers.hpp`.
+
 ## Documentation Split
 
 - `architecture.md` explains the public layers, targets, and user-visible threading guarantees
 - `maintainer-architecture.md` explains private ownership and implementation seams
 - `maintainer-cmake-packaging.md` explains build-tree vs install-tree package config generation and usage
+- `adr/` contains Architecture Decision Records documenting *why* key design choices were made
 
 If a document starts teaching private command types, mailbox structure, or backend adapter details to normal consumers, that content belongs here instead.
