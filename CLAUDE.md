@@ -1,0 +1,87 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build & Test
+
+```bash
+# Quick start (build + tests)
+scripts/build && scripts/test
+
+# Run a single test by name
+scripts/test -R "TestSuiteName.TestName"
+
+# Format all source files
+scripts/format
+
+# Integration tests (requires a real GGUF model)
+scripts/build -DZOO_BUILD_INTEGRATION_TESTS=ON
+ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test
+
+# Sanitizers / coverage
+scripts/build -DZOO_ENABLE_SANITIZERS=ON
+scripts/build -DZOO_ENABLE_COVERAGE=ON
+```
+
+## Architecture
+
+C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Three strict layers — each depends only on layers below it:
+
+| Layer | Namespace | Role |
+|-------|-----------|------|
+| 3 | `zoo::Agent` | Async orchestration: inference thread, request queue, streaming, agentic tool loop |
+| 2 | `zoo::tools` | Tool registry, call parsing, schema validation, GBNF grammar generation. Header-only, zero llama.cpp dependency |
+| 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
+
+**Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `std::future<Response>`. All callbacks run on the inference thread. Model is protected by `model_mutex_`.
+
+**CMake targets:** `zoo` (static lib), `zoo_core` (interface compat alias). Consumers use `ZooKeeper::zoo`.
+
+## Key Conventions
+
+- All llama.cpp calls live in `src/core/model*.cpp` — nowhere else
+- `model.hpp` uses forward declarations for llama types (no `llama.h` in public headers)
+- Error handling uses `std::expected` (C++23), not exceptions
+- `role_to_string()` returns `const char*` (static storage) — safe for `llama_chat_message`
+- `ZOO_LOG` is a no-op when `ZOO_LOGGING_ENABLED` is not defined
+- `validate_role_sequence()` is a free function in `types.hpp` (pure logic, unit testable)
+
+## Testing
+
+- Unit tests cover pure logic only: types, tools, validation, parsing, grammar, interceptor, batch
+- Model/Agent testing requires integration tests with a real GGUF model
+- Never `using namespace zoo;` in test files — `zoo::testing` clashes with `::testing` (gtest)
+- Test binary: `zoo_tests`, discovered via `gtest_discover_tests`
+
+## Pre-PR Checklist
+
+Before opening a Pull Request, always run:
+
+```bash
+scripts/format    # CI enforces formatting
+scripts/build     # Must compile cleanly
+scripts/test      # All tests must pass
+```
+
+<AgentBoundaries>
+## Boundaries
+
+### Always (no permission needed)
+- Read any file, run `scripts/build`, `scripts/test`, `scripts/format`
+
+### Ask first
+- Adding new dependencies or modifying CMakeLists.txt build structure
+- Changes to public API headers (`include/zoo/*.hpp`, `include/zoo/core/*.hpp`, `include/zoo/tools/*.hpp`)
+- Updating the llama.cpp submodule (`extern/llama.cpp`)
+
+### Never
+- Include `llama.h` in any public header (forward-declare llama types)
+- Add llama.cpp calls outside `src/core/model*.cpp`
+- Use exceptions for error handling (use `std::expected`)
+- Push directly to `main`
+- Commit `.DS_Store`, build artifacts, or secrets
+</AgentBoundaries>
+
+## Git Workflow
+
+All changes go through feature branches and Pull Requests. Do not push directly to `main`.

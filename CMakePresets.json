@@ -1,0 +1,109 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default (tests enabled)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "ZOO_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Development (tests + examples)",
+      "inherits": "default",
+      "cacheVariables": {
+        "ZOO_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "integration",
+      "displayName": "Integration tests",
+      "inherits": "dev",
+      "cacheVariables": {
+        "ZOO_BUILD_INTEGRATION_TESTS": "ON"
+      }
+    },
+    {
+      "name": "sanitizers",
+      "displayName": "Address + UB sanitizers",
+      "inherits": "default",
+      "cacheVariables": {
+        "ZOO_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Code coverage instrumentation",
+      "inherits": "default",
+      "cacheVariables": {
+        "ZOO_ENABLE_COVERAGE": "ON",
+        "ZOO_BUILD_INTEGRATION_TESTS": "ON"
+      }
+    },
+    {
+      "name": "docs",
+      "displayName": "Documentation only",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "ZOO_BUILD_DOCS": "ON",
+        "ZOO_BUILD_TESTS": "OFF",
+        "ZOO_BUILD_EXAMPLES": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "docs",
+      "configurePreset": "docs",
+      "targets": ["zoo_docs"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "unit",
+      "configurePreset": "default",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "integration",
+      "configurePreset": "integration",
+      "filter": {
+        "include": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

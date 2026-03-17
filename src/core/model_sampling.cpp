@@ -89,14 +89,15 @@ bool Model::rebuild_sampler_with_schema_grammar() {
         return false;
     }
 
-    add_sampling_stages(chain.get());
-
+    // Grammar must filter logits before top-k/top-p narrow the candidate set,
+    // otherwise top-k=1 can select a token the grammar rejects.
     auto* grammar_sampler = llama_sampler_init_grammar(vocab_, tool_grammar_str_.c_str(), "root");
     if (!grammar_sampler) {
         return false;
     }
     llama_sampler_chain_add(chain.get(), grammar_sampler);
 
+    add_sampling_stages(chain.get());
     add_dist_sampler(chain.get());
 
     sampler_ = std::move(chain);

@@ -95,8 +95,7 @@ int main() {
 ```bash
 git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
-cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
-cmake --build build -j4
+scripts/build -DZOO_BUILD_EXAMPLES=ON
 ```
 
 For consumers, `ZooKeeper::zoo` is the primary CMake target. See [docs/building.md](docs/building.md) for:
@@ -139,8 +138,7 @@ See [docs/architecture.md](docs/architecture.md) for the full threading model an
 Generate the API reference locally with:
 
 ```bash
-cmake -B build -DZOO_BUILD_DOCS=ON
-cmake --build build --target zoo_docs
+cmake --preset docs && cmake --build --preset docs
 ```
 
 ## Testing
@@ -148,17 +146,15 @@ cmake --build build --target zoo_docs
 The default build runs the full unit suite, and CI also smoke-tests build-tree and installed-package CMake consumers.
 
 ```bash
-ctest --test-dir build --output-on-failure
+scripts/test
 ```
 
 For live smoke coverage against a real model:
 
 ```bash
-cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON
-ctest --test-dir build --output-on-failure
+scripts/build -DZOO_BUILD_INTEGRATION_TESTS=ON
+ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf scripts/test
 ```
-
-Set `ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf` to enable the live integration tests.
 
 ## Acknowledgments
 
