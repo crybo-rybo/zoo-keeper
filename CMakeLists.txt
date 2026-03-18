@@ -83,6 +83,7 @@ add_library(zoo STATIC
     src/core/model_prompt.cpp
     src/core/model_history.cpp
     src/core/model_sampling.cpp
+    src/core/model_tool_calling.cpp
 )
 target_include_directories(zoo PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -97,6 +98,7 @@ target_compile_features(zoo PUBLIC cxx_std_23)
 # through the target interface so installed-package consumers inherit it.
 target_link_libraries(zoo PRIVATE
     $<BUILD_INTERFACE:llama>
+    $<BUILD_INTERFACE:common>
     $<INSTALL_INTERFACE:ZooKeeper::llama>
 )
 set_property(TARGET zoo APPEND PROPERTY

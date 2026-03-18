@@ -4,9 +4,9 @@
  */
 
 #include "zoo/core/model.hpp"
+#include "zoo/core/model_tool_calling_state.hpp"
 
 #include "zoo/internal/core/batch.hpp"
-#include "zoo/internal/tools/sentinel_stream_filter.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -55,13 +55,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
-    const bool is_tool_grammar = grammar_mode_ == GrammarMode::ToolCall;
-    bool in_tool_call = false;
     bool stopped_by_callback = false;
-    std::optional<tools::SentinelStreamFilter> stream_filter;
-    if (is_tool_grammar && on_token) {
-        stream_filter.emplace();
-    }
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
     const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) + 1;
@@ -122,17 +116,6 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         generated_text.append(buff, static_cast<size_t>(n));
         ++token_count;
 
-        if (is_tool_grammar && !in_tool_call) {
-            static constexpr std::string_view kOpenTag = "<tool_call>";
-            const size_t check_start =
-                generated_text.size() > kOpenTag.size() + static_cast<size_t>(n)
-                    ? generated_text.size() - kOpenTag.size() - static_cast<size_t>(n)
-                    : 0;
-            if (generated_text.find(kOpenTag.data(), check_start) != std::string::npos) {
-                in_tool_call = true;
-            }
-        }
-
         if (!stop_sequences.empty()) {
             const size_t match_len = find_stop_sequence(generated_text, stop_sequences);
             if (match_len > 0) {
@@ -142,28 +125,16 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         }
 
         if (on_token) {
-            std::string visible_chunk;
-            if (stream_filter) {
-                visible_chunk =
-                    stream_filter->consume(std::string_view(buff, static_cast<size_t>(n)));
-            } else {
-                visible_chunk.assign(buff, static_cast<size_t>(n));
-            }
+            std::string_view visible_chunk(buff, static_cast<size_t>(n));
 
-            if (!visible_chunk.empty()) {
-                auto action = invoke_token_callback(*on_token, visible_chunk);
-                if (!action) {
-                    return std::unexpected(action.error());
-                }
-                if (*action == TokenAction::Stop) {
-                    stopped_by_callback = true;
-                    break;
-                }
+            auto action = invoke_token_callback(*on_token, visible_chunk);
+            if (!action) {
+                return std::unexpected(action.error());
             }
-        }
-
-        if (in_tool_call && generated_text.ends_with("</tool_call>")) {
-            break;
+            if (*action == TokenAction::Stop) {
+                stopped_by_callback = true;
+                break;
+            }
         }
 
         if (token_count >= effective_max || current_pos >= context_size_) {
@@ -186,16 +157,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     }
 
     llama_batch_free(ar_batch);
-
-    if (on_token && stream_filter && !stopped_by_callback) {
-        std::string trailing = stream_filter->finalize();
-        if (!trailing.empty()) {
-            auto action = invoke_token_callback(*on_token, trailing);
-            if (!action) {
-                return std::unexpected(action.error());
-            }
-        }
-    }
+    (void)stopped_by_callback;
 
     return generated_text;
 }
@@ -243,8 +205,16 @@ Expected<Response> Model::generate(const std::string& user_message,
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
+    // Merge config stop sequences with tool-calling additional stops.
+    auto all_stops = config_.stop_sequences;
+    if (tool_state_) {
+        for (const auto& s : tool_state_->additional_stops) {
+            all_stops.push_back(s);
+        }
+    }
+
     auto generate_result =
-        run_inference(*tokens_result, config_.max_tokens, config_.stop_sequences,
+        run_inference(*tokens_result, config_.max_tokens, all_stops,
                       std::optional<TokenCallback>(wrapped_callback), should_cancel);
 
     if (!generate_result) {
@@ -286,8 +256,8 @@ Expected<Response> Model::generate(const std::string& user_message,
 Expected<Model::GenerationResult>
 Model::generate_from_history(std::optional<TokenCallback> on_token,
                              CancellationCallback should_cancel) {
-    if (grammar_mode_ == GrammarMode::ToolCall) {
-        rebuild_sampler_with_grammar();
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        rebuild_sampler_with_tool_grammar();
     } else if (grammar_mode_ == GrammarMode::Schema) {
         rebuild_sampler_with_schema_grammar();
     }
@@ -304,15 +274,28 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
-    auto text_result = run_inference(*tokens_result, config_.max_tokens, config_.stop_sequences,
-                                     on_token, should_cancel);
+    // Merge config stop sequences with tool-calling additional stops.
+    auto all_stops = config_.stop_sequences;
+    if (tool_state_) {
+        for (const auto& s : tool_state_->additional_stops) {
+            all_stops.push_back(s);
+        }
+    }
+
+    auto text_result =
+        run_inference(*tokens_result, config_.max_tokens, all_stops, on_token, should_cancel);
 
     if (!text_result) {
         return std::unexpected(text_result.error());
     }
 
-    const bool tool_detected = (grammar_mode_ == GrammarMode::ToolCall) &&
-                               (text_result->find("<tool_call>") != std::string::npos);
+    // Tool call detection: if tool calling is active, parse the output to check
+    // for tool calls instead of relying on sentinel detection.
+    bool tool_detected = false;
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        auto parsed = parse_tool_response(*text_result);
+        tool_detected = !parsed.tool_calls.empty();
+    }
 
     return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
 }

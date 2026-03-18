@@ -46,8 +46,8 @@ class ModelBackend final : public AgentBackend {
         model_->replace_messages(std::move(messages));
     }
 
-    bool set_tool_grammar(const std::string& grammar_str) override {
-        return model_->set_tool_grammar(grammar_str);
+    bool set_tool_calling(const std::vector<CoreToolInfo>& tools) override {
+        return model_->set_tool_calling(tools);
     }
 
     bool set_schema_grammar(const std::string& grammar_str) override {
@@ -56,6 +56,15 @@ class ModelBackend final : public AgentBackend {
 
     void clear_tool_grammar() override {
         model_->clear_tool_grammar();
+    }
+
+    ParsedToolResponse parse_tool_response(const std::string& text) const override {
+        auto parsed = model_->parse_tool_response(text);
+        return ParsedToolResponse{std::move(parsed.content), std::move(parsed.tool_calls)};
+    }
+
+    const char* tool_calling_format_name() const noexcept override {
+        return model_->tool_calling_format_name();
     }
 
   private:

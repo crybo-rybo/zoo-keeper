@@ -48,11 +48,32 @@ enum class Role {
 /**
  * @brief Represents one message in the conversation history.
  */
+/**
+ * @brief Structured tool call data attached to assistant messages.
+ *
+ * When an assistant response contains one or more tool invocations, the
+ * parsed tool calls are stored here rather than as opaque text, enabling
+ * format-independent round-tripping through any model's chat template.
+ */
+struct ToolCallInfo {
+    std::string id;             ///< Correlation identifier for the tool call.
+    std::string name;           ///< Tool name the model wants to invoke.
+    std::string arguments_json; ///< Serialized JSON arguments.
+
+    bool operator==(const ToolCallInfo& other) const = default;
+};
+
+/**
+ * @brief Represents one message in the conversation history.
+ */
 struct Message {
     Role role;           ///< Speaker role associated with the message.
     std::string content; ///< Raw message content passed to the model.
     std::optional<std::string>
         tool_call_id; ///< Tool call correlation identifier for tool responses.
+
+    /// Structured tool calls for assistant messages (empty for other roles).
+    std::vector<ToolCallInfo> tool_calls;
 
     /**
      * @brief Creates a system message.
@@ -61,7 +82,7 @@ struct Message {
      * @return A message tagged with `Role::System`.
      */
     static Message system(std::string content) {
-        return Message{Role::System, std::move(content), std::nullopt};
+        return Message{Role::System, std::move(content), std::nullopt, {}};
     }
 
     /**
@@ -71,7 +92,7 @@ struct Message {
      * @return A message tagged with `Role::User`.
      */
     static Message user(std::string content) {
-        return Message{Role::User, std::move(content), std::nullopt};
+        return Message{Role::User, std::move(content), std::nullopt, {}};
     }
 
     /**
@@ -81,7 +102,18 @@ struct Message {
      * @return A message tagged with `Role::Assistant`.
      */
     static Message assistant(std::string content) {
-        return Message{Role::Assistant, std::move(content), std::nullopt};
+        return Message{Role::Assistant, std::move(content), std::nullopt, {}};
+    }
+
+    /**
+     * @brief Creates an assistant message with structured tool calls.
+     *
+     * @param content Visible text before/around the tool calls.
+     * @param calls Parsed tool call metadata.
+     * @return A message tagged with `Role::Assistant` carrying tool call data.
+     */
+    static Message assistant_with_tool_calls(std::string content, std::vector<ToolCallInfo> calls) {
+        return Message{Role::Assistant, std::move(content), std::nullopt, std::move(calls)};
     }
 
     /**
@@ -92,7 +124,7 @@ struct Message {
      * @return A message tagged with `Role::Tool`.
      */
     static Message tool(std::string content, std::string tool_call_id) {
-        return Message{Role::Tool, std::move(content), std::move(tool_call_id)};
+        return Message{Role::Tool, std::move(content), std::move(tool_call_id), {}};
     }
 
     /// Compares two messages including role, content, and tool call correlation.
@@ -458,5 +490,17 @@ using RequestId = uint64_t;
 
     return {};
 }
+
+/**
+ * @brief Minimal tool description for template-driven tool calling at the core layer.
+ *
+ * This avoids a dependency from Layer 1 (core) on Layer 2 (tools).
+ * The agent layer converts `tools::ToolMetadata` to this before passing to `Model`.
+ */
+struct CoreToolInfo {
+    std::string name;
+    std::string description;
+    std::string parameters_json; ///< JSON Schema of the parameters as a string.
+};
 
 } // namespace zoo

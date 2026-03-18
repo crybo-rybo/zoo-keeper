@@ -4,66 +4,124 @@
  */
 
 #include "zoo/core/model.hpp"
+#include "zoo/core/model_tool_calling_state.hpp"
 
 #include "zoo/internal/core/prompt_bookkeeping.hpp"
 
+#include <chat.h>
 #include <llama.h>
 
 namespace zoo::core {
 
-const std::vector<llama_chat_message>& Model::llama_messages() {
-    if (!prompt_state_.cached_messages_dirty) {
-        return prompt_state_.cached_llama_messages;
-    }
+namespace {
 
-    prompt_state_.cached_llama_messages.clear();
-    prompt_state_.cached_llama_messages.reserve(messages_.size());
-    for (const auto& msg : messages_) {
-        prompt_state_.cached_llama_messages.push_back(
-            {role_to_string(msg.role), msg.content.c_str()});
+/// Converts zoo::Message history to common_chat_msg for the common layer.
+std::vector<common_chat_msg> to_chat_msgs(const std::vector<Message>& messages) {
+    std::vector<common_chat_msg> result;
+    result.reserve(messages.size());
+    for (const auto& msg : messages) {
+        common_chat_msg cm;
+        cm.role = role_to_string(msg.role);
+        cm.content = msg.content;
+
+        if (msg.tool_call_id.has_value()) {
+            cm.tool_call_id = *msg.tool_call_id;
+        }
+
+        for (const auto& tc : msg.tool_calls) {
+            cm.tool_calls.push_back({tc.name, tc.arguments_json, tc.id});
+        }
+
+        result.push_back(std::move(cm));
     }
-    prompt_state_.cached_messages_dirty = false;
-    return prompt_state_.cached_llama_messages;
+    return result;
 }
 
-Expected<std::string> Model::render_prompt_delta() {
-    const auto& llama_msgs = llama_messages();
-    int new_len =
-        llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), true, nullptr, 0);
+} // namespace
 
-    if (new_len < 0) {
-        return std::unexpected(
-            Error{ErrorCode::TemplateRenderFailed, "llama_chat_apply_template failed"});
+Expected<std::string> Model::render_prompt_delta() {
+    auto chat_msgs = to_chat_msgs(messages_);
+
+    // Build inputs for the template system.
+    common_chat_templates_inputs inputs;
+    inputs.messages = std::move(chat_msgs);
+    inputs.add_generation_prompt = true;
+    inputs.use_jinja = true;
+
+    // If tools are registered, include them so the template can format them.
+    if (tool_state_) {
+        inputs.tools = tool_state_->tools;
+        inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     }
+
+    common_chat_params params;
+    try {
+        params = common_chat_templates_apply(chat_templates_.get(), inputs);
+    } catch (const std::exception& e) {
+        return std::unexpected(
+            Error{ErrorCode::TemplateRenderFailed,
+                  std::string("common_chat_templates_apply failed: ") + e.what()});
+    }
+
+    const std::string& new_prompt = params.prompt;
+    const int new_len = static_cast<int>(new_prompt.size());
 
     if (new_len == 0) {
         return std::string{};
-    }
-
-    if (new_len > static_cast<int>(prompt_state_.formatted_prompt.size())) {
-        prompt_state_.formatted_prompt.resize(static_cast<size_t>(new_len));
-    }
-
-    new_len = llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), true,
-                                        prompt_state_.formatted_prompt.data(),
-                                        prompt_state_.formatted_prompt.size());
-    if (new_len < 0) {
-        return std::unexpected(
-            Error{ErrorCode::TemplateRenderFailed, "llama_chat_apply_template failed"});
     }
 
     if (rendered_prompt_requires_kv_reset(prompt_state_.committed_prompt_len, new_len)) {
         clear_kv_cache();
     }
 
-    return std::string(prompt_state_.formatted_prompt.begin() + prompt_state_.committed_prompt_len,
-                       prompt_state_.formatted_prompt.begin() + new_len);
+    // Extract the delta since the last committed prompt position.
+    std::string delta;
+    if (prompt_state_.committed_prompt_len < new_len) {
+        delta = new_prompt.substr(static_cast<size_t>(prompt_state_.committed_prompt_len));
+    } else if (prompt_state_.committed_prompt_len == 0) {
+        delta = new_prompt;
+    }
+
+    // Cache the full rendered prompt for finalization.
+    prompt_state_.rendered_prompt = new_prompt;
+    prompt_state_.dirty = false;
+
+    // If we have tool state, update grammar/triggers from this render pass.
+    // The grammar may vary when the message history changes the template output.
+    if (tool_state_ && !params.grammar.empty()) {
+        tool_state_->grammar = params.grammar;
+        tool_state_->grammar_lazy = params.grammar_lazy;
+        tool_state_->grammar_triggers = std::move(params.grammar_triggers);
+        tool_state_->preserved_tokens = std::move(params.preserved_tokens);
+        tool_state_->additional_stops = std::move(params.additional_stops);
+        tool_state_->thinking_forced_open = params.thinking_forced_open;
+        tool_grammar_str_ = tool_state_->grammar;
+    }
+
+    return delta;
 }
 
 void Model::finalize_response() {
-    const auto& llama_msgs = llama_messages();
-    int new_prev_len =
-        llama_chat_apply_template(tmpl_, llama_msgs.data(), llama_msgs.size(), false, nullptr, 0);
+    auto chat_msgs = to_chat_msgs(messages_);
+
+    common_chat_templates_inputs inputs;
+    inputs.messages = std::move(chat_msgs);
+    inputs.add_generation_prompt = false;
+    inputs.use_jinja = true;
+
+    if (tool_state_) {
+        inputs.tools = tool_state_->tools;
+        inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
+    }
+
+    common_chat_params params;
+    try {
+        params = common_chat_templates_apply(chat_templates_.get(), inputs);
+    } catch (const std::exception&) {
+        return;
+    }
+
+    const int new_prev_len = static_cast<int>(params.prompt.size());
     commit_rendered_prompt(prompt_state_.committed_prompt_len, new_prev_len);
 }
 
@@ -75,18 +133,18 @@ void Model::clear_kv_cache() {
 }
 
 void Model::note_history_append() noexcept {
-    note_history_mutation(PromptHistoryMutation::Append, prompt_state_.cached_messages_dirty,
+    note_history_mutation(PromptHistoryMutation::Append, prompt_state_.dirty,
                           prompt_state_.committed_prompt_len);
 }
 
 void Model::note_history_rewrite() noexcept {
-    note_history_mutation(PromptHistoryMutation::Rewrite, prompt_state_.cached_messages_dirty,
+    note_history_mutation(PromptHistoryMutation::Rewrite, prompt_state_.dirty,
                           prompt_state_.committed_prompt_len);
     clear_kv_cache();
 }
 
 void Model::note_history_reset() noexcept {
-    note_history_mutation(PromptHistoryMutation::Reset, prompt_state_.cached_messages_dirty,
+    note_history_mutation(PromptHistoryMutation::Reset, prompt_state_.dirty,
                           prompt_state_.committed_prompt_len);
     clear_kv_cache();
 }

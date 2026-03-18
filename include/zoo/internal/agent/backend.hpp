@@ -25,7 +25,17 @@ namespace zoo::internal::agent {
 struct GenerationResult {
     std::string text;                ///< Raw generated text for the pass.
     int prompt_tokens = 0;           ///< Number of prompt tokens rendered for the pass.
-    bool tool_call_detected = false; ///< Whether sentinel-based grammar mode emitted a tool call.
+    bool tool_call_detected = false; ///< Whether tool calling detected a tool call in the output.
+};
+
+/**
+ * @brief Parsed tool response from model output.
+ *
+ * Mirrors `core::Model::ParsedResponse` for the backend interface.
+ */
+struct ParsedToolResponse {
+    std::string content;
+    std::vector<ToolCallInfo> tool_calls;
 };
 
 /**
@@ -50,45 +60,35 @@ class AgentBackend {
 
     /**
      * @brief Replaces the retained message history without flushing the KV cache.
-     *
-     * Unlike `clear_history()` followed by repeated `add_message()` calls, this
-     * method sets the message list atomically and resets the committed prompt
-     * position to zero so the next generation re-renders from scratch.  The KV
-     * cache is intentionally left intact: when the caller renders the first
-     * generation after `replace_messages`, the full prompt is processed starting
-     * at position zero, which naturally overwrites any stale cached entries from
-     * the previous history.  Stale entries at positions beyond the new prompt
-     * length are never referenced due to causal attention masking.
-     *
-     * Use this when restoring a previously snapshotted history so that the
-     * redundant KV-cache flush from `clear_history` is avoided.
-     *
-     * @param messages Replacement message list.
      */
     virtual void replace_messages(std::vector<Message> messages) = 0;
 
     /**
-     * @brief Enables lazy grammar-constrained generation for tool calls.
+     * @brief Configures template-driven tool calling.
      *
-     * Grammar activates only after the `<tool_call>` sentinel is emitted.
-     *
-     * @param grammar_str GBNF grammar string rooted at `root`.
-     * @return `true` when the sampler chain was rebuilt successfully.
+     * @param tools Tool descriptions for the model's chat template.
+     * @return `true` when tool calling was set up successfully.
      */
-    virtual bool set_tool_grammar(const std::string& grammar_str) = 0;
+    virtual bool set_tool_calling(const std::vector<CoreToolInfo>& tools) = 0;
 
     /**
      * @brief Enables immediate grammar-constrained generation for schema output.
-     *
-     * Grammar is active from the first generated token; no sentinel required.
      *
      * @param grammar_str GBNF grammar string rooted at `root`.
      * @return `true` when the sampler chain was rebuilt successfully.
      */
     virtual bool set_schema_grammar(const std::string& grammar_str) = 0;
 
-    /// Disables any active grammar and restores the default sampler chain.
+    /// Disables any active grammar/tool calling and restores the default sampler chain.
     virtual void clear_tool_grammar() = 0;
+
+    /**
+     * @brief Parses a generated text into structured content and tool calls.
+     */
+    virtual ParsedToolResponse parse_tool_response(const std::string& text) const = 0;
+
+    /// Returns the name of the detected tool calling format.
+    virtual const char* tool_calling_format_name() const noexcept = 0;
 };
 
 } // namespace zoo::internal::agent

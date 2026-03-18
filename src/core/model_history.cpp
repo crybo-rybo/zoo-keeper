@@ -60,7 +60,7 @@ void Model::replace_messages(std::vector<Message> messages) {
     // clear_kv_cache(): the caller is restoring a previously valid history, and
     // any stale KV entries will be overwritten when the next full prompt is
     // decoded starting at position 0.
-    prompt_state_.cached_messages_dirty = true;
+    prompt_state_.dirty = true;
     prompt_state_.committed_prompt_len = 0;
 }
 

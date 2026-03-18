@@ -16,6 +16,7 @@ struct llama_context;
 struct llama_sampler;
 struct llama_vocab;
 struct llama_chat_message;
+struct common_chat_templates;
 
 namespace zoo::core {
 
@@ -72,7 +73,7 @@ class Model {
         std::string text;      ///< Raw generated text for the pass.
         int prompt_tokens = 0; ///< Number of prompt tokens rendered for the pass.
         bool tool_call_detected =
-            false; ///< Whether sentinel-based grammar mode emitted a tool call.
+            false; ///< Whether tool calling detected a tool call in the output.
     };
 
     /**
@@ -129,14 +130,16 @@ class Model {
     void replace_messages(std::vector<Message> messages);
 
     /**
-     * @brief Enables grammar-constrained tool calling for future generations.
+     * @brief Configures template-driven tool calling from registered tool metadata.
      *
-     * Uses lazy grammar activation triggered by `<tool_call>` sentinel.
+     * Converts tool metadata to the format expected by the model's chat template,
+     * applies the template to determine the grammar, triggers, and stop sequences
+     * appropriate for this model family, and rebuilds the sampler chain.
      *
-     * @param grammar_str GBNF grammar string rooted at `root`.
-     * @return `true` when the sampler chain was rebuilt successfully.
+     * @param tools Registered tools in canonical registration order.
+     * @return `true` when tool calling was set up successfully.
      */
-    bool set_tool_grammar(const std::string& grammar_str);
+    bool set_tool_calling(const std::vector<CoreToolInfo>& tools);
 
     /**
      * @brief Enables grammar-constrained schema output for future generations.
@@ -148,16 +151,35 @@ class Model {
      */
     bool set_schema_grammar(const std::string& grammar_str);
 
-    /// Disables any active grammar and restores the default sampler chain.
+    /// Disables any active grammar/tool calling and restores the default sampler chain.
     void clear_tool_grammar() noexcept;
-    /// Returns whether tool grammar constraints are currently active.
-    bool has_tool_grammar() const noexcept {
-        return grammar_mode_ == GrammarMode::ToolCall;
+
+    /// Returns whether native tool calling is currently active.
+    bool has_tool_calling() const noexcept {
+        return grammar_mode_ == GrammarMode::NativeToolCall;
     }
     /// Returns whether schema grammar constraints are currently active.
     bool has_schema_grammar() const noexcept {
         return grammar_mode_ == GrammarMode::Schema;
     }
+
+    /**
+     * @brief Parses a generated text into structured content and tool calls.
+     *
+     * Uses the detected chat format from template initialization to parse
+     * model output via `common_chat_parse()`.
+     *
+     * @param text Raw model output to parse.
+     * @return Parsed message with content and tool calls.
+     */
+    struct ParsedResponse {
+        std::string content;
+        std::vector<ToolCallInfo> tool_calls;
+    };
+    ParsedResponse parse_tool_response(const std::string& text) const;
+
+    /// Returns the name of the detected tool calling format (e.g. "hermes_2_pro").
+    const char* tool_calling_format_name() const noexcept;
 
     /// Returns the configured context window size.
     int context_size() const noexcept;
@@ -180,10 +202,14 @@ class Model {
     struct LlamaSamplerDeleter {
         void operator()(llama_sampler* sampler) const noexcept;
     };
+    struct ChatTemplatesDeleter {
+        void operator()(common_chat_templates* tmpls) const noexcept;
+    };
 
     using LlamaModelHandle = std::unique_ptr<llama_model, LlamaModelDeleter>;
     using LlamaContextHandle = std::unique_ptr<llama_context, LlamaContextDeleter>;
     using LlamaSamplerHandle = std::unique_ptr<llama_sampler, LlamaSamplerDeleter>;
+    using ChatTemplatesHandle = std::unique_ptr<common_chat_templates, ChatTemplatesDeleter>;
 
     /// Constructs an uninitialized model wrapper. Call `initialize()` before use.
     explicit Model(const Config& config);
@@ -229,12 +255,10 @@ class Model {
     void add_sampling_stages(llama_sampler* chain) const;
     /// Adds a distribution or greedy sampler as the final selection stage.
     void add_dist_sampler(llama_sampler* chain) const;
-    /// Rebuilds the sampler chain so a lazy grammar activates on `<tool_call>`.
-    bool rebuild_sampler_with_grammar();
+    /// Rebuilds the sampler chain with a lazy grammar using format-detected triggers.
+    bool rebuild_sampler_with_tool_grammar();
     /// Rebuilds the sampler chain with an immediately-active grammar for schema output.
     bool rebuild_sampler_with_schema_grammar();
-    /// Returns cached llama.cpp chat messages, rebuilding only when history has changed.
-    const std::vector<llama_chat_message>& llama_messages();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
     /// Trims the oldest retained conversation state to the configured history budget.
@@ -244,9 +268,8 @@ class Model {
 
     struct PromptState {
         int committed_prompt_len = 0;
-        std::vector<char> formatted_prompt;
-        std::vector<llama_chat_message> cached_llama_messages;
-        bool cached_messages_dirty = true;
+        std::string rendered_prompt;
+        bool dirty = true;
     };
 
     // Config
@@ -259,20 +282,22 @@ class Model {
     const llama_vocab* vocab_ = nullptr;
 
     int context_size_ = 0;
-    const char* tmpl_ = nullptr;
+
+    // Chat template state (llama.cpp common layer)
+    ChatTemplatesHandle chat_templates_;
 
     // Grammar state
-    /**
-     * @brief Distinguishes between no grammar, lazy tool-call grammar, and
-     *        immediate schema-output grammar.
-     */
     enum class GrammarMode {
-        None,     ///< No grammar constraint active.
-        ToolCall, ///< Lazy grammar activated on the `<tool_call>` sentinel.
-        Schema    ///< Immediate grammar active from the first generated token.
+        None,           ///< No grammar constraint active.
+        NativeToolCall, ///< Lazy grammar with format-detected triggers via common layer.
+        Schema          ///< Immediate grammar active from the first generated token.
     };
     std::string tool_grammar_str_;
     GrammarMode grammar_mode_ = GrammarMode::None;
+
+    // Tool calling state (populated by set_tool_calling)
+    struct ToolCallingState;
+    std::unique_ptr<ToolCallingState> tool_state_;
 
     // Incremental prompt state
     PromptState prompt_state_;

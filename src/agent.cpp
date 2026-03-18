@@ -97,8 +97,4 @@ size_t Agent::tool_count() const noexcept {
     return impl_->runtime.tool_count();
 }
 
-std::string Agent::build_tool_system_prompt(const std::string& base_prompt) const {
-    return impl_->runtime.build_tool_system_prompt(base_prompt);
-}
-
 } // namespace zoo

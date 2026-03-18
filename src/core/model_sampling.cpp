@@ -1,15 +1,18 @@
 /**
  * @file model_sampling.cpp
- * @brief Sampler-chain and tool-grammar management for `zoo::core::Model`.
+ * @brief Sampler-chain and grammar management for `zoo::core::Model`.
  */
 
 #include "zoo/core/model.hpp"
+#include "zoo/core/model_tool_calling_state.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <common.h>
 #include <cstdint>
 #include <llama.h>
 #include <random>
+#include <regex>
 
 namespace zoo::core {
 
@@ -33,29 +36,24 @@ uint32_t make_sampler_seed(int configured_seed) {
     return static_cast<uint32_t>(seed ^ (seed >> 32));
 }
 
-} // namespace
-
-bool Model::set_tool_grammar(const std::string& grammar_str) {
-    tool_grammar_str_ = grammar_str;
-    return rebuild_sampler_with_grammar();
+/// Escapes regex special characters for use in trigger patterns.
+std::string regex_escape(const std::string& str) {
+    static const std::regex special_chars{R"([-[\]{}()*+?.,\^$|#\s])"};
+    return std::regex_replace(str, special_chars, R"(\$&)");
 }
+
+} // namespace
 
 bool Model::set_schema_grammar(const std::string& grammar_str) {
     tool_grammar_str_ = grammar_str;
     return rebuild_sampler_with_schema_grammar();
 }
 
-void Model::clear_tool_grammar() noexcept {
-    if (grammar_mode_ == GrammarMode::None) {
-        return;
+bool Model::rebuild_sampler_with_tool_grammar() {
+    if (!tool_state_ || tool_grammar_str_.empty()) {
+        return false;
     }
 
-    tool_grammar_str_.clear();
-    grammar_mode_ = GrammarMode::None;
-    sampler_ = create_sampler_chain();
-}
-
-bool Model::rebuild_sampler_with_grammar() {
     auto chain_params = llama_sampler_chain_default_params();
     chain_params.no_perf = false;
     auto chain = LlamaSamplerHandle(llama_sampler_chain_init(chain_params));
@@ -65,10 +63,50 @@ bool Model::rebuild_sampler_with_grammar() {
 
     add_sampling_stages(chain.get());
 
-    const char* trigger = "<tool_call>";
-    const char* trigger_patterns[] = {trigger};
-    auto* grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
-        vocab_, tool_grammar_str_.c_str(), "root", trigger_patterns, 1, nullptr, 0);
+    // Convert common_grammar_trigger to the arrays expected by the lazy grammar API.
+    std::vector<std::string> trigger_patterns;
+    std::vector<llama_token> trigger_tokens;
+
+    for (const auto& trigger : tool_state_->grammar_triggers) {
+        switch (trigger.type) {
+        case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
+            trigger_patterns.push_back(regex_escape(trigger.value));
+            break;
+        case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
+            trigger_patterns.push_back(trigger.value);
+            break;
+        case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL: {
+            std::string anchored = trigger.value;
+            if (anchored.empty() || anchored.front() != '^') {
+                anchored = "^" + anchored;
+            }
+            if (anchored.empty() || anchored.back() != '$') {
+                anchored = anchored + "$";
+            }
+            trigger_patterns.push_back(std::move(anchored));
+            break;
+        }
+        case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
+            trigger_tokens.push_back(trigger.token);
+            break;
+        }
+    }
+
+    std::vector<const char*> trigger_patterns_c;
+    trigger_patterns_c.reserve(trigger_patterns.size());
+    for (const auto& p : trigger_patterns) {
+        trigger_patterns_c.push_back(p.c_str());
+    }
+
+    llama_sampler* grammar_sampler = nullptr;
+    if (tool_state_->grammar_lazy) {
+        grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
+            vocab_, tool_grammar_str_.c_str(), "root", trigger_patterns_c.data(),
+            trigger_patterns_c.size(), trigger_tokens.data(), trigger_tokens.size());
+    } else {
+        grammar_sampler = llama_sampler_init_grammar(vocab_, tool_grammar_str_.c_str(), "root");
+    }
+
     if (!grammar_sampler) {
         return false;
     }
@@ -77,7 +115,7 @@ bool Model::rebuild_sampler_with_grammar() {
     add_dist_sampler(chain.get());
 
     sampler_ = std::move(chain);
-    grammar_mode_ = GrammarMode::ToolCall;
+    grammar_mode_ = GrammarMode::NativeToolCall;
     return true;
 }
 

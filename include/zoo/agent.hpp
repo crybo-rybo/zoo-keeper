@@ -253,17 +253,6 @@ class Agent {
     /// Returns the number of tools currently registered with the agent.
     size_t tool_count() const noexcept;
 
-    /**
-     * @brief Builds a system prompt that advertises the currently registered tools.
-     *
-     * When grammar-based tool calling is active the prompt describes the
-     * sentinel-tagged format; otherwise it falls back to plain JSON instructions.
-     *
-     * @param base_prompt Base system prompt to extend.
-     * @return Prompt text augmented with tool usage instructions and schemas.
-     */
-    std::string build_tool_system_prompt(const std::string& base_prompt) const;
-
   private:
     struct Impl;
 

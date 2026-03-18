@@ -8,8 +8,8 @@
 
 #include "zoo/internal/agent/runtime.hpp"
 
+#include "zoo/core/model.hpp"
 #include "zoo/internal/log.hpp"
-#include "zoo/internal/tools/grammar.hpp"
 #include "zoo/tools/registry.hpp"
 #include <cassert>
 #include <chrono>
@@ -225,43 +225,12 @@ Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
         return std::unexpected(result.error());
     }
 
-    update_tool_grammar();
+    update_tool_calling();
     return {};
 }
 
 size_t AgentRuntime::tool_count() const noexcept {
     return tool_registry_.size();
-}
-
-std::string AgentRuntime::build_tool_system_prompt(const std::string& base_prompt) const {
-    auto schemas = tool_registry_.get_all_schemas();
-    if (schemas.empty()) {
-        return base_prompt;
-    }
-
-    if (tool_grammar_active_.load(std::memory_order_acquire)) {
-        return base_prompt +
-               "\n\nYou have access to tools. When you need to use a tool, wrap the "
-               "call in sentinel tags like this:\n"
-               "<tool_call>{\"name\": \"tool_name\", \"arguments\": {\"param1\": "
-               "\"value1\"}}</tool_call>\n"
-               "\nYou may think step-by-step before calling a tool. "
-               "Do NOT output any text after the </tool_call> closing tag.\n"
-               "After receiving a tool result, incorporate it into a natural response.\n"
-               "If no tool is needed, respond normally without sentinel tags.\n"
-               "\nAvailable tools:\n" +
-               schemas.dump(2);
-    }
-
-    return base_prompt +
-           "\n\nWhen you need to use a tool, respond with a JSON object containing "
-           "\"name\" and \"arguments\" fields. For example:\n"
-           "{\"name\": \"tool_name\", \"arguments\": {\"param1\": \"value1\"}}\n"
-           "\nOutput ONLY the JSON tool call when invoking a tool — no text after it.\n"
-           "After receiving a tool result, incorporate it into a natural response.\n"
-           "If no tool is needed, respond normally without JSON.\n"
-           "\nAvailable tools:\n" +
-           schemas.dump(2);
 }
 
 // ---------------------------------------------------------------------------
@@ -336,17 +305,17 @@ void AgentRuntime::handle_command(Command& cmd) {
                        backend_->clear_history();
                        c.done->set_value();
                    },
-                   [this](RefreshToolGrammarCmd& c) {
-                       auto grammar = tools::GrammarBuilder::build(c.metadata);
+                   [this](RefreshToolCallingCmd& c) {
                        bool active = false;
-                       if (grammar.empty()) {
+                       if (c.tools.empty()) {
                            backend_->clear_tool_grammar();
-                       } else if (backend_->set_tool_grammar(grammar)) {
+                       } else if (backend_->set_tool_calling(c.tools)) {
                            active = true;
-                           ZOO_LOG("info", "tool grammar updated (%zu tools)", c.metadata.size());
+                           ZOO_LOG("info", "tool calling configured (%zu tools, format=%s)",
+                                   c.tools.size(), backend_->tool_calling_format_name());
                        } else {
                            backend_->clear_tool_grammar();
-                           ZOO_LOG("warn", "grammar sampler init failed, falling back to "
+                           ZOO_LOG("warn", "tool calling setup failed, falling back to "
                                            "unconstrained generation");
                        }
                        tool_grammar_active_.store(active, std::memory_order_release);
@@ -380,21 +349,31 @@ void AgentRuntime::resolve_command_on_shutdown(Command& cmd) {
                    [](SetSystemPromptCmd& c) { c.done->set_value(); },
                    [](GetHistoryCmd& c) { c.done->set_value(std::vector<Message>{}); },
                    [](ClearHistoryCmd& c) { c.done->set_value(); },
-                   [](RefreshToolGrammarCmd& c) { c.done->set_value(false); },
+                   [](RefreshToolCallingCmd& c) { c.done->set_value(false); },
                },
                cmd);
 }
 
-void AgentRuntime::update_tool_grammar() {
+void AgentRuntime::update_tool_calling() {
     if (!running_.load(std::memory_order_acquire)) {
         return;
     }
 
+    // Convert ToolMetadata → CoreToolInfo for the backend.
     auto metadata = tool_registry_.get_all_tool_metadata();
+    std::vector<CoreToolInfo> tools;
+    tools.reserve(metadata.size());
+    for (const auto& tm : metadata) {
+        tools.push_back(CoreToolInfo{
+            tm.name,
+            tm.description,
+            tm.parameters_schema.dump(),
+        });
+    }
+
     auto done = std::make_shared<std::promise<bool>>();
     auto future = done->get_future();
-    if (!request_mailbox_.push_command(
-            RefreshToolGrammarCmd{std::move(metadata), std::move(done)})) {
+    if (!request_mailbox_.push_command(RefreshToolCallingCmd{std::move(tools), std::move(done)})) {
         return;
     }
     future.get();
