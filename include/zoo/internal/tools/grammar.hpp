@@ -18,38 +18,6 @@ namespace zoo::tools {
 class GrammarBuilder {
   public:
     /**
-     * @brief Builds a grammar from normalized tool metadata.
-     *
-     * @param tools Registered tools in canonical registration order.
-     * @return A GBNF grammar rooted at `root`, or an empty string when no tools
-     *         are registered.
-     */
-    static std::string build(const std::vector<ToolMetadata>& tools) {
-        if (tools.empty()) {
-            return {};
-        }
-
-        std::string grammar;
-        grammar += "root ::= " + literal("<tool_call>") + " ws tool-call ws " +
-                   literal("</tool_call>") + "\n";
-        grammar += "tool-call ::= ";
-        for (size_t i = 0; i < tools.size(); ++i) {
-            if (i > 0) {
-                grammar += " | ";
-            }
-            grammar += tool_rule_name(i);
-        }
-        grammar += "\n";
-
-        for (size_t tool_index = 0; tool_index < tools.size(); ++tool_index) {
-            append_tool_rules(grammar, tool_index, tools[tool_index]);
-        }
-
-        grammar += primitive_rules();
-        return grammar;
-    }
-
-    /**
      * @brief Builds a grammar for a standalone JSON schema (no tool-call sentinels).
      *
      * @param parameters Normalized parameter vector describing the output schema.
@@ -93,45 +61,6 @@ class GrammarBuilder {
     }
 
   private:
-    static void append_tool_rules(std::string& grammar, size_t tool_index,
-                                  const ToolMetadata& tool) {
-        const std::string prefix = "tool-" + std::to_string(tool_index);
-
-        grammar += tool_rule_name(tool_index) + " ::= " + literal("{") + " ws " +
-                   json_string_literal("name") + " ws " + literal(":") + " ws " +
-                   json_string_literal(tool.name) + " ws " + literal(",") + " ws " +
-                   json_string_literal("arguments") + " ws " + literal(":") + " ws " +
-                   literal("{") + " ws ";
-
-        if (!tool.parameters.empty()) {
-            grammar += prefix + "-args ws ";
-        }
-
-        grammar += literal("}") + " ws " + literal("}") + "\n";
-
-        if (tool.parameters.empty()) {
-            return;
-        }
-
-        const size_t required_count = count_required_prefix(tool.parameters);
-        append_prefixed_parameter_rules(grammar, prefix, tool.parameters);
-
-        grammar += prefix + "-args ::= ";
-        if (required_count == tool.parameters.size()) {
-            grammar += build_prefixed_required_sequence(prefix, 0, required_count);
-        } else if (required_count == 0) {
-            grammar += prefix + "-start-0";
-        } else {
-            grammar += build_prefixed_required_sequence(prefix, 0, required_count) + " " + prefix +
-                       "-cont-" + std::to_string(required_count);
-        }
-        grammar += "\n";
-
-        if (required_count < tool.parameters.size()) {
-            append_prefixed_optional_rules(grammar, prefix, tool.parameters, required_count);
-        }
-    }
-
     static void append_prefixed_parameter_rules(std::string& grammar, const std::string& prefix,
                                                 const std::vector<ToolParameter>& parameters) {
         for (size_t param_index = 0; param_index < parameters.size(); ++param_index) {
@@ -221,10 +150,6 @@ class GrammarBuilder {
             return json_string_literal(value.get<std::string>());
         }
         return literal(value.dump());
-    }
-
-    static std::string tool_rule_name(size_t tool_index) {
-        return "tool-" + std::to_string(tool_index);
     }
 
     static std::string json_string_literal(const std::string& value) {

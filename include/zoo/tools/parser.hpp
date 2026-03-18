@@ -71,60 +71,6 @@ class ToolCallParser {
         return result;
     }
 
-    /**
-     * @brief Extracts a tool call wrapped in `<tool_call>` sentinel tags.
-     *
-     * @param output Raw model output that may contain visible text and one sentinel-wrapped tool
-     * call.
-     * @return Parsed tool call plus the text that precedes the opening tag.
-     */
-    static ParseResult parse_sentinel(const std::string& output) {
-        ParseResult result;
-
-        static constexpr std::string_view OPEN_TAG = "<tool_call>";
-        static constexpr std::string_view CLOSE_TAG = "</tool_call>";
-
-        auto open_pos = output.find(OPEN_TAG);
-        if (open_pos == std::string::npos) {
-            result.text_before = output;
-            return result;
-        }
-
-        auto content_start = open_pos + OPEN_TAG.size();
-        auto close_pos = output.find(CLOSE_TAG, content_start);
-        if (close_pos == std::string::npos) {
-            result.text_before = output;
-            return result;
-        }
-
-        std::string json_str = output.substr(content_start, close_pos - content_start);
-
-        // Trim whitespace around JSON
-        auto first = json_str.find_first_not_of(" \t\n\r");
-        auto last = json_str.find_last_not_of(" \t\n\r");
-        if (first != std::string::npos) {
-            json_str = json_str.substr(first, last - first + 1);
-        }
-
-        try {
-            auto j = nlohmann::json::parse(json_str);
-            if (j.is_object() && j.contains("name") && j.contains("arguments")) {
-                ToolCall tc;
-                tc.name = j["name"].get<std::string>();
-                tc.arguments = std::move(j["arguments"]);
-                tc.id = j.value("id", generate_id(json_str));
-                result.tool_call = std::move(tc);
-                result.text_before = output.substr(0, open_pos);
-                return result;
-            }
-        } catch (const nlohmann::json::exception&) {
-            // Invalid JSON inside sentinels
-        }
-
-        result.text_before = output;
-        return result;
-    }
-
   private:
     /// Finds the matching closing brace for the JSON object that starts at `start`.
     static size_t find_json_object_end(const std::string& text, size_t start) {

@@ -130,21 +130,9 @@ TEST(SchemaGrammarTest, DiffersFromToolGrammar) {
 
     auto schema_grammar = GrammarBuilder::build_schema(params);
 
-    // Build an equivalent tool grammar for comparison
-    zoo::tools::ToolMetadata tool_meta;
-    tool_meta.name = "search";
-    tool_meta.description = "Search";
-    tool_meta.parameters = params;
-    auto tool_grammar = GrammarBuilder::build({tool_meta});
-
-    // Schema grammar should NOT have tool-call sentinels
+    // Schema grammar should have the primitive rules but no tool-call sentinels
     EXPECT_EQ(schema_grammar.find("<tool_call>"), std::string::npos);
-    // Tool grammar SHOULD have tool-call sentinels
-    EXPECT_NE(tool_grammar.find("<tool_call>"), std::string::npos);
-
-    // Both should have the primitive rules
     EXPECT_NE(schema_grammar.find("string ::="), std::string::npos);
-    EXPECT_NE(tool_grammar.find("string ::="), std::string::npos);
 }
 
 } // namespace
