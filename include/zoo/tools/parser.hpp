@@ -1,6 +1,6 @@
 /**
  * @file parser.hpp
- * @brief Parsers that recover tool calls from unconstrained or sentinel-delimited output.
+ * @brief Parser that recovers tool calls from unconstrained model output.
  */
 
 #pragma once
@@ -14,10 +14,11 @@
 namespace zoo::tools {
 
 /**
- * @brief Extracts tool calls from model output.
+ * @brief Extracts tool calls from model output using heuristic brace-based extraction.
  *
- * The parser supports both heuristic brace-based extraction and explicit
- * `<tool_call>...</tool_call>` sentinel tags used by grammar-constrained mode.
+ * This parser is used as a fallback for unconstrained output. When native
+ * template-driven tool calling is active, parsed results are obtained via
+ * `core::Model::parse_tool_response()` instead.
  */
 class ToolCallParser {
   public:

@@ -46,9 +46,6 @@ enum class Role {
 }
 
 /**
- * @brief Represents one message in the conversation history.
- */
-/**
  * @brief Structured tool call data attached to assistant messages.
  *
  * When an assistant response contains one or more tool invocations, the
@@ -498,8 +495,8 @@ using RequestId = uint64_t;
  * The agent layer converts `tools::ToolMetadata` to this before passing to `Model`.
  */
 struct CoreToolInfo {
-    std::string name;
-    std::string description;
+    std::string name;            ///< Registered tool name exposed to the model.
+    std::string description;     ///< Human-readable description used in the chat template.
     std::string parameters_json; ///< JSON Schema of the parameters as a string.
 };
 

@@ -30,21 +30,25 @@ C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Three strict layer
 | Layer | Namespace | Role |
 |-------|-----------|------|
 | 3 | `zoo::Agent` | Async orchestration: inference thread, request queue, streaming, agentic tool loop |
-| 2 | `zoo::tools` | Tool registry, call parsing, schema validation, GBNF grammar generation. Header-only, zero llama.cpp dependency |
+| 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Header-only, zero llama.cpp dependency |
 | 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
 
 **Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `std::future<Response>`. All callbacks run on the inference thread. Model is protected by `model_mutex_`.
 
-**CMake targets:** `zoo` (static lib), `zoo_core` (interface compat alias). Consumers use `ZooKeeper::zoo`.
+**Tool calling:** Model initializes chat templates via `common_chat_templates_init()` (from the llama.cpp `common` library). Prompt rendering uses `common_chat_templates_apply()`. Tool calling is template-driven: `Model::set_tool_calling()` detects the model's format (29+ supported formats) and activates a lazy grammar with format-specific triggers. Parsed tool calls are returned as `ToolCallInfo` structs via `Model::parse_tool_response()`. The old hardcoded `<tool_call>` sentinel approach has been removed.
+
+**CMake targets:** `zoo` (static lib), `zoo_core` (interface compat alias). Consumers use `ZooKeeper::zoo`. The build requires `LLAMA_BUILD_COMMON=ON` to link the `common` library from llama.cpp.
 
 ## Key Conventions
 
 - All llama.cpp calls live in `src/core/model*.cpp` — nowhere else
-- `model.hpp` uses forward declarations for llama types (no `llama.h` in public headers)
+- `model.hpp` uses forward declarations for llama types (no `llama.h` in public headers); `common_chat_templates` is also forward-declared there
 - Error handling uses `std::expected` (C++23), not exceptions
 - `role_to_string()` returns `const char*` (static storage) — safe for `llama_chat_message`
 - `ZOO_LOG` is a no-op when `ZOO_LOGGING_ENABLED` is not defined
 - `validate_role_sequence()` is a free function in `types.hpp` (pure logic, unit testable)
+- `ToolCallInfo` in `types.hpp` carries parsed tool call data (id, name, arguments_json) from model output
+- `CoreToolInfo` in `types.hpp` is the Layer 1 tool descriptor — the agent converts `tools::ToolMetadata` to this before calling `Model::set_tool_calling()`
 
 ## Testing
 

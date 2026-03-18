@@ -13,12 +13,16 @@
 namespace zoo::tools {
 
 /**
- * @brief Builds a GBNF grammar that constrains output to registered tool calls.
+ * @brief Builds a GBNF grammar that constrains model output to a JSON schema shape.
+ *
+ * Used by the structured-extraction path to generate an immediately-active
+ * grammar for schema-constrained generation. Tool calling grammars are handled
+ * by the llama.cpp common layer via `Model::set_tool_calling()`.
  */
 class GrammarBuilder {
   public:
     /**
-     * @brief Builds a grammar for a standalone JSON schema (no tool-call sentinels).
+     * @brief Builds a grammar for a standalone JSON schema.
      *
      * @param parameters Normalized parameter vector describing the output schema.
      * @return A GBNF grammar rooted at `root`, or an empty string when no
