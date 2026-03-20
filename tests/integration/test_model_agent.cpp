@@ -165,3 +165,26 @@ TEST_F(LiveModelIntegrationTest, AgentCompleteDoesNotMutatePersistentHistory) {
     const auto after = agent->get_history();
     EXPECT_EQ(after, before);
 }
+
+TEST_F(LiveModelIntegrationTest, AgentWithToolsHandlesFencedCodePrompt) {
+    auto cfg = config();
+    cfg.max_tokens = 96;
+
+    auto agent_result = zoo::Agent::create(cfg);
+    ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
+
+    auto& agent = *agent_result;
+    ASSERT_TRUE(agent
+                    ->register_tool("get_time", "Get the current date and time", {},
+                                    []() { return std::string("2026-03-20 12:00:00"); })
+                    .has_value());
+
+    agent->set_system_prompt("You are a helpful assistant with access to tools.");
+
+    auto handle = agent->chat(zoo::Message::user(
+        "Write a short fenced Python hello-world example and keep the answer brief."));
+    auto response = handle.future.get();
+
+    ASSERT_TRUE(response.has_value()) << response.error().to_string();
+    EXPECT_FALSE(response->text.empty());
+}

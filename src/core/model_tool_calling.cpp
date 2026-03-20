@@ -53,6 +53,15 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
         return false;
     }
 
+    common_peg_arena parser;
+    try {
+        if (!params.parser.empty()) {
+            parser.load(params.parser);
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
+
     auto state = std::make_unique<ToolCallingState>();
     state->tools = std::move(chat_tools);
     state->format = params.format;
@@ -62,6 +71,7 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
     state->preserved_tokens = std::move(params.preserved_tokens);
     state->additional_stops = std::move(params.additional_stops);
     state->thinking_forced_open = params.thinking_forced_open;
+    state->parser = std::move(parser);
 
     tool_grammar_str_ = state->grammar;
     tool_state_ = std::move(state);

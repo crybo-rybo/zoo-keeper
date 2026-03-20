@@ -86,15 +86,28 @@ Expected<std::string> Model::render_prompt_delta() {
     prompt_state_.rendered_prompt = new_prompt;
     prompt_state_.dirty = false;
 
-    // If we have tool state, update grammar/triggers from this render pass.
-    // The grammar may vary when the message history changes the template output.
-    if (tool_state_ && !params.grammar.empty()) {
+    // If we have tool state, fully refresh the current format/parsing/grammar
+    // state from this render pass. The template output can vary with history.
+    if (tool_state_) {
+        common_peg_arena parser;
+        try {
+            if (!params.parser.empty()) {
+                parser.load(params.parser);
+            }
+        } catch (const std::exception& e) {
+            return std::unexpected(
+                Error{ErrorCode::TemplateRenderFailed,
+                      std::string("Failed to deserialize tool parser: ") + e.what()});
+        }
+
+        tool_state_->format = params.format;
         tool_state_->grammar = params.grammar;
         tool_state_->grammar_lazy = params.grammar_lazy;
         tool_state_->grammar_triggers = std::move(params.grammar_triggers);
         tool_state_->preserved_tokens = std::move(params.preserved_tokens);
         tool_state_->additional_stops = std::move(params.additional_stops);
         tool_state_->thinking_forced_open = params.thinking_forced_open;
+        tool_state_->parser = std::move(parser);
         tool_grammar_str_ = tool_state_->grammar;
     }
 

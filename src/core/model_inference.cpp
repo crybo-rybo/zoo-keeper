@@ -197,6 +197,25 @@ Expected<Response> Model::generate(const std::string& user_message,
         return std::unexpected(prompt_result.error());
     }
 
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        if (tool_grammar_str_.empty()) {
+            sampler_ = create_sampler_chain();
+            if (!sampler_) {
+                rollback_last_message();
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
+            }
+        } else if (!rebuild_sampler_with_tool_grammar()) {
+            rollback_last_message();
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
+        }
+    } else if (grammar_mode_ == GrammarMode::Schema && !rebuild_sampler_with_schema_grammar()) {
+        rollback_last_message();
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
+    }
+
     auto tokens_result = tokenize(*prompt_result);
     if (!tokens_result) {
         rollback_last_message();
@@ -256,15 +275,25 @@ Expected<Response> Model::generate(const std::string& user_message,
 Expected<Model::GenerationResult>
 Model::generate_from_history(std::optional<TokenCallback> on_token,
                              CancellationCallback should_cancel) {
-    if (grammar_mode_ == GrammarMode::NativeToolCall) {
-        rebuild_sampler_with_tool_grammar();
-    } else if (grammar_mode_ == GrammarMode::Schema) {
-        rebuild_sampler_with_schema_grammar();
-    }
-
     auto prompt_result = render_prompt_delta();
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
+    }
+
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        if (tool_grammar_str_.empty()) {
+            sampler_ = create_sampler_chain();
+            if (!sampler_) {
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
+            }
+        } else if (!rebuild_sampler_with_tool_grammar()) {
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
+        }
+    } else if (grammar_mode_ == GrammarMode::Schema && !rebuild_sampler_with_schema_grammar()) {
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
     }
 
     auto tokens_result = tokenize(*prompt_result);

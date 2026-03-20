@@ -61,8 +61,6 @@ bool Model::rebuild_sampler_with_tool_grammar() {
         return false;
     }
 
-    add_sampling_stages(chain.get());
-
     // Convert common_grammar_trigger to the arrays expected by the lazy grammar API.
     std::vector<std::string> trigger_patterns;
     std::vector<llama_token> trigger_tokens;
@@ -112,6 +110,9 @@ bool Model::rebuild_sampler_with_tool_grammar() {
     }
     llama_sampler_chain_add(chain.get(), grammar_sampler);
 
+    // Grammar must filter logits before top-k/top-p narrow the candidate set,
+    // otherwise the chain can still pick a token the grammar rejects.
+    add_sampling_stages(chain.get());
     add_dist_sampler(chain.get());
 
     sampler_ = std::move(chain);

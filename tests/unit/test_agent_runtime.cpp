@@ -428,6 +428,31 @@ TEST(AgentRuntimeTest, SuccessfulToolCallPopulatesToolInvocations) {
     EXPECT_FALSE(inv.error.has_value());
 }
 
+TEST(AgentRuntimeTest, ToolEnabledFencedCodeReplyCompletesWithoutSpuriousToolCalls) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            GenerationResult{"```python\nprint(\"hello world\")\n```", 6, false});
+    });
+
+    auto handle = runtime.chat(Message::user("Write a fenced Python hello world example."));
+    auto result = handle.future.get();
+
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "```python\nprint(\"hello world\")\n```");
+    EXPECT_TRUE(result->tool_invocations.empty());
+
+    const auto ops = backend_ptr->operations();
+    EXPECT_LT(index_of(ops, "set_tool_calling"), index_of(ops, "generate"));
+    EXPECT_LT(index_of(ops, "generate"), index_of(ops, "finalize"));
+}
+
 TEST(AgentRuntimeTest, ValidationFailureThenSuccessPopulatesToolInvocations) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
