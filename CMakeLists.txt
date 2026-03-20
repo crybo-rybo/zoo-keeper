@@ -40,6 +40,7 @@ configure_file(
 )
 
 set(ZOO_BUILD_LLAMA_LINK_LIBRARIES
+    "$<TARGET_FILE:common>"
     "$<TARGET_FILE:llama>"
     "$<TARGET_FILE:ggml>"
     "$<TARGET_FILE:ggml-base>"
@@ -203,7 +204,7 @@ install(FILES
 )
 
 
-set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo -llama -lggml -lggml-base -lggml-cpu")
+set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo -lcommon -llama -lggml -lggml-base -lggml-cpu")
 if(TARGET ggml-blas)
     string(APPEND ZOO_PKGCONFIG_LIBS " -lggml-blas")
 endif()
