@@ -107,4 +107,65 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     EXPECT_FALSE(model.tool_state_->parser.empty());
 }
 
+TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
+    zoo::core::Model model(make_config());
+
+    auto templates = common_chat_templates_init(nullptr, peg_native_tool_template());
+    ASSERT_TRUE(templates);
+    model.chat_templates_.reset(templates.release());
+
+    auto state = std::make_unique<zoo::core::Model::ToolCallingState>();
+    state->format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    state->tools.push_back(
+        {"echo", "Echo text",
+         R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"]})"});
+
+    model.tool_state_ = std::move(state);
+    model.grammar_mode_ = zoo::core::Model::GrammarMode::NativeToolCall;
+    model.messages_.push_back(zoo::Message::user("hello"));
+
+    // Render to populate the parser state (updates tool_state_->format and parser).
+    auto prompt = model.render_prompt_delta();
+    ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();
+    ASSERT_EQ(model.tool_state_->format, COMMON_CHAT_FORMAT_PEG_NATIVE);
+
+    // PEG_NATIVE format: [TOOL_CALLS]<name>[ARGS]<json-args>
+    std::string tool_text = R"([TOOL_CALLS]echo[ARGS]{"text":"hi"})";
+    auto parsed = model.parse_tool_response(tool_text);
+
+    ASSERT_FALSE(parsed.tool_calls.empty());
+    EXPECT_EQ(parsed.tool_calls[0].name, "echo");
+}
+
+TEST(ModelToolCallingTest, AssistantWithToolCallsPreservesStructure) {
+    std::vector<zoo::ToolCallInfo> calls = {{"call_1", "echo", R"({"text":"hi"})"}};
+    auto msg = zoo::Message::assistant_with_tool_calls("visible text", calls);
+
+    EXPECT_EQ(msg.role, zoo::Role::Assistant);
+    EXPECT_EQ(msg.content, "visible text");
+    ASSERT_EQ(msg.tool_calls.size(), 1u);
+    EXPECT_EQ(msg.tool_calls[0].name, "echo");
+    EXPECT_EQ(msg.tool_calls[0].id, "call_1");
+    EXPECT_EQ(msg.tool_calls[0].arguments_json, R"({"text":"hi"})");
+}
+
+TEST(ModelToolCallingTest, PlainAssistantMessageWhenNoToolState) {
+    zoo::core::Model model(make_config());
+
+    // No tool_state_ set, grammar_mode_ defaults to None.
+    EXPECT_EQ(model.grammar_mode_, zoo::core::Model::GrammarMode::None);
+    EXPECT_EQ(model.tool_state_, nullptr);
+
+    // Simulate the generate() branching: no NativeToolCall mode → plain assistant message.
+    std::string generated_text = "Hello, world!";
+    zoo::Message msg =
+        (model.grammar_mode_ == zoo::core::Model::GrammarMode::NativeToolCall && model.tool_state_)
+            ? zoo::Message::assistant_with_tool_calls("", {})
+            : zoo::Message::assistant(generated_text);
+
+    EXPECT_EQ(msg.role, zoo::Role::Assistant);
+    EXPECT_EQ(msg.content, "Hello, world!");
+    EXPECT_TRUE(msg.tool_calls.empty());
+}
+
 } // namespace

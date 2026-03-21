@@ -242,15 +242,29 @@ Expected<Response> Model::generate(const std::string& user_message,
     }
 
     std::string generated_text = std::move(*generate_result);
-    messages_.push_back(Message::assistant(generated_text));
-    estimated_tokens_ += estimate_tokens(generated_text) + kTemplateOverheadPerMessage;
+
+    // When native tool calling is active, parse the output to extract
+    // structured tool calls for proper history round-tripping.
+    if (grammar_mode_ == GrammarMode::NativeToolCall && tool_state_) {
+        auto parsed = parse_tool_response(generated_text);
+        if (!parsed.tool_calls.empty()) {
+            messages_.push_back(Message::assistant_with_tool_calls(std::move(parsed.content),
+                                                                   std::move(parsed.tool_calls)));
+        } else {
+            messages_.push_back(Message::assistant(std::move(parsed.content)));
+        }
+    } else {
+        messages_.push_back(Message::assistant(std::move(generated_text)));
+    }
+
+    estimated_tokens_ += estimate_tokens(messages_.back().content) + kTemplateOverheadPerMessage;
     note_history_append();
     finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
 
     Response response;
-    response.text = std::move(generated_text);
+    response.text = messages_.back().content;
     response.usage.prompt_tokens = prompt_tokens;
     response.usage.completion_tokens = completion_tokens;
     response.usage.total_tokens = prompt_tokens + completion_tokens;
