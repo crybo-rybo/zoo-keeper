@@ -27,7 +27,8 @@ class ModelBackend final : public AgentBackend {
         }
 
         return GenerationResult{std::move(result->text), result->prompt_tokens,
-                                result->tool_call_detected};
+                                result->tool_call_detected, std::move(result->parsed_content),
+                                std::move(result->tool_calls)};
     }
 
     void finalize_response() override {

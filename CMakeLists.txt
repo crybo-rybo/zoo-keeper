@@ -85,6 +85,7 @@ add_library(zoo STATIC
     src/core/model_history.cpp
     src/core/model_sampling.cpp
     src/core/model_tool_calling.cpp
+    src/core/stream_filter.cpp
 )
 target_include_directories(zoo PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

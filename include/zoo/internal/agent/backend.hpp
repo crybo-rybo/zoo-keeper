@@ -25,6 +25,11 @@ struct GenerationResult {
     std::string text;                ///< Raw generated text for the pass.
     int prompt_tokens = 0;           ///< Number of prompt tokens rendered for the pass.
     bool tool_call_detected = false; ///< Whether tool calling detected a tool call in the output.
+
+    /// Visible content after stripping tool-call syntax (empty when no tool calling).
+    std::string parsed_content;
+    /// Structured tool calls extracted from the output (empty when none detected).
+    std::vector<ToolCallInfo> tool_calls;
 };
 
 /**

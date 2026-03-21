@@ -16,6 +16,8 @@ add_executable(zoo_tests
     unit/test_extraction.cpp
     unit/test_request_tracker.cpp
     unit/test_model_tool_calling.cpp
+    unit/test_token_accounting.cpp
+    unit/test_streaming_filter.cpp
 )
 
 target_link_libraries(zoo_tests

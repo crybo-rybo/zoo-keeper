@@ -7,6 +7,7 @@
 #include "zoo/core/model_tool_calling_state.hpp"
 
 #include "zoo/internal/core/batch.hpp"
+#include "zoo/internal/core/stream_filter.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -56,6 +57,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
     bool stopped_by_callback = false;
+    bool tool_stream_suppressed = false;
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
     const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) + 1;
@@ -125,15 +127,23 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         }
 
         if (on_token) {
-            std::string_view visible_chunk(buff, static_cast<size_t>(n));
-
-            auto action = invoke_token_callback(*on_token, visible_chunk);
-            if (!action) {
-                return std::unexpected(action.error());
+            // Suppress streaming once a tool-call grammar trigger is detected.
+            if (!tool_stream_suppressed && tool_state_ &&
+                grammar_mode_ == GrammarMode::NativeToolCall) {
+                tool_stream_suppressed =
+                    is_tool_trigger_detected(generated_text, tool_state_->grammar_triggers);
             }
-            if (*action == TokenAction::Stop) {
-                stopped_by_callback = true;
-                break;
+
+            if (!tool_stream_suppressed) {
+                std::string_view visible_chunk(buff, static_cast<size_t>(n));
+                auto action = invoke_token_callback(*on_token, visible_chunk);
+                if (!action) {
+                    return std::unexpected(action.error());
+                }
+                if (*action == TokenAction::Stop) {
+                    stopped_by_callback = true;
+                    break;
+                }
             }
         }
 
@@ -257,7 +267,7 @@ Expected<Response> Model::generate(const std::string& user_message,
         messages_.push_back(Message::assistant(std::move(generated_text)));
     }
 
-    estimated_tokens_ += estimate_tokens(messages_.back().content) + kTemplateOverheadPerMessage;
+    estimated_tokens_ += estimate_message_tokens(messages_.back());
     note_history_append();
     finalize_response();
 
@@ -332,15 +342,20 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
         return std::unexpected(text_result.error());
     }
 
-    // Tool call detection: if tool calling is active, parse the output to check
-    // for tool calls instead of relying on sentinel detection.
+    // Tool call detection: if tool calling is active, parse the output and
+    // return the structured result so callers avoid a redundant re-parse.
     bool tool_detected = false;
+    std::string parsed_content;
+    std::vector<ToolCallInfo> parsed_tool_calls;
     if (grammar_mode_ == GrammarMode::NativeToolCall) {
         auto parsed = parse_tool_response(*text_result);
         tool_detected = !parsed.tool_calls.empty();
+        parsed_content = std::move(parsed.content);
+        parsed_tool_calls = std::move(parsed.tool_calls);
     }
 
-    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
+    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected,
+                            std::move(parsed_content), std::move(parsed_tool_calls)};
 }
 
 } // namespace zoo::core

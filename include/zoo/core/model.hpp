@@ -74,6 +74,11 @@ class Model {
         int prompt_tokens = 0; ///< Number of prompt tokens rendered for the pass.
         bool tool_call_detected =
             false; ///< Whether tool calling detected a tool call in the output.
+
+        /// Visible content after stripping tool-call syntax (empty when no tool calling).
+        std::string parsed_content;
+        /// Structured tool calls extracted from the output (empty when none detected).
+        std::vector<ToolCallInfo> tool_calls;
     };
 
     /**
@@ -82,11 +87,16 @@ class Model {
      * This lower-level entry point is used by the agent tool loop so it can
      * alternate between assistant generations and injected tool results.
      *
+     * @note This method does **not** commit the assistant turn to history.
+     *       The caller is responsible for adding the structured message via
+     *       `add_message(Message::assistant_with_tool_calls(...))` when tool
+     *       calls are detected.  See `generate()` for the self-contained path.
+     *
      * @param on_token Optional callback invoked for streamed token fragments.
      * @param should_cancel Optional callback queried each decode step; returning
      *        `true` terminates generation with a cancellation signal.
      * @return Raw generation output plus prompt-token count, tool-call signal,
-     *         and effective tool-calling format for that pass.
+     *         and pre-parsed tool calls (avoids needing a second parse).
      */
     Expected<GenerationResult>
     generate_from_history(std::optional<TokenCallback> on_token = std::nullopt,
@@ -262,6 +272,8 @@ class Model {
     bool rebuild_sampler_with_schema_grammar();
     /// Estimates token count for bookkeeping when exact prompt rendering is unavailable.
     int estimate_tokens(const std::string& text) const;
+    /// Estimates token cost of a complete message including tool-call metadata.
+    int estimate_message_tokens(const Message& message) const;
     /// Trims the oldest retained conversation state to the configured history budget.
     void trim_history_to_fit();
     /// Removes the most recent message and invalidates incremental prompt state.

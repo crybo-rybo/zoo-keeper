@@ -16,13 +16,13 @@ void Model::set_system_prompt(const std::string& prompt) {
     Message sys_msg = Message::system(prompt);
 
     if (!messages_.empty() && messages_[0].role == Role::System) {
-        estimated_tokens_ -= estimate_tokens(messages_[0].content) + kTemplateOverheadPerMessage;
+        estimated_tokens_ -= estimate_message_tokens(messages_[0]);
         messages_[0] = std::move(sys_msg);
     } else {
         messages_.insert(messages_.begin(), std::move(sys_msg));
     }
 
-    estimated_tokens_ += estimate_tokens(prompt) + kTemplateOverheadPerMessage;
+    estimated_tokens_ += estimate_message_tokens(messages_[0]);
     note_history_rewrite();
 }
 
@@ -33,7 +33,7 @@ Expected<void> Model::add_message(const Message& message) {
     }
 
     messages_.push_back(message);
-    estimated_tokens_ += estimate_tokens(message.content) + kTemplateOverheadPerMessage;
+    estimated_tokens_ += estimate_message_tokens(message);
     note_history_append();
     trim_history_to_fit();
     return {};
@@ -53,7 +53,7 @@ void Model::replace_messages(std::vector<Message> messages) {
     messages_ = std::move(messages);
     estimated_tokens_ = 0;
     for (const auto& m : messages_) {
-        estimated_tokens_ += estimate_tokens(m.content) + kTemplateOverheadPerMessage;
+        estimated_tokens_ += estimate_message_tokens(m);
     }
     // Invalidate the rendered-prompt cache and reset the committed position so
     // the next generation re-renders from scratch, but intentionally skip
@@ -89,6 +89,19 @@ int Model::estimate_tokens(const std::string& text) const {
     return std::max(1, static_cast<int>(text.length() / 4));
 }
 
+int Model::estimate_message_tokens(const Message& message) const {
+    int total = estimate_tokens(message.content) + kTemplateOverheadPerMessage;
+    if (message.tool_call_id.has_value()) {
+        total += estimate_tokens(*message.tool_call_id);
+    }
+    for (const auto& tc : message.tool_calls) {
+        total += estimate_tokens(tc.name);
+        total += estimate_tokens(tc.id);
+        total += estimate_tokens(tc.arguments_json);
+    }
+    return total;
+}
+
 void Model::trim_history_to_fit() {
     const size_t system_offset =
         (!messages_.empty() && messages_.front().role == Role::System) ? 1u : 0u;
@@ -112,8 +125,7 @@ void Model::trim_history_to_fit() {
     }
 
     for (size_t index = system_offset; index < erase_end; ++index) {
-        estimated_tokens_ -=
-            estimate_tokens(messages_[index].content) + kTemplateOverheadPerMessage;
+        estimated_tokens_ -= estimate_message_tokens(messages_[index]);
     }
     if (estimated_tokens_ < 0) {
         estimated_tokens_ = 0;
@@ -129,7 +141,7 @@ void Model::rollback_last_message() noexcept {
         return;
     }
 
-    estimated_tokens_ -= estimate_tokens(messages_.back().content) + kTemplateOverheadPerMessage;
+    estimated_tokens_ -= estimate_message_tokens(messages_.back());
     if (estimated_tokens_ < 0) {
         estimated_tokens_ = 0;
     }

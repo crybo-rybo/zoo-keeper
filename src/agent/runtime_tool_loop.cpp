@@ -109,12 +109,19 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::vector<ToolCallInfo> structured_tool_calls;
 
         if (use_native_tool_calling && generated->tool_call_detected) {
-            // Parse the output using the model's native format parser.
-            auto parsed = backend_->parse_tool_response(generated->text);
-            response_text = std::move(parsed.content);
-
-            if (!parsed.tool_calls.empty()) {
+            // Prefer the pre-parsed result from generate_from_history() to
+            // avoid a redundant parse. Fall back to parse_tool_response()
+            // when pre-parsed data is absent (e.g. test fakes).
+            if (!generated->tool_calls.empty()) {
+                response_text = std::move(generated->parsed_content);
+                structured_tool_calls = std::move(generated->tool_calls);
+            } else {
+                auto parsed = backend_->parse_tool_response(generated->text);
+                response_text = std::move(parsed.content);
                 structured_tool_calls = std::move(parsed.tool_calls);
+            }
+
+            if (!structured_tool_calls.empty()) {
                 const auto& first_tc = structured_tool_calls.front();
                 tools::ToolCall tc;
                 tc.id = first_tc.id;
