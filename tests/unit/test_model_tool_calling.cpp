@@ -86,6 +86,7 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
 
     model.tool_grammar_str_ = state->grammar;
     model.tool_state_ = std::move(state);
+    model.grammar_mode_ = zoo::core::Model::GrammarMode::NativeToolCall;
     model.messages_.push_back(zoo::Message::user("hello"));
 
     auto prompt = model.render_prompt_delta();

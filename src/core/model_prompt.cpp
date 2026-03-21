@@ -86,9 +86,11 @@ Expected<std::string> Model::render_prompt_delta() {
     prompt_state_.rendered_prompt = new_prompt;
     prompt_state_.dirty = false;
 
-    // If we have tool state, fully refresh the current format/parsing/grammar
-    // state from this render pass. The template output can vary with history.
-    if (tool_state_) {
+    // If native tool calling is active, fully refresh the current
+    // format/parsing/grammar state from this render pass. The template output
+    // can vary with history. Skip this when in Schema mode (extraction) to
+    // avoid overwriting the caller's schema grammar with tool-call grammar.
+    if (grammar_mode_ == GrammarMode::NativeToolCall && tool_state_) {
         common_peg_arena parser;
         try {
             if (!params.parser.empty()) {
