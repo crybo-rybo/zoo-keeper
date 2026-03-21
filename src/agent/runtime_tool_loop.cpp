@@ -58,9 +58,11 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
     const bool has_tools = tool_registry_.size() > 0;
     const bool use_native_tool_calling =
         has_tools && tool_grammar_active_.load(std::memory_order_acquire);
+    const bool is_generic_format = use_native_tool_calling && backend_->is_generic_tool_format();
 
-    ZOO_LOG("debug", "processing request %lu (tools=%d, native_tc=%d)",
-            static_cast<unsigned long>(request.id), has_tools, use_native_tool_calling);
+    ZOO_LOG("debug", "processing request %lu (tools=%d, native_tc=%d, generic=%d)",
+            static_cast<unsigned long>(request.id), has_tools, use_native_tool_calling,
+            is_generic_format);
 
     while (iteration < max_tool_iterations) {
         ++iteration;
@@ -88,9 +90,13 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::optional<tools::ToolCallInterceptor> interceptor;
 
         if (use_native_tool_calling) {
-            // Native tool calling: grammar handles constraining, we get clean output.
-            // Stream tokens directly to user callback.
-            if (request.streaming_callback) {
+            if (is_generic_format) {
+                // Generic format wraps all output in JSON — buffer it, don't
+                // stream raw wrapper to the user.
+                callback = make_metrics_callback(
+                    [](std::string_view) -> TokenAction { return TokenAction::Continue; });
+            } else if (request.streaming_callback) {
+                // Structured native: stream tokens directly to user callback.
                 callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
                     (*request.streaming_callback)(token);
                     return TokenAction::Continue;
@@ -127,7 +133,7 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::string response_text;
         std::vector<ToolCallInfo> structured_tool_calls;
 
-        if (use_native_tool_calling && generated->tool_call_detected) {
+        if (use_native_tool_calling && (generated->tool_call_detected || is_generic_format)) {
             // Parse the output using the model's native format parser.
             auto parsed = backend_->parse_tool_response(generated->text);
             response_text = std::move(parsed.content);
@@ -144,6 +150,13 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                     tc.arguments = nlohmann::json::object();
                 }
                 detected_tool_call = std::move(tc);
+            }
+
+            // Generic format: emit the unwrapped content to the streaming
+            // callback now that we know it is a plain response (no tool call).
+            if (is_generic_format && !detected_tool_call.has_value() &&
+                request.streaming_callback) {
+                (*request.streaming_callback)(response_text);
             }
         } else if (interceptor) {
             auto intercept_result = interceptor->finalize();
@@ -186,8 +199,14 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                         validation_error.message.c_str());
 
                 std::string error_content = "Error: " + validation_error.message;
-                backend_->add_message(
-                    Message::tool(error_content + "\nPlease correct the arguments.", tool_call.id));
+                if (is_generic_format) {
+                    backend_->add_message(Message::user(
+                        "Tool call validation failed for `" + tool_call.name + "`:\n" +
+                        error_content + "\n\nPlease correct the arguments and continue."));
+                } else {
+                    backend_->add_message(Message::tool(
+                        error_content + "\nPlease correct the arguments.", tool_call.id));
+                }
                 tool_invocations.push_back(ToolInvocation{
                     tool_call.id, tool_call.name, std::move(args_json),
                     ToolInvocationStatus::ValidationFailed, std::nullopt, validation_error});
@@ -210,7 +229,14 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 status = ToolInvocationStatus::ExecutionFailed;
             }
 
-            backend_->add_message(Message::tool(std::move(tool_result_str), tool_call.id));
+            if (is_generic_format) {
+                backend_->add_message(Message::user(
+                    "Tool result for `" + tool_call.name + "`:\n" + tool_result_str +
+                    "\n\nUse this tool result to continue answering the original request. "
+                    "Call another tool only if still necessary."));
+            } else {
+                backend_->add_message(Message::tool(std::move(tool_result_str), tool_call.id));
+            }
             tool_invocations.push_back(
                 ToolInvocation{tool_call.id, tool_call.name, std::move(args_json), status,
                                std::move(result_json), std::move(tool_error)});

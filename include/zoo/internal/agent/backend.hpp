@@ -89,6 +89,9 @@ class AgentBackend {
 
     /// Returns the name of the detected tool calling format.
     virtual const char* tool_calling_format_name() const noexcept = 0;
+
+    /// Returns true when the active tool-calling format is the generic JSON wrapper.
+    virtual bool is_generic_tool_format() const noexcept = 0;
 };
 
 } // namespace zoo::internal::agent

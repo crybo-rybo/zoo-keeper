@@ -67,6 +67,10 @@ class ModelBackend final : public AgentBackend {
         return model_->tool_calling_format_name();
     }
 
+    bool is_generic_tool_format() const noexcept override {
+        return std::string_view(model_->tool_calling_format_name()) == "Generic";
+    }
+
   private:
     std::unique_ptr<core::Model> model_;
 };
