@@ -153,6 +153,13 @@ install(TARGETS zoo zoo_core
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# llama.cpp's common library is not exported by upstream, but zoo.a depends
+# on it at link time.  Install it alongside our own archives so the install-
+# tree config can reference it.
+install(FILES $<TARGET_FILE:common>
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
 install(EXPORT ZooKeeperTargets
     FILE ZooKeeperTargets.cmake
     NAMESPACE ZooKeeper::
