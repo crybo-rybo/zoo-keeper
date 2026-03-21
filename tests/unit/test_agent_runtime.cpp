@@ -29,6 +29,7 @@ using zoo::internal::agent::AgentBackend;
 using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
 using zoo::internal::agent::ParsedToolResponse;
+using zoo::internal::agent::ToolCallingFormatKind;
 
 class FakeBackend final : public AgentBackend {
   public:
@@ -66,7 +67,12 @@ class FakeBackend final : public AgentBackend {
             action = std::move(generations_.front());
             generations_.pop_front();
         }
-        return action(std::move(on_token), should_cancel);
+        auto result = action(std::move(on_token), should_cancel);
+        if (result) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            active_tool_format_kind_ = result->tool_format_kind;
+        }
+        return result;
     }
 
     void finalize_response() override {
@@ -106,8 +112,13 @@ class FakeBackend final : public AgentBackend {
 
     ParsedToolResponse parse_tool_response(const std::string& text) const override {
         ParsedToolResponse result;
+        ToolCallingFormatKind tool_format_kind = ToolCallingFormatKind::None;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            tool_format_kind = active_tool_format_kind_;
+        }
 
-        if (generic_tool_format_) {
+        if (tool_format_kind == ToolCallingFormatKind::GenericFallback) {
             // Simulate common_chat_parse_generic(): the model wraps all output
             // in JSON — either {"response": "..."} or {"tool_call": {...}}.
             auto j = nlohmann::json::parse(text, nullptr, false);
@@ -158,15 +169,17 @@ class FakeBackend final : public AgentBackend {
     }
 
     const char* tool_calling_format_name() const noexcept override {
-        return generic_tool_format_ ? "Generic" : "fake";
-    }
+        std::lock_guard<std::mutex> lock(mutex_);
+        switch (active_tool_format_kind_) {
+        case ToolCallingFormatKind::GenericFallback:
+            return "Generic";
+        case ToolCallingFormatKind::StructuredNative:
+            return "fake";
+        case ToolCallingFormatKind::None:
+            return "none";
+        }
 
-    bool is_generic_tool_format() const noexcept override {
-        return generic_tool_format_;
-    }
-
-    void set_generic_tool_format(bool value) {
-        generic_tool_format_ = value;
+        return "none";
     }
 
     bool set_schema_grammar(const std::string& grammar_str) override {
@@ -193,7 +206,7 @@ class FakeBackend final : public AgentBackend {
     std::deque<GenerationAction> generations_;
     std::vector<Message> history_;
     bool tool_calling_supported_ = true;
-    bool generic_tool_format_ = false;
+    ToolCallingFormatKind active_tool_format_kind_ = ToolCallingFormatKind::None;
 };
 
 Config make_config() {
@@ -216,7 +229,8 @@ void register_single_int_tool(AgentRuntime& runtime, const std::string& name,
 GenerationResult tool_call_generation(const std::string& tool_name, const nlohmann::json& arguments,
                                       std::string id = "call-1") {
     nlohmann::json payload = {{"id", std::move(id)}, {"name", tool_name}, {"arguments", arguments}};
-    return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true};
+    return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true,
+                            ToolCallingFormatKind::StructuredNative};
 }
 
 size_t index_of(const std::vector<std::string>& operations, const std::string& value) {
@@ -766,7 +780,6 @@ TEST(AgentRuntimeTest, CompleteRejectsEmptyMessageHistory) {
 TEST(AgentRuntimeTest, GenericFormatUnwrapsResponseJson) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    backend_ptr->set_generic_tool_format(true);
     AgentRuntime runtime(make_config(), std::move(backend));
 
     register_single_int_tool(runtime, "double_value", "Doubles a number",
@@ -774,7 +787,8 @@ TEST(AgentRuntimeTest, GenericFormatUnwrapsResponseJson) {
 
     // Generic format: model outputs {"response": "Hello"} with tool_call_detected=false
     backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{R"({"response": "Hello"})", 10, false});
+        return Expected<GenerationResult>(GenerationResult{R"({"response": "Hello"})", 10, false,
+                                                           ToolCallingFormatKind::GenericFallback});
     });
 
     auto handle = runtime.chat(Message::user("say hello"));
@@ -788,11 +802,12 @@ TEST(AgentRuntimeTest, GenericFormatUnwrapsResponseJson) {
 TEST(AgentRuntimeTest, GenericFormatDoesNotStreamRawJson) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    backend_ptr->set_generic_tool_format(true);
     AgentRuntime runtime(make_config(), std::move(backend));
 
     register_single_int_tool(runtime, "double_value", "Doubles a number",
                              [](int value) { return value * 2; });
+
+    EXPECT_STREQ(backend_ptr->tool_calling_format_name(), "none");
 
     backend_ptr->push_generation([](std::optional<TokenCallback> on_token,
                                     const CancellationCallback&) {
@@ -804,7 +819,8 @@ TEST(AgentRuntimeTest, GenericFormatDoesNotStreamRawJson) {
             (*on_token)(R"( "Hello")");
             (*on_token)("}");
         }
-        return Expected<GenerationResult>(GenerationResult{R"({"response": "Hello"})", 10, false});
+        return Expected<GenerationResult>(GenerationResult{R"({"response": "Hello"})", 10, false,
+                                                           ToolCallingFormatKind::GenericFallback});
     });
 
     std::string streamed;
@@ -821,7 +837,6 @@ TEST(AgentRuntimeTest, GenericFormatDoesNotStreamRawJson) {
 TEST(AgentRuntimeTest, GenericFormatToolCallUsesUserFollowUp) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    backend_ptr->set_generic_tool_format(true);
     AgentRuntime runtime(make_config(), std::move(backend));
 
     register_single_int_tool(runtime, "double_value", "Doubles a number",
@@ -832,12 +847,14 @@ TEST(AgentRuntimeTest, GenericFormatToolCallUsesUserFollowUp) {
         nlohmann::json payload = {
             {"tool_call",
              {{"id", "call-1"}, {"name", "double_value"}, {"arguments", {{"value", 5}}}}}};
-        return Expected<GenerationResult>(GenerationResult{payload.dump(), 10, true});
+        return Expected<GenerationResult>(
+            GenerationResult{payload.dump(), 10, true, ToolCallingFormatKind::GenericFallback});
     });
     // Second generation: final text response
     backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            GenerationResult{R"({"response": "The result is 10"})", 10, false});
+        return Expected<GenerationResult>(GenerationResult{R"({"response": "The result is 10"})",
+                                                           10, false,
+                                                           ToolCallingFormatKind::GenericFallback});
     });
 
     auto handle = runtime.chat(Message::user("double 5"));
@@ -869,7 +886,6 @@ TEST(AgentRuntimeTest, GenericFormatToolCallUsesUserFollowUp) {
 TEST(AgentRuntimeTest, GenericFormatValidationFailureUsesUserFollowUp) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    backend_ptr->set_generic_tool_format(true);
     Config config = make_config();
     config.max_tool_retries = 2;
     AgentRuntime runtime(config, std::move(backend));
@@ -882,19 +898,22 @@ TEST(AgentRuntimeTest, GenericFormatValidationFailureUsesUserFollowUp) {
         nlohmann::json payload = {
             {"tool_call",
              {{"id", "call-bad"}, {"name", "double_value"}, {"arguments", {{"value", "wrong"}}}}}};
-        return Expected<GenerationResult>(GenerationResult{payload.dump(), 10, true});
+        return Expected<GenerationResult>(
+            GenerationResult{payload.dump(), 10, true, ToolCallingFormatKind::GenericFallback});
     });
     // Second generation: valid arguments
     backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
         nlohmann::json payload = {
             {"tool_call",
              {{"id", "call-good"}, {"name", "double_value"}, {"arguments", {{"value", 7}}}}}};
-        return Expected<GenerationResult>(GenerationResult{payload.dump(), 10, true});
+        return Expected<GenerationResult>(
+            GenerationResult{payload.dump(), 10, true, ToolCallingFormatKind::GenericFallback});
     });
     // Final text response
     backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            GenerationResult{R"({"response": "The result is 14"})", 10, false});
+        return Expected<GenerationResult>(GenerationResult{R"({"response": "The result is 14"})",
+                                                           10, false,
+                                                           ToolCallingFormatKind::GenericFallback});
     });
 
     auto handle = runtime.chat(Message::user("double 7"));
@@ -922,6 +941,54 @@ TEST(AgentRuntimeTest, GenericFormatValidationFailureUsesUserFollowUp) {
         EXPECT_EQ(op.find("add:tool:"), std::string::npos)
             << "Generic format should not use Role::Tool, found: " << op;
     }
+}
+
+TEST(AgentRuntimeTest, ToolFormatKindIsReevaluatedAcrossIterations) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        nlohmann::json payload = {
+            {"tool_call",
+             {{"id", "call-1"}, {"name", "double_value"}, {"arguments", {{"value", 5}}}}}};
+        return Expected<GenerationResult>(
+            GenerationResult{payload.dump(), 10, true, ToolCallingFormatKind::GenericFallback});
+    });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            tool_call_generation("double_value", {{"value", 7}}, "call-2"));
+    });
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            GenerationResult{"Done", 10, false, ToolCallingFormatKind::StructuredNative});
+    });
+
+    auto handle = runtime.chat(Message::user("double 5 and then double 7"));
+    auto result = handle.future.get();
+
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "Done");
+    ASSERT_EQ(result->tool_invocations.size(), 2u);
+
+    const auto ops = backend_ptr->operations();
+    int user_tool_result_count = 0;
+    bool found_structured_tool_result = false;
+    for (const auto& op : ops) {
+        if (op.find("add:user:Tool result for `double_value`") != std::string::npos) {
+            ++user_tool_result_count;
+        }
+        if (op.find(R"(add:tool:{"result":14})") != std::string::npos) {
+            found_structured_tool_result = true;
+        }
+    }
+
+    EXPECT_EQ(user_tool_result_count, 1);
+    EXPECT_TRUE(found_structured_tool_result)
+        << "Expected a structured-native tool result after the format switched away from generic";
 }
 
 } // namespace

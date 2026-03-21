@@ -10,10 +10,140 @@
 #include "zoo/internal/tools/interceptor.hpp"
 #include "zoo/tools/parser.hpp"
 #include "zoo/tools/validation.hpp"
+#include <array>
+#include <cctype>
 #include <chrono>
 #include <unordered_map>
 
 namespace zoo::internal::agent {
+
+namespace {
+
+enum class GenericPrefixMatch {
+    Undecided,
+    GenericWrapper,
+    NotGeneric,
+};
+
+enum class NativeStreamingMode {
+    BufferingPrefix,
+    Passthrough,
+    SuppressingGenericWrapper,
+};
+
+std::string_view trim_leading_ascii_whitespace(std::string_view text) {
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
+        text.remove_prefix(1);
+    }
+    return text;
+}
+
+GenericPrefixMatch classify_generic_wrapper_prefix(std::string_view text) {
+    text = trim_leading_ascii_whitespace(text);
+    if (text.empty()) {
+        return GenericPrefixMatch::Undecided;
+    }
+    if (text.front() != '{') {
+        return GenericPrefixMatch::NotGeneric;
+    }
+
+    text.remove_prefix(1);
+    text = trim_leading_ascii_whitespace(text);
+    if (text.empty()) {
+        return GenericPrefixMatch::Undecided;
+    }
+    if (text.front() != '"') {
+        return GenericPrefixMatch::NotGeneric;
+    }
+
+    text.remove_prefix(1);
+    constexpr std::array<std::string_view, 3> generic_keys = {"response", "tool_call",
+                                                              "tool_calls"};
+
+    bool matches_partial_key = false;
+    for (std::string_view key : generic_keys) {
+        if (text.size() <= key.size()) {
+            if (key.substr(0, text.size()) == text) {
+                matches_partial_key = true;
+            }
+            continue;
+        }
+
+        if (text.substr(0, key.size()) == key) {
+            if (text[key.size()] == '"') {
+                return GenericPrefixMatch::GenericWrapper;
+            }
+            return GenericPrefixMatch::NotGeneric;
+        }
+    }
+
+    return matches_partial_key ? GenericPrefixMatch::Undecided : GenericPrefixMatch::NotGeneric;
+}
+
+class NativeToolStreamingGate {
+  public:
+    explicit NativeToolStreamingGate(std::function<void(std::string_view)> callback)
+        : callback_(std::move(callback)) {}
+
+    TokenAction on_token(std::string_view token) {
+        switch (mode_) {
+        case NativeStreamingMode::Passthrough:
+            emit(token);
+            return TokenAction::Continue;
+        case NativeStreamingMode::SuppressingGenericWrapper:
+            return TokenAction::Continue;
+        case NativeStreamingMode::BufferingPrefix:
+            buffer_.append(token);
+            break;
+        }
+
+        switch (classify_generic_wrapper_prefix(buffer_)) {
+        case GenericPrefixMatch::GenericWrapper:
+            mode_ = NativeStreamingMode::SuppressingGenericWrapper;
+            return TokenAction::Continue;
+        case GenericPrefixMatch::NotGeneric:
+            mode_ = NativeStreamingMode::Passthrough;
+            emit(buffer_);
+            buffer_.clear();
+            return TokenAction::Continue;
+        case GenericPrefixMatch::Undecided:
+            return TokenAction::Continue;
+        }
+
+        return TokenAction::Continue;
+    }
+
+    bool emitted_user_tokens() const noexcept {
+        return emitted_user_tokens_;
+    }
+
+    void emit_text(std::string_view text) {
+        if (text.empty()) {
+            return;
+        }
+
+        mode_ = NativeStreamingMode::Passthrough;
+        buffer_.clear();
+        emit(text);
+    }
+
+  private:
+    void emit(std::string_view text) {
+        callback_(text);
+        emitted_user_tokens_ = true;
+    }
+
+    std::function<void(std::string_view)> callback_;
+    std::string buffer_;
+    NativeStreamingMode mode_ = NativeStreamingMode::BufferingPrefix;
+    bool emitted_user_tokens_ = false;
+};
+
+bool is_generic_tool_format(ToolCallingFormatKind tool_format_kind) noexcept {
+    return tool_format_kind == ToolCallingFormatKind::GenericFallback;
+}
+
+} // namespace
 
 Expected<Response> AgentRuntime::process_request(const Request& request) {
     if (request.extraction_schema.has_value()) {
@@ -58,11 +188,9 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
     const bool has_tools = tool_registry_.size() > 0;
     const bool use_native_tool_calling =
         has_tools && tool_grammar_active_.load(std::memory_order_acquire);
-    const bool is_generic_format = use_native_tool_calling && backend_->is_generic_tool_format();
 
-    ZOO_LOG("debug", "processing request %lu (tools=%d, native_tc=%d, generic=%d)",
-            static_cast<unsigned long>(request.id), has_tools, use_native_tool_calling,
-            is_generic_format);
+    ZOO_LOG("debug", "processing request %lu (tools=%d, native_tc=%d)",
+            static_cast<unsigned long>(request.id), has_tools, use_native_tool_calling);
 
     while (iteration < max_tool_iterations) {
         ++iteration;
@@ -88,18 +216,16 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
 
         std::optional<TokenCallback> callback;
         std::optional<tools::ToolCallInterceptor> interceptor;
+        std::optional<NativeToolStreamingGate> native_streaming_gate;
 
         if (use_native_tool_calling) {
-            if (is_generic_format) {
-                // Generic format wraps all output in JSON — buffer it, don't
-                // stream raw wrapper to the user.
-                callback = make_metrics_callback(
-                    [](std::string_view) -> TokenAction { return TokenAction::Continue; });
-            } else if (request.streaming_callback) {
-                // Structured native: stream tokens directly to user callback.
+            if (request.streaming_callback) {
+                // Buffer only the opening prefix so generic wrapper JSON never
+                // reaches the caller, while structured native output still
+                // streams token-by-token once the prefix is classified.
+                native_streaming_gate.emplace(*request.streaming_callback);
                 callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
-                    (*request.streaming_callback)(token);
-                    return TokenAction::Continue;
+                    return native_streaming_gate->on_token(token);
                 });
             } else {
                 callback = make_metrics_callback(
@@ -132,6 +258,7 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::optional<tools::ToolCall> detected_tool_call;
         std::string response_text;
         std::vector<ToolCallInfo> structured_tool_calls;
+        const bool is_generic_format = is_generic_tool_format(generated->tool_format_kind);
 
         if (use_native_tool_calling && (generated->tool_call_detected || is_generic_format)) {
             // Parse the output using the model's native format parser.
@@ -151,19 +278,22 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 }
                 detected_tool_call = std::move(tc);
             }
-
-            // Generic format: emit the unwrapped content to the streaming
-            // callback now that we know it is a plain response (no tool call).
-            if (is_generic_format && !detected_tool_call.has_value() &&
-                request.streaming_callback) {
-                (*request.streaming_callback)(response_text);
-            }
         } else if (interceptor) {
             auto intercept_result = interceptor->finalize();
             detected_tool_call = std::move(intercept_result.tool_call);
             response_text = std::move(intercept_result.full_text);
         } else {
             response_text = std::move(generated->text);
+        }
+
+        if (native_streaming_gate && !native_streaming_gate->emitted_user_tokens()) {
+            if (is_generic_format) {
+                if (!detected_tool_call.has_value()) {
+                    native_streaming_gate->emit_text(response_text);
+                }
+            } else if (!response_text.empty()) {
+                native_streaming_gate->emit_text(response_text);
+            }
         }
 
         if (detected_tool_call.has_value()) {

@@ -11,6 +11,19 @@ namespace zoo::internal::agent {
 
 namespace {
 
+ToolCallingFormatKind to_internal_tool_format_kind(core::ToolCallingFormatKind kind) noexcept {
+    switch (kind) {
+    case core::ToolCallingFormatKind::StructuredNative:
+        return ToolCallingFormatKind::StructuredNative;
+    case core::ToolCallingFormatKind::GenericFallback:
+        return ToolCallingFormatKind::GenericFallback;
+    case core::ToolCallingFormatKind::None:
+        return ToolCallingFormatKind::None;
+    }
+
+    return ToolCallingFormatKind::None;
+}
+
 class ModelBackend final : public AgentBackend {
   public:
     explicit ModelBackend(std::unique_ptr<core::Model> model) : model_(std::move(model)) {}
@@ -27,7 +40,8 @@ class ModelBackend final : public AgentBackend {
         }
 
         return GenerationResult{std::move(result->text), result->prompt_tokens,
-                                result->tool_call_detected};
+                                result->tool_call_detected,
+                                to_internal_tool_format_kind(result->tool_format_kind)};
     }
 
     void finalize_response() override {
@@ -65,10 +79,6 @@ class ModelBackend final : public AgentBackend {
 
     const char* tool_calling_format_name() const noexcept override {
         return model_->tool_calling_format_name();
-    }
-
-    bool is_generic_tool_format() const noexcept override {
-        return std::string_view(model_->tool_calling_format_name()) == "Generic";
     }
 
   private:
