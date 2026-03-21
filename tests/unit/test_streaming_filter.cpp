@@ -73,4 +73,42 @@ TEST(StreamingFilterTest, TokenTriggerIsSkipped) {
     EXPECT_FALSE(zoo::core::is_tool_trigger_detected("any text at all", triggers));
 }
 
+TEST(StreamingFilterTest, SplitWordTriggerPrefixIsBufferedUntilDecision) {
+    zoo::core::ToolCallWordTriggerFilter filter({"[TOOL_CALLS]"});
+
+    EXPECT_EQ(filter.consume("[TOO"), "");
+    EXPECT_FALSE(filter.suppressing());
+
+    EXPECT_EQ(filter.consume("L_CALLS]"), "");
+    EXPECT_TRUE(filter.suppressing());
+}
+
+TEST(StreamingFilterTest, FalsePositiveWordPrefixFlushesAsVisibleText) {
+    zoo::core::ToolCallWordTriggerFilter filter({"<function="});
+
+    EXPECT_EQ(filter.consume("<fun"), "");
+    EXPECT_FALSE(filter.suppressing());
+
+    EXPECT_EQ(filter.consume("ny value"), "<funny value");
+    EXPECT_FALSE(filter.suppressing());
+}
+
+TEST(StreamingFilterTest, VisibleTextBeforeTriggerStillStreams) {
+    zoo::core::ToolCallWordTriggerFilter filter({"<function="});
+
+    EXPECT_EQ(filter.consume("hello <fun"), "hello ");
+    EXPECT_FALSE(filter.suppressing());
+
+    EXPECT_EQ(filter.consume("ction="), "");
+    EXPECT_TRUE(filter.suppressing());
+}
+
+TEST(StreamingFilterTest, FinalizeFlushesIncompleteBufferedPrefix) {
+    zoo::core::ToolCallWordTriggerFilter filter({"[TOOL_CALLS]"});
+
+    EXPECT_EQ(filter.consume("[TOO"), "");
+    EXPECT_EQ(filter.finalize(), "[TOO");
+    EXPECT_FALSE(filter.suppressing());
+}
+
 } // namespace

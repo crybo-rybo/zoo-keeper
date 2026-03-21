@@ -58,6 +58,13 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     int token_count = 0;
     bool stopped_by_callback = false;
     bool tool_stream_suppressed = false;
+    std::optional<ToolCallWordTriggerFilter> word_trigger_filter;
+    if (on_token && tool_state_ && grammar_mode_ == GrammarMode::NativeToolCall) {
+        auto word_triggers = extract_word_triggers(tool_state_->grammar_triggers);
+        if (!word_triggers.empty()) {
+            word_trigger_filter.emplace(std::move(word_triggers));
+        }
+    }
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
     const int base_pos = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) + 1;
@@ -127,22 +134,35 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         }
 
         if (on_token) {
-            // Suppress streaming once a tool-call grammar trigger is detected.
-            if (!tool_stream_suppressed && tool_state_ &&
-                grammar_mode_ == GrammarMode::NativeToolCall) {
-                tool_stream_suppressed =
-                    is_tool_trigger_detected(generated_text, tool_state_->grammar_triggers);
-            }
-
             if (!tool_stream_suppressed) {
-                std::string_view visible_chunk(buff, static_cast<size_t>(n));
-                auto action = invoke_token_callback(*on_token, visible_chunk);
-                if (!action) {
-                    return std::unexpected(action.error());
+                std::string visible_chunk;
+                if (word_trigger_filter) {
+                    visible_chunk = word_trigger_filter->consume(
+                        std::string_view(buff, static_cast<size_t>(n)));
+                    tool_stream_suppressed = word_trigger_filter->suppressing();
+                } else {
+                    visible_chunk.assign(buff, static_cast<size_t>(n));
                 }
-                if (*action == TokenAction::Stop) {
-                    stopped_by_callback = true;
-                    break;
+
+                // For regex-style triggers we can only detect once the full
+                // accumulated text matches, so suppress the current fragment
+                // before forwarding anything visible from it.
+                if (!tool_stream_suppressed && tool_state_ &&
+                    grammar_mode_ == GrammarMode::NativeToolCall &&
+                    is_tool_trigger_detected(generated_text, tool_state_->grammar_triggers)) {
+                    tool_stream_suppressed = true;
+                    visible_chunk.clear();
+                }
+
+                if (!visible_chunk.empty()) {
+                    auto action = invoke_token_callback(*on_token, visible_chunk);
+                    if (!action) {
+                        return std::unexpected(action.error());
+                    }
+                    if (*action == TokenAction::Stop) {
+                        stopped_by_callback = true;
+                        break;
+                    }
                 }
             }
         }
@@ -167,7 +187,16 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     }
 
     llama_batch_free(ar_batch);
-    (void)stopped_by_callback;
+
+    if (on_token && word_trigger_filter && !tool_stream_suppressed && !stopped_by_callback) {
+        std::string trailing = word_trigger_filter->finalize();
+        if (!trailing.empty()) {
+            auto action = invoke_token_callback(*on_token, trailing);
+            if (!action) {
+                return std::unexpected(action.error());
+            }
+        }
+    }
 
     return generated_text;
 }
