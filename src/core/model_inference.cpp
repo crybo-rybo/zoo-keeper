@@ -18,17 +18,6 @@ namespace zoo::core {
 
 namespace {
 
-ToolCallingFormatKind classify_tool_format_kind(common_chat_format format) noexcept {
-    switch (format) {
-    case COMMON_CHAT_FORMAT_GENERIC:
-        return ToolCallingFormatKind::GenericFallback;
-    case COMMON_CHAT_FORMAT_CONTENT_ONLY:
-        return ToolCallingFormatKind::None;
-    default:
-        return ToolCallingFormatKind::StructuredNative;
-    }
-}
-
 Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::string_view token) {
     try {
         return callback(token);
@@ -329,11 +318,6 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
         return std::unexpected(text_result.error());
     }
 
-    ToolCallingFormatKind tool_format_kind = ToolCallingFormatKind::None;
-    if (grammar_mode_ == GrammarMode::NativeToolCall && tool_state_) {
-        tool_format_kind = classify_tool_format_kind(tool_state_->format);
-    }
-
     // Tool call detection: if tool calling is active, parse the output to check
     // for tool calls instead of relying on sentinel detection.
     bool tool_detected = false;
@@ -342,8 +326,7 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
         tool_detected = !parsed.tool_calls.empty();
     }
 
-    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected,
-                            tool_format_kind};
+    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
 }
 
 } // namespace zoo::core

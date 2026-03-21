@@ -56,22 +56,6 @@ zoo::Config make_base_config(const std::filesystem::path& model_path) {
     return config;
 }
 
-void skip_unless_live_model_uses_generic_tool_calling(const zoo::Config& config) {
-    auto model_result = zoo::core::Model::load(config);
-    ASSERT_TRUE(model_result.has_value()) << model_result.error().to_string();
-
-    const std::vector<zoo::CoreToolInfo> tools = {{
-        "echo",
-        "Echo text",
-        R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false})",
-    }};
-
-    ASSERT_TRUE((*model_result)->set_tool_calling(tools));
-    if (std::string_view((*model_result)->tool_calling_format_name()) != "Generic") {
-        GTEST_SKIP() << "Configured integration model does not resolve to generic tool calling.";
-    }
-}
-
 class LiveModelIntegrationTest : public ::testing::Test {
   protected:
     void SetUp() override {
@@ -206,70 +190,4 @@ TEST_F(LiveModelIntegrationTest, AgentWithToolsHandlesFencedCodePrompt) {
 
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
     EXPECT_FALSE(response->text.empty());
-}
-
-TEST_F(LiveModelIntegrationTest, AgentWithGenericToolsDoesNotExposeWrapperJson) {
-    auto cfg = config();
-    cfg.max_tokens = 96;
-
-    skip_unless_live_model_uses_generic_tool_calling(cfg);
-
-    auto agent_result = zoo::Agent::create(cfg);
-    ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
-
-    auto& agent = *agent_result;
-    ASSERT_TRUE(agent
-                    ->register_tool("get_time", "Get the current date and time", {},
-                                    []() { return std::string("2026-03-20 12:00:00"); })
-                    .has_value());
-
-    agent->set_system_prompt("You are a helpful assistant with access to tools.");
-
-    std::string streamed;
-    auto handle = agent->chat(
-        zoo::Message::user(
-            "Write a short fenced Python hello-world example and keep the answer brief."),
-        [&](std::string_view token) { streamed.append(token); });
-    auto response = handle.future.get();
-
-    ASSERT_TRUE(response.has_value()) << response.error().to_string();
-    EXPECT_FALSE(response->text.empty());
-    EXPECT_FALSE(streamed.empty());
-    EXPECT_EQ(response->text.find(R"({"response")"), std::string::npos);
-    EXPECT_EQ(response->text.find(R"({"tool_call")"), std::string::npos);
-    EXPECT_EQ(streamed.find(R"({"response")"), std::string::npos);
-    EXPECT_EQ(streamed.find(R"({"tool_call")"), std::string::npos);
-}
-
-TEST_F(LiveModelIntegrationTest, AgentWithGenericToolsCompletesToolLoopWithoutToolRoleHistory) {
-    auto cfg = config();
-    cfg.max_tokens = 96;
-
-    skip_unless_live_model_uses_generic_tool_calling(cfg);
-
-    auto agent_result = zoo::Agent::create(cfg);
-    ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
-
-    auto& agent = *agent_result;
-    ASSERT_TRUE(agent
-                    ->register_tool("get_time", "Get the current date and time", {},
-                                    []() { return std::string("2026-03-20 12:00:00"); })
-                    .has_value());
-
-    agent->set_system_prompt("You are a helpful assistant with access to tools.");
-
-    auto handle = agent->chat(
-        zoo::Message::user("Use tools to tell me the current date and time. Reply briefly."));
-    auto response = handle.future.get();
-
-    ASSERT_TRUE(response.has_value()) << response.error().to_string();
-    EXPECT_FALSE(response->text.empty());
-    EXPECT_FALSE(response->tool_invocations.empty());
-    EXPECT_EQ(response->text.find(R"({"response")"), std::string::npos);
-    EXPECT_EQ(response->text.find(R"({"tool_call")"), std::string::npos);
-
-    const auto history = agent->get_history();
-    EXPECT_TRUE(std::none_of(history.begin(), history.end(), [](const zoo::Message& message) {
-        return message.role == zoo::Role::Tool;
-    }));
 }

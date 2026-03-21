@@ -71,7 +71,7 @@ Contributor rules:
 - `include/zoo/tools/*` contains the supported public tool API.
 - `ToolRegistry` owns normalized metadata and invocation wiring.
 - Parser and validator operate on strings and JSON, not on model internals.
-- `include/zoo/internal/tools/*` contains private grammar/interceptor helpers used by the runtime.
+- `include/zoo/internal/tools/*` contains private grammar/interceptor helpers. The interceptor is a standalone utility not used by the agent runtime; grammar generation for tool calling is handled by llama.cpp's `common` layer.
 
 Maintain these invariants:
 

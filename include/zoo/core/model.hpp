@@ -21,15 +21,6 @@ struct common_chat_templates;
 namespace zoo::core {
 
 /**
- * @brief Classifies the effective tool-calling format for a single generation pass.
- */
-enum class ToolCallingFormatKind {
-    None,             ///< No native tool-calling format is active for this pass.
-    StructuredNative, ///< A model-specific structured native tool format is active.
-    GenericFallback   ///< llama.cpp generic JSON wrapper tool format is active.
-};
-
-/**
  * @brief Direct llama.cpp wrapper for model lifecycle, history, and generation.
  *
  * `Model` owns the llama.cpp model, context, sampler chain, and incremental
@@ -83,8 +74,6 @@ class Model {
         int prompt_tokens = 0; ///< Number of prompt tokens rendered for the pass.
         bool tool_call_detected =
             false; ///< Whether tool calling detected a tool call in the output.
-        ToolCallingFormatKind tool_format_kind =
-            ToolCallingFormatKind::None; ///< Effective tool-calling format for this pass.
     };
 
     /**

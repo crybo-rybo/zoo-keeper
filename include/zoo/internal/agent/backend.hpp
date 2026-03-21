@@ -17,17 +17,6 @@
 namespace zoo::internal::agent {
 
 /**
- * @brief Classifies the effective tool-calling format for a single generation pass.
- *
- * Mirrors `core::ToolCallingFormatKind` without depending on `model.hpp`.
- */
-enum class ToolCallingFormatKind {
-    None,
-    StructuredNative,
-    GenericFallback,
-};
-
-/**
  * @brief Result of a single generation pass started from existing history.
  *
  * Mirrors `core::Model::GenerationResult` without depending on model.hpp.
@@ -36,8 +25,6 @@ struct GenerationResult {
     std::string text;                ///< Raw generated text for the pass.
     int prompt_tokens = 0;           ///< Number of prompt tokens rendered for the pass.
     bool tool_call_detected = false; ///< Whether tool calling detected a tool call in the output.
-    ToolCallingFormatKind tool_format_kind =
-        ToolCallingFormatKind::None; ///< Effective tool-calling format for this pass.
 };
 
 /**

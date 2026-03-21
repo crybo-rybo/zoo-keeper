@@ -1,7 +1,7 @@
 {
-    "model_path": "path/to/model.gguf",
+    "model_path": "/Users/conorrybacki/.models/gemma-3-12b-it-q4_0.gguf",
     "context_size": 4096,
-    "max_tokens": -1,
+    "max_tokens": 2048,
     "n_gpu_layers": -1,
     "use_mmap": true,
     "use_mlock": false,

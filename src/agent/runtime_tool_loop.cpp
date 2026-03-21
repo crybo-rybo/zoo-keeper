@@ -7,143 +7,11 @@
 
 #include "zoo/internal/agent/runtime_helpers.hpp"
 #include "zoo/internal/log.hpp"
-#include "zoo/internal/tools/interceptor.hpp"
-#include "zoo/tools/parser.hpp"
 #include "zoo/tools/validation.hpp"
-#include <array>
-#include <cctype>
 #include <chrono>
 #include <unordered_map>
 
 namespace zoo::internal::agent {
-
-namespace {
-
-enum class GenericPrefixMatch {
-    Undecided,
-    GenericWrapper,
-    NotGeneric,
-};
-
-enum class NativeStreamingMode {
-    BufferingPrefix,
-    Passthrough,
-    SuppressingGenericWrapper,
-};
-
-std::string_view trim_leading_ascii_whitespace(std::string_view text) {
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
-        text.remove_prefix(1);
-    }
-    return text;
-}
-
-GenericPrefixMatch classify_generic_wrapper_prefix(std::string_view text) {
-    text = trim_leading_ascii_whitespace(text);
-    if (text.empty()) {
-        return GenericPrefixMatch::Undecided;
-    }
-    if (text.front() != '{') {
-        return GenericPrefixMatch::NotGeneric;
-    }
-
-    text.remove_prefix(1);
-    text = trim_leading_ascii_whitespace(text);
-    if (text.empty()) {
-        return GenericPrefixMatch::Undecided;
-    }
-    if (text.front() != '"') {
-        return GenericPrefixMatch::NotGeneric;
-    }
-
-    text.remove_prefix(1);
-    constexpr std::array<std::string_view, 3> generic_keys = {"response", "tool_call",
-                                                              "tool_calls"};
-
-    bool matches_partial_key = false;
-    for (std::string_view key : generic_keys) {
-        if (text.size() <= key.size()) {
-            if (key.substr(0, text.size()) == text) {
-                matches_partial_key = true;
-            }
-            continue;
-        }
-
-        if (text.substr(0, key.size()) == key) {
-            if (text[key.size()] == '"') {
-                return GenericPrefixMatch::GenericWrapper;
-            }
-            return GenericPrefixMatch::NotGeneric;
-        }
-    }
-
-    return matches_partial_key ? GenericPrefixMatch::Undecided : GenericPrefixMatch::NotGeneric;
-}
-
-class NativeToolStreamingGate {
-  public:
-    explicit NativeToolStreamingGate(std::function<void(std::string_view)> callback)
-        : callback_(std::move(callback)) {}
-
-    TokenAction on_token(std::string_view token) {
-        switch (mode_) {
-        case NativeStreamingMode::Passthrough:
-            emit(token);
-            return TokenAction::Continue;
-        case NativeStreamingMode::SuppressingGenericWrapper:
-            return TokenAction::Continue;
-        case NativeStreamingMode::BufferingPrefix:
-            buffer_.append(token);
-            break;
-        }
-
-        switch (classify_generic_wrapper_prefix(buffer_)) {
-        case GenericPrefixMatch::GenericWrapper:
-            mode_ = NativeStreamingMode::SuppressingGenericWrapper;
-            return TokenAction::Continue;
-        case GenericPrefixMatch::NotGeneric:
-            mode_ = NativeStreamingMode::Passthrough;
-            emit(buffer_);
-            buffer_.clear();
-            return TokenAction::Continue;
-        case GenericPrefixMatch::Undecided:
-            return TokenAction::Continue;
-        }
-
-        return TokenAction::Continue;
-    }
-
-    bool emitted_user_tokens() const noexcept {
-        return emitted_user_tokens_;
-    }
-
-    void emit_text(std::string_view text) {
-        if (text.empty()) {
-            return;
-        }
-
-        mode_ = NativeStreamingMode::Passthrough;
-        buffer_.clear();
-        emit(text);
-    }
-
-  private:
-    void emit(std::string_view text) {
-        callback_(text);
-        emitted_user_tokens_ = true;
-    }
-
-    std::function<void(std::string_view)> callback_;
-    std::string buffer_;
-    NativeStreamingMode mode_ = NativeStreamingMode::BufferingPrefix;
-    bool emitted_user_tokens_ = false;
-};
-
-bool is_generic_tool_format(ToolCallingFormatKind tool_format_kind) noexcept {
-    return tool_format_kind == ToolCallingFormatKind::GenericFallback;
-}
-
-} // namespace
 
 Expected<Response> AgentRuntime::process_request(const Request& request) {
     if (request.extraction_schema.has_value()) {
@@ -215,27 +83,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         };
 
         std::optional<TokenCallback> callback;
-        std::optional<tools::ToolCallInterceptor> interceptor;
-        std::optional<NativeToolStreamingGate> native_streaming_gate;
 
-        if (use_native_tool_calling) {
-            if (request.streaming_callback) {
-                // Buffer only the opening prefix so generic wrapper JSON never
-                // reaches the caller, while structured native output still
-                // streams token-by-token once the prefix is classified.
-                native_streaming_gate.emplace(*request.streaming_callback);
-                callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
-                    return native_streaming_gate->on_token(token);
-                });
-            } else {
-                callback = make_metrics_callback(
-                    [](std::string_view) -> TokenAction { return TokenAction::Continue; });
-            }
-        } else if (has_tools) {
-            // Heuristic fallback: use interceptor to detect JSON tool calls.
-            interceptor.emplace(request.streaming_callback);
-            callback = make_metrics_callback(interceptor->make_callback());
-        } else if (request.streaming_callback) {
+        if (request.streaming_callback) {
             callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
                 (*request.streaming_callback)(token);
                 return TokenAction::Continue;
@@ -258,9 +107,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         std::optional<tools::ToolCall> detected_tool_call;
         std::string response_text;
         std::vector<ToolCallInfo> structured_tool_calls;
-        const bool is_generic_format = is_generic_tool_format(generated->tool_format_kind);
 
-        if (use_native_tool_calling && (generated->tool_call_detected || is_generic_format)) {
+        if (use_native_tool_calling && generated->tool_call_detected) {
             // Parse the output using the model's native format parser.
             auto parsed = backend_->parse_tool_response(generated->text);
             response_text = std::move(parsed.content);
@@ -278,22 +126,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 }
                 detected_tool_call = std::move(tc);
             }
-        } else if (interceptor) {
-            auto intercept_result = interceptor->finalize();
-            detected_tool_call = std::move(intercept_result.tool_call);
-            response_text = std::move(intercept_result.full_text);
         } else {
             response_text = std::move(generated->text);
-        }
-
-        if (native_streaming_gate && !native_streaming_gate->emitted_user_tokens()) {
-            if (is_generic_format) {
-                if (!detected_tool_call.has_value()) {
-                    native_streaming_gate->emit_text(response_text);
-                }
-            } else if (!response_text.empty()) {
-                native_streaming_gate->emit_text(response_text);
-            }
         }
 
         if (detected_tool_call.has_value()) {
@@ -329,14 +163,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                         validation_error.message.c_str());
 
                 std::string error_content = "Error: " + validation_error.message;
-                if (is_generic_format) {
-                    backend_->add_message(Message::user(
-                        "Tool call validation failed for `" + tool_call.name + "`:\n" +
-                        error_content + "\n\nPlease correct the arguments and continue."));
-                } else {
-                    backend_->add_message(Message::tool(
-                        error_content + "\nPlease correct the arguments.", tool_call.id));
-                }
+                backend_->add_message(
+                    Message::tool(error_content + "\nPlease correct the arguments.", tool_call.id));
                 tool_invocations.push_back(ToolInvocation{
                     tool_call.id, tool_call.name, std::move(args_json),
                     ToolInvocationStatus::ValidationFailed, std::nullopt, validation_error});
@@ -359,14 +187,7 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 status = ToolInvocationStatus::ExecutionFailed;
             }
 
-            if (is_generic_format) {
-                backend_->add_message(Message::user(
-                    "Tool result for `" + tool_call.name + "`:\n" + tool_result_str +
-                    "\n\nUse this tool result to continue answering the original request. "
-                    "Call another tool only if still necessary."));
-            } else {
-                backend_->add_message(Message::tool(std::move(tool_result_str), tool_call.id));
-            }
+            backend_->add_message(Message::tool(std::move(tool_result_str), tool_call.id));
             tool_invocations.push_back(
                 ToolInvocation{tool_call.id, tool_call.name, std::move(args_json), status,
                                std::move(result_json), std::move(tool_error)});

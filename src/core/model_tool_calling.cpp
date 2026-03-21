@@ -5,6 +5,7 @@
 
 #include "zoo/core/model.hpp"
 #include "zoo/core/model_tool_calling_state.hpp"
+#include "zoo/internal/log.hpp"
 
 #include <chat.h>
 #include <common.h>
@@ -44,12 +45,17 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
     common_chat_params params;
     try {
         params = common_chat_templates_apply(chat_templates_.get(), inputs);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
+        ZOO_LOG("info", "native tool calling not available for this model");
         return false;
     }
 
-    // If no tool calling format was detected, fall back
-    if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY && params.grammar.empty()) {
+    // Only support structured native formats — reject generic wrapper and
+    // content-only (no tool calling) so there is a single runtime path.
+    if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY ||
+        params.format == COMMON_CHAT_FORMAT_GENERIC) {
+        ZOO_LOG("info", "native tool calling not available for this model (format: '%s')",
+                common_chat_format_name(params.format));
         return false;
     }
 
@@ -85,6 +91,8 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
     }
 
     grammar_mode_ = GrammarMode::NativeToolCall;
+    ZOO_LOG("info", "native tool calling enabled: format '%s' (%zu tools registered)",
+            common_chat_format_name(tool_state_->format), tool_state_->tools.size());
     return true;
 }
 
