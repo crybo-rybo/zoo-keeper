@@ -16,6 +16,7 @@ option(ZOO_BUILD_BENCHMARKS "Build local performance harnesses" OFF)
 option(ZOO_BUILD_DOCS "Build API documentation with Doxygen" OFF)
 option(ZOO_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 option(ZOO_ENABLE_SANITIZERS "Enable ASan/TSan/UBSan" OFF)
+option(ZOO_WARNINGS_AS_ERRORS "Treat warnings in zoo-owned targets as errors" OFF)
 if(APPLE)
     option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" ON)
 else()
@@ -123,6 +124,8 @@ add_library(ZooKeeper::zoo_core ALIAS zoo_core)
 
 # Compiler warnings
 zoo_set_warnings(zoo PRIVATE)
+zoo_enable_warnings_as_errors(zoo)
+zoo_mark_llama_includes_as_system(zoo)
 
 # Sanitizers
 zoo_enable_sanitizers(zoo)

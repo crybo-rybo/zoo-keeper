@@ -94,7 +94,7 @@ jobs:
           echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Build
-        run: scripts/build -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
+        run: scripts/build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON ${{ matrix.cmake_extra }}
 
       - name: Run tests
         run: scripts/test

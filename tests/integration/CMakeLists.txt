@@ -36,5 +36,7 @@ gtest_discover_tests(zoo_integration_tests
 )
 
 zoo_set_warnings(zoo_integration_tests PRIVATE)
+zoo_enable_warnings_as_errors(zoo_integration_tests)
+zoo_mark_llama_includes_as_system(zoo_integration_tests)
 zoo_enable_coverage(zoo_integration_tests)
 zoo_enable_sanitizers(zoo_integration_tests)
