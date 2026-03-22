@@ -293,9 +293,9 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
     });
 
     std::string streamed;
-    auto handle = runtime.chat(
-        "Tell me a story", GenerationOptions{},
-        [&](std::string_view token) { streamed.append(token.data(), token.size()); });
+    auto handle = runtime.chat("Tell me a story", GenerationOptions{}, [&](std::string_view token) {
+        streamed.append(token.data(), token.size());
+    });
 
     auto result = handle.await_result();
     ASSERT_TRUE(result.has_value());
