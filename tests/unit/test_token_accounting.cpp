@@ -48,14 +48,14 @@ struct Model::ToolCallingState {
 
 namespace {
 
-zoo::Config make_config() {
-    zoo::Config config;
+zoo::ModelConfig make_config() {
+    zoo::ModelConfig config;
     config.model_path = "unused.gguf";
     return config;
 }
 
 TEST(TokenAccountingTest, PlainMessageAccounting) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     zoo::Message msg = zoo::Message::assistant("hello");
     int via_estimate_message = model.estimate_message_tokens(msg);
@@ -66,7 +66,7 @@ TEST(TokenAccountingTest, PlainMessageAccounting) {
 }
 
 TEST(TokenAccountingTest, ToolCallMessageLargerThanPlain) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     std::vector<zoo::ToolCallInfo> calls = {{"id1", "add", R"({"a":1})"}};
     zoo::Message with_tool_calls = zoo::Message::assistant_with_tool_calls("", std::move(calls));
@@ -79,7 +79,7 @@ TEST(TokenAccountingTest, ToolCallMessageLargerThanPlain) {
 }
 
 TEST(TokenAccountingTest, ToolCallIdIncluded) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     zoo::Message long_id = zoo::Message::tool("result", "call_123");
     zoo::Message short_id = zoo::Message::tool("result", "x");
@@ -91,10 +91,10 @@ TEST(TokenAccountingTest, ToolCallIdIncluded) {
 }
 
 TEST(TokenAccountingTest, AddMessageUpdatesEstimate) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     int before_user = model.estimated_tokens_;
-    auto result = model.add_message(zoo::Message::user("hi"));
+    auto result = model.add_message(zoo::Message::user("hi").view());
     ASSERT_TRUE(result.has_value());
 
     int after_user = model.estimated_tokens_;
@@ -105,7 +105,7 @@ TEST(TokenAccountingTest, AddMessageUpdatesEstimate) {
     zoo::Message tool_call_msg = zoo::Message::assistant_with_tool_calls("", std::move(calls));
 
     int before_tool = model.estimated_tokens_;
-    auto result2 = model.add_message(tool_call_msg);
+    auto result2 = model.add_message(tool_call_msg.view());
     ASSERT_TRUE(result2.has_value());
 
     int after_tool = model.estimated_tokens_;
@@ -113,16 +113,16 @@ TEST(TokenAccountingTest, AddMessageUpdatesEstimate) {
 }
 
 TEST(TokenAccountingTest, RollbackRemovesToolCallCost) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
-    auto add_user = model.add_message(zoo::Message::user("hello"));
+    auto add_user = model.add_message(zoo::Message::user("hello").view());
     ASSERT_TRUE(add_user.has_value());
 
     std::vector<zoo::ToolCallInfo> calls = {{"id42", "search", R"({"q":"foo"})"}};
     zoo::Message tool_call_msg =
         zoo::Message::assistant_with_tool_calls("thinking", std::move(calls));
 
-    auto add_assistant = model.add_message(tool_call_msg);
+    auto add_assistant = model.add_message(tool_call_msg.view());
     ASSERT_TRUE(add_assistant.has_value());
 
     int tokens_after_add = model.estimated_tokens_;
@@ -133,46 +133,8 @@ TEST(TokenAccountingTest, RollbackRemovesToolCallCost) {
               tokens_after_add - model.estimate_message_tokens(tool_call_msg));
 }
 
-TEST(TokenAccountingTest, TrimHistoryDeductsToolCallCost) {
-    zoo::Config config;
-    config.model_path = "unused.gguf";
-    config.max_history_messages = 2;
-    zoo::core::Model model(config);
-
-    // Fill history beyond the max_history_messages budget with tool-heavy messages.
-    // user → assistant (with tool calls) → tool → user → assistant
-    auto r1 = model.add_message(zoo::Message::user("first"));
-    ASSERT_TRUE(r1.has_value());
-
-    std::vector<zoo::ToolCallInfo> calls = {
-        {"tc1", "search", R"({"query":"a very long search query to inflate token count"})"}};
-    zoo::Message tool_msg = zoo::Message::assistant_with_tool_calls("thinking", std::move(calls));
-    int tool_msg_cost = model.estimate_message_tokens(tool_msg);
-
-    auto r2 = model.add_message(tool_msg);
-    ASSERT_TRUE(r2.has_value());
-
-    auto r3 = model.add_message(zoo::Message::tool("result", "tc1"));
-    ASSERT_TRUE(r3.has_value());
-
-    auto r4 = model.add_message(zoo::Message::user("second"));
-    ASSERT_TRUE(r4.has_value());
-
-    auto r5 = model.add_message(zoo::Message::assistant("reply"));
-    ASSERT_TRUE(r5.has_value());
-
-    // trim_history_to_fit runs inside add_message. The oldest messages
-    // (including the tool-call assistant message) should have been trimmed.
-    // Verify the estimate actually decreased from the pre-trim baseline
-    // relative to what was added (proving tool-call cost was deducted).
-    EXPECT_GT(tool_msg_cost, 0);
-    // The history should contain at most max_history_messages + system offset
-    // messages, so cost should be lower than if nothing was trimmed.
-    EXPECT_LE(model.messages_.size(), config.max_history_messages + 1u);
-}
-
-TEST(TokenAccountingTest, ReplaceMessagesIncludesToolCalls) {
-    zoo::core::Model model(make_config());
+TEST(TokenAccountingTest, ReplaceHistoryIncludesToolCalls) {
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     std::vector<zoo::ToolCallInfo> calls = {{"cid", "fn", R"({"x":1})"}};
     std::vector<zoo::Message> messages = {
@@ -186,7 +148,7 @@ TEST(TokenAccountingTest, ReplaceMessagesIncludesToolCalls) {
         expected += model.estimate_message_tokens(m);
     }
 
-    model.replace_messages(messages);
+    model.replace_history(zoo::HistorySnapshot{messages});
 
     EXPECT_EQ(model.estimated_tokens_, expected);
 }

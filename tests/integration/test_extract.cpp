@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -40,17 +41,23 @@ class LiveExtractIntegrationTest : public ::testing::Test {
         model_path_ = *model_path;
     }
 
-    zoo::Config config(int max_tokens = 64) const {
-        zoo::Config cfg;
-        cfg.model_path = model_path_.string();
-        cfg.context_size = 2048;
-        cfg.max_tokens = max_tokens;
-        cfg.n_gpu_layers = 0;
-        cfg.max_history_messages = 8;
-        cfg.sampling.temperature = 0.0f;
-        cfg.sampling.top_p = 1.0f;
-        cfg.sampling.top_k = 1;
-        cfg.sampling.seed = 7;
+    struct TestConfig {
+        zoo::ModelConfig model;
+        zoo::AgentConfig agent;
+        zoo::GenerationOptions generation;
+    };
+
+    TestConfig config(int max_tokens = 64) const {
+        TestConfig cfg;
+        cfg.model.model_path = model_path_.string();
+        cfg.model.context_size = 2048;
+        cfg.model.n_gpu_layers = 0;
+        cfg.agent.max_history_messages = 8;
+        cfg.generation.max_tokens = max_tokens;
+        cfg.generation.sampling.temperature = 0.0f;
+        cfg.generation.sampling.top_p = 1.0f;
+        cfg.generation.sampling.top_k = 1;
+        cfg.generation.sampling.seed = 7;
         return cfg;
     }
 
@@ -61,7 +68,8 @@ class LiveExtractIntegrationTest : public ::testing::Test {
 
 // Verify that the model produces a valid JSON object with the correct key types.
 TEST_F(LiveExtractIntegrationTest, ExtractReturnsValidJsonMatchingSchema) {
-    auto agent_result = zoo::Agent::create(config());
+    const auto cfg = config();
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
     agent->set_system_prompt("You are a helpful assistant. Extract information as instructed.");
@@ -72,42 +80,43 @@ TEST_F(LiveExtractIntegrationTest, ExtractReturnsValidJsonMatchingSchema) {
         {"required", nlohmann::json::array({"name", "age"})},
         {"additionalProperties", false}};
 
-    auto handle = agent->extract(schema, zoo::Message::user("Alice is 30 years old."));
-    auto response = handle.future.get();
+    auto handle = agent->extract(schema, "Alice is 30 years old.");
+    auto response = handle.await_result();
 
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
-    ASSERT_TRUE(response->extracted_data.has_value());
-
-    const auto& data = *response->extracted_data;
+    const auto& data = response->data;
     EXPECT_TRUE(data.contains("name"));
     EXPECT_TRUE(data.contains("age"));
     EXPECT_TRUE(data["name"].is_string());
     EXPECT_TRUE(data["age"].is_number_integer());
 }
 
-// Regression: normal chat() must leave extracted_data as nullopt.
-TEST_F(LiveExtractIntegrationTest, ExtractedDataIsNulloptForNormalChat) {
-    auto agent_result = zoo::Agent::create(config(24));
+// Regression: normal chat() returns a plain text response type, not a structured payload.
+TEST_F(LiveExtractIntegrationTest, ChatReturnsPlainTextResponse) {
+    const auto cfg = config(24);
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
     agent->set_system_prompt("Reply briefly.");
 
-    auto handle = agent->chat(zoo::Message::user("Say hello in one short sentence."));
-    auto response = handle.future.get();
+    auto handle = agent->chat("Say hello in one short sentence.");
+    auto response = handle.await_result();
 
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
-    EXPECT_FALSE(response->extracted_data.has_value());
+    EXPECT_FALSE(response->text.empty());
+    EXPECT_FALSE(response->tool_trace.has_value());
 }
 
 // Stateless extract must not append to agent history.
 TEST_F(LiveExtractIntegrationTest, StatelessExtractDoesNotMutateHistory) {
-    auto agent_result = zoo::Agent::create(config());
+    const auto cfg = config();
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
     agent->set_system_prompt("Reply briefly.");
 
-    auto chat_handle = agent->chat(zoo::Message::user("Say hello in one short sentence."));
-    ASSERT_TRUE(chat_handle.future.get().has_value());
+    auto chat_handle = agent->chat("Say hello in one short sentence.");
+    ASSERT_TRUE(chat_handle.await_result().has_value());
 
     const auto before = agent->get_history();
 
@@ -116,17 +125,21 @@ TEST_F(LiveExtractIntegrationTest, StatelessExtractDoesNotMutateHistory) {
                              {"required", nlohmann::json::array({"sentiment"})},
                              {"additionalProperties", false}};
 
+    const std::array<zoo::MessageView, 2> messages = {
+        zoo::MessageView{zoo::Role::System, "Classify the sentiment of the text."},
+        zoo::MessageView{zoo::Role::User, "I really enjoyed this film."},
+    };
     auto extract_handle =
-        agent->extract(schema, {zoo::Message::system("Classify the sentiment of the text."),
-                                zoo::Message::user("I really enjoyed this film.")});
-    ASSERT_TRUE(extract_handle.future.get().has_value());
+        agent->extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)});
+    ASSERT_TRUE(extract_handle.await_result().has_value());
 
     EXPECT_EQ(agent->get_history(), before);
 }
 
 // Streaming callback must fire during extraction and extracted_data must still resolve.
 TEST_F(LiveExtractIntegrationTest, ExtractStreamsTokensAndReturnsExtractedData) {
-    auto agent_result = zoo::Agent::create(config());
+    const auto cfg = config();
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
     agent->set_system_prompt("You are a helpful assistant. Extract information as instructed.");
@@ -137,13 +150,12 @@ TEST_F(LiveExtractIntegrationTest, ExtractStreamsTokensAndReturnsExtractedData) 
                              {"additionalProperties", false}};
 
     std::string streamed;
-    auto handle = agent->extract(schema, zoo::Message::user("There are 7 apples on the shelf."),
+    auto handle = agent->extract(schema, "There are 7 apples on the shelf.", {},
                                  [&](std::string_view token) { streamed.append(token); });
-    auto response = handle.future.get();
+    auto response = handle.await_result();
 
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
     EXPECT_FALSE(streamed.empty());
-    ASSERT_TRUE(response->extracted_data.has_value());
-    EXPECT_TRUE((*response->extracted_data).contains("count"));
-    EXPECT_TRUE((*response->extracted_data)["count"].is_number_integer());
+    EXPECT_TRUE(response->data.contains("count"));
+    EXPECT_TRUE(response->data["count"].is_number_integer());
 }

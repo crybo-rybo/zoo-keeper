@@ -5,21 +5,18 @@
 
 #include "zoo/internal/agent/mailbox.hpp"
 #include <gtest/gtest.h>
-#include <string>
 #include <utility>
 
 namespace {
 
 using namespace zoo::internal::agent;
 
-Request make_request(zoo::RequestId id, std::string text) {
-    Request request(zoo::Message::user(std::move(text)));
-    request.id = id;
-    return request;
+QueuedRequest make_request(uint32_t slot, uint32_t generation = 1) {
+    return QueuedRequest{slot, generation};
 }
 
-const Request& as_request(const WorkItem& item) {
-    return std::get<Request>(item);
+const QueuedRequest& as_request(const WorkItem& item) {
+    return std::get<QueuedRequest>(item);
 }
 
 } // namespace
@@ -27,39 +24,29 @@ const Request& as_request(const WorkItem& item) {
 TEST(RuntimeMailboxTest, PopsRequestsInSubmissionOrder) {
     RuntimeMailbox mailbox(2);
 
-    ASSERT_TRUE(mailbox.push_request(make_request(1, "first")));
-    ASSERT_TRUE(mailbox.push_request(make_request(2, "second")));
+    ASSERT_TRUE(mailbox.push_request(make_request(1, 11)));
+    ASSERT_TRUE(mailbox.push_request(make_request(2, 22)));
 
     auto first = mailbox.pop();
     ASSERT_TRUE(first.has_value());
-    EXPECT_EQ(as_request(*first).id, 1u);
-    ASSERT_EQ(as_request(*first).messages.size(), 1u);
-    EXPECT_EQ(as_request(*first).messages.front().content, "first");
+    EXPECT_EQ(as_request(*first).slot, 1u);
+    EXPECT_EQ(as_request(*first).generation, 11u);
 
     auto second = mailbox.pop();
     ASSERT_TRUE(second.has_value());
-    EXPECT_EQ(as_request(*second).id, 2u);
-    ASSERT_EQ(as_request(*second).messages.size(), 1u);
-    EXPECT_EQ(as_request(*second).messages.front().content, "second");
-}
-
-TEST(RuntimeMailboxTest, RejectsRequestsPastCapacity) {
-    RuntimeMailbox mailbox(1);
-
-    ASSERT_TRUE(mailbox.push_request(make_request(1, "first")));
-    EXPECT_FALSE(mailbox.push_request(make_request(2, "second")));
-    EXPECT_EQ(mailbox.size(), 1u);
+    EXPECT_EQ(as_request(*second).slot, 2u);
+    EXPECT_EQ(as_request(*second).generation, 22u);
 }
 
 TEST(RuntimeMailboxTest, ShutdownDrainsQueuedRequestsThenStops) {
     RuntimeMailbox mailbox(2);
 
-    ASSERT_TRUE(mailbox.push_request(make_request(7, "queued")));
+    ASSERT_TRUE(mailbox.push_request(make_request(7, 9)));
     mailbox.shutdown();
 
     auto queued = mailbox.pop();
     ASSERT_TRUE(queued.has_value());
-    EXPECT_EQ(as_request(*queued).id, 7u);
+    EXPECT_EQ(as_request(*queued).slot, 7u);
 
     auto drained = mailbox.pop();
     EXPECT_FALSE(drained.has_value());
@@ -69,22 +56,13 @@ TEST(RuntimeMailboxTest, RejectsNewRequestsAfterShutdown) {
     RuntimeMailbox mailbox(2);
 
     mailbox.shutdown();
-    EXPECT_FALSE(mailbox.push_request(make_request(3, "late")));
-}
-
-TEST(RuntimeMailboxTest, ZeroCapacityAllowsUnboundedPushes) {
-    RuntimeMailbox mailbox(0);
-
-    for (zoo::RequestId i = 1; i <= 10; ++i) {
-        ASSERT_TRUE(mailbox.push_request(make_request(i, "msg")));
-    }
-    EXPECT_EQ(mailbox.size(), 10u);
+    EXPECT_FALSE(mailbox.push_request(make_request(3, 4)));
 }
 
 TEST(RuntimeMailboxTest, CommandsArePrioritizedOverRequests) {
     RuntimeMailbox mailbox(2);
 
-    ASSERT_TRUE(mailbox.push_request(make_request(1, "request")));
+    ASSERT_TRUE(mailbox.push_request(make_request(1, 1)));
 
     auto promise = std::make_shared<std::promise<void>>();
     ASSERT_TRUE(mailbox.push_command(SetSystemPromptCmd{"hello", promise}));
@@ -95,7 +73,7 @@ TEST(RuntimeMailboxTest, CommandsArePrioritizedOverRequests) {
 
     auto second = mailbox.pop();
     ASSERT_TRUE(second.has_value());
-    EXPECT_TRUE(std::holds_alternative<Request>(*second));
+    EXPECT_TRUE(std::holds_alternative<QueuedRequest>(*second));
 }
 
 TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
@@ -109,7 +87,7 @@ TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
 TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
     RuntimeMailbox mailbox(4);
 
-    ASSERT_TRUE(mailbox.push_request(make_request(1, "req")));
+    ASSERT_TRUE(mailbox.push_request(make_request(1, 1)));
 
     auto p1 = std::make_shared<std::promise<void>>();
     auto p2 = std::make_shared<std::promise<void>>();
@@ -126,7 +104,7 @@ TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
 
     auto third = mailbox.pop();
     ASSERT_TRUE(third.has_value());
-    EXPECT_TRUE(std::holds_alternative<Request>(*third));
+    EXPECT_TRUE(std::holds_alternative<QueuedRequest>(*third));
 }
 
 TEST(RuntimeMailboxTest, ShutdownDrainsCommandsThenStops) {

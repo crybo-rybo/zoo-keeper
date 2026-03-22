@@ -18,33 +18,35 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    zoo::Config config;
-    config.model_path = argv[1];
-    config.max_tokens = 512;
-    config.n_gpu_layers = 0;
+    zoo::ModelConfig model_config;
+    model_config.model_path = argv[1];
+    model_config.n_gpu_layers = 0;
 
-    auto agent_result = zoo::Agent::create(config);
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 512;
+
+    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
     if (!agent_result) {
         std::cerr << agent_result.error().to_string() << '\n';
         return 1;
     }
 
     auto& agent = *agent_result;
-    auto handle = agent->chat(zoo::Message::user("Write a detailed travel guide for Iceland."),
+    auto handle = agent->chat("Write a detailed travel guide for Iceland.", {},
                               [](std::string_view token) { std::cout << token << std::flush; });
 
     // Safety: the canceller thread captures `agent` and `completed` by reference.
     // This is safe because `canceller.join()` below guarantees the thread finishes
     // before either variable goes out of scope.
     std::atomic<bool> completed{false};
-    std::thread canceller([&agent, &completed, id = handle.id] {
+    std::thread canceller([&agent, &completed, id = handle.id()] {
         std::this_thread::sleep_for(250ms);
         if (!completed.load()) {
             agent->cancel(id);
         }
     });
 
-    auto response = handle.future.get();
+    auto response = handle.await_result();
     completed.store(true);
     canceller.join();
 

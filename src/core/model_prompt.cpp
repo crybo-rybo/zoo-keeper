@@ -24,8 +24,8 @@ std::vector<common_chat_msg> to_chat_msgs(const std::vector<Message>& messages) 
         cm.role = role_to_string(msg.role);
         cm.content = msg.content;
 
-        if (msg.tool_call_id.has_value()) {
-            cm.tool_call_id = *msg.tool_call_id;
+        if (!msg.tool_call_id.empty()) {
+            cm.tool_call_id = msg.tool_call_id;
         }
 
         for (const auto& tc : msg.tool_calls) {
@@ -110,6 +110,7 @@ Expected<std::string> Model::render_prompt_delta() {
         tool_state_->grammar = params.grammar;
         tool_state_->grammar_lazy = params.grammar_lazy;
         tool_state_->grammar_triggers = std::move(params.grammar_triggers);
+        tool_state_->trigger_matcher = ToolCallTriggerMatcher(tool_state_->grammar_triggers);
         tool_state_->preserved_tokens = std::move(params.preserved_tokens);
         tool_state_->additional_stops = std::move(params.additional_stops);
         tool_state_->thinking_forced_open = params.thinking_forced_open;

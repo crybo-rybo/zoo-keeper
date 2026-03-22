@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,6 +14,29 @@
 struct common_grammar_trigger;
 
 namespace zoo::core {
+
+/// Precompiled matcher for non-token tool-call grammar triggers.
+class ToolCallTriggerMatcher {
+  public:
+    ToolCallTriggerMatcher() = default;
+
+    explicit ToolCallTriggerMatcher(const std::vector<common_grammar_trigger>& triggers);
+
+    [[nodiscard]] bool is_detected(std::string_view text) const;
+
+    [[nodiscard]] const std::vector<std::string>& word_triggers() const noexcept {
+        return word_triggers_;
+    }
+
+  private:
+    struct RegexTrigger {
+        std::regex regex;
+        bool full_match = false;
+    };
+
+    std::vector<std::string> word_triggers_;
+    std::vector<RegexTrigger> regex_triggers_;
+};
 
 /// Returns true if any non-word grammar trigger is matched in the accumulated text.
 ///

@@ -112,8 +112,8 @@ bool Model::rebuild_sampler_with_tool_grammar() {
 
     // Grammar must filter logits before top-k/top-p narrow the candidate set,
     // otherwise the chain can still pick a token the grammar rejects.
-    add_sampling_stages(chain.get());
-    add_dist_sampler(chain.get());
+    add_sampling_stages(chain.get(), active_sampling_);
+    add_dist_sampler(chain.get(), active_sampling_);
 
     sampler_ = std::move(chain);
     grammar_mode_ = GrammarMode::NativeToolCall;
@@ -136,16 +136,15 @@ bool Model::rebuild_sampler_with_schema_grammar() {
     }
     llama_sampler_chain_add(chain.get(), grammar_sampler);
 
-    add_sampling_stages(chain.get());
-    add_dist_sampler(chain.get());
+    add_sampling_stages(chain.get(), active_sampling_);
+    add_dist_sampler(chain.get(), active_sampling_);
 
     sampler_ = std::move(chain);
     grammar_mode_ = GrammarMode::Schema;
     return true;
 }
 
-void Model::add_sampling_stages(llama_sampler* chain) const {
-    const auto& sp = config_.sampling;
+void Model::add_sampling_stages(llama_sampler* chain, const SamplingParams& sp) const {
     if (sp.repeat_penalty != 1.0f) {
         if (auto* p = llama_sampler_init_penalties(sp.repeat_last_n, sp.repeat_penalty, 0.0f, 0.0f))
             llama_sampler_chain_add(chain, p);
@@ -164,8 +163,8 @@ void Model::add_sampling_stages(llama_sampler* chain) const {
     }
 }
 
-void Model::add_dist_sampler(llama_sampler* chain) const {
-    const uint32_t seed = make_sampler_seed(config_.sampling.seed);
+void Model::add_dist_sampler(llama_sampler* chain, const SamplingParams& sampling) const {
+    const uint32_t seed = make_sampler_seed(sampling.seed);
     if (auto* d = llama_sampler_init_dist(seed)) {
         llama_sampler_chain_add(chain, d);
     } else if (auto* g = llama_sampler_init_greedy()) {
@@ -181,8 +180,8 @@ Model::LlamaSamplerHandle Model::create_sampler_chain() {
         return nullptr;
     }
 
-    add_sampling_stages(chain.get());
-    add_dist_sampler(chain.get());
+    add_sampling_stages(chain.get(), active_sampling_);
+    add_dist_sampler(chain.get(), active_sampling_);
 
     return chain;
 }

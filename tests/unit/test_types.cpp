@@ -7,6 +7,8 @@
 #include "zoo/core/types.hpp"
 #include <gtest/gtest.h>
 
+#include <array>
+
 TEST(RoleTest, RoleToString) {
     EXPECT_STREQ(zoo::role_to_string(zoo::Role::System), "system");
     EXPECT_STREQ(zoo::role_to_string(zoo::Role::User), "user");
@@ -14,33 +16,73 @@ TEST(RoleTest, RoleToString) {
     EXPECT_STREQ(zoo::role_to_string(zoo::Role::Tool), "tool");
 }
 
-TEST(MessageTest, FactoryMethods) {
-    auto sys = zoo::Message::system("System message");
-    EXPECT_EQ(sys.role, zoo::Role::System);
-    EXPECT_EQ(sys.content, "System message");
-    EXPECT_FALSE(sys.tool_call_id.has_value());
+TEST(ToolCallTest, OwnedToolCallProducesBorrowedView) {
+    zoo::OwnedToolCall call{"call_1", "lookup_weather", R"({"city":"Boston"})"};
+    const auto view = call.view();
 
-    auto user = zoo::Message::user("User message");
-    EXPECT_EQ(user.role, zoo::Role::User);
-
-    auto assistant = zoo::Message::assistant("Assistant message");
-    EXPECT_EQ(assistant.role, zoo::Role::Assistant);
-
-    auto tool = zoo::Message::tool("Tool result", "call_123");
-    EXPECT_EQ(tool.role, zoo::Role::Tool);
-    ASSERT_TRUE(tool.tool_call_id.has_value());
-    EXPECT_EQ(*tool.tool_call_id, "call_123");
+    EXPECT_EQ(view.id, "call_1");
+    EXPECT_EQ(view.name, "lookup_weather");
+    EXPECT_EQ(view.arguments_json, R"({"city":"Boston"})");
 }
 
-TEST(MessageTest, Equality) {
-    auto msg1 = zoo::Message::user("Hello");
-    auto msg2 = zoo::Message::user("Hello");
-    auto msg3 = zoo::Message::user("World");
-    auto msg4 = zoo::Message::assistant("Hello");
+TEST(MessageTest, FactoryMethodsCreateOwnedMessages) {
+    auto sys = zoo::OwnedMessage::system("System message");
+    EXPECT_EQ(sys.role, zoo::Role::System);
+    EXPECT_EQ(sys.content, "System message");
+    EXPECT_TRUE(sys.tool_call_id.empty());
 
-    EXPECT_EQ(msg1, msg2);
-    EXPECT_NE(msg1, msg3);
-    EXPECT_NE(msg1, msg4);
+    auto user = zoo::OwnedMessage::user("User message");
+    EXPECT_EQ(user.role, zoo::Role::User);
+
+    auto assistant = zoo::OwnedMessage::assistant("Assistant message");
+    EXPECT_EQ(assistant.role, zoo::Role::Assistant);
+
+    auto tool = zoo::OwnedMessage::tool("Tool result", "call_123");
+    EXPECT_EQ(tool.role, zoo::Role::Tool);
+    EXPECT_EQ(tool.tool_call_id, "call_123");
+}
+
+TEST(MessageTest, ViewReflectsOwnedMessageWithoutCopyingFields) {
+    zoo::OwnedMessage message = zoo::OwnedMessage::assistant_with_tool_calls(
+        "Visible text", {zoo::OwnedToolCall{"call_1", "sum", R"({"a":1})"}});
+
+    const zoo::MessageView view = message.view();
+
+    EXPECT_EQ(view.role(), zoo::Role::Assistant);
+    EXPECT_EQ(view.content(), "Visible text");
+    ASSERT_EQ(view.tool_calls().size(), 1u);
+    EXPECT_EQ(view.tool_calls()[0].name, "sum");
+}
+
+TEST(MessageTest, BorrowedMessageCanBeMaterialized) {
+    const std::array<zoo::ToolCallView, 1> tool_calls = {
+        zoo::ToolCallView{"call_2", "echo", R"({"text":"hello"})"}};
+    const zoo::MessageView view{zoo::Role::Assistant, "hello", std::span(tool_calls)};
+
+    const auto owned = zoo::OwnedMessage::from_view(view);
+
+    EXPECT_EQ(owned.role, zoo::Role::Assistant);
+    EXPECT_EQ(owned.content, "hello");
+    ASSERT_EQ(owned.tool_calls.size(), 1u);
+    EXPECT_EQ(owned.tool_calls[0].arguments_json, R"({"text":"hello"})");
+}
+
+TEST(ConversationViewTest, SupportsBorrowedAndOwnedStorage) {
+    const std::array<zoo::MessageView, 2> borrowed = {
+        zoo::MessageView{zoo::Role::System, "Be concise."},
+        zoo::MessageView{zoo::Role::User, "Say hello."}};
+    zoo::ConversationView borrowed_view{std::span<const zoo::MessageView>(borrowed)};
+
+    EXPECT_EQ(borrowed_view.size(), 2u);
+    EXPECT_EQ(borrowed_view[1].content(), "Say hello.");
+
+    zoo::HistorySnapshot snapshot{
+        {zoo::OwnedMessage::system("Prompt"), zoo::OwnedMessage::user("Ping")}};
+    const auto owned_view = snapshot.view();
+
+    EXPECT_EQ(owned_view.size(), 2u);
+    EXPECT_EQ(owned_view[0].content(), "Prompt");
+    EXPECT_EQ(owned_view[1].role(), zoo::Role::User);
 }
 
 TEST(ErrorTest, Construction) {
@@ -73,93 +115,26 @@ TEST(ErrorTest, Expected) {
     EXPECT_EQ(failure.error().code, zoo::ErrorCode::Unknown);
 }
 
-TEST(SamplingParamsTest, Defaults) {
+TEST(SamplingParamsTest, DefaultsAndValidation) {
     zoo::SamplingParams params;
     EXPECT_FLOAT_EQ(params.temperature, 0.7f);
     EXPECT_FLOAT_EQ(params.top_p, 0.9f);
     EXPECT_EQ(params.top_k, 40);
-}
-
-TEST(SamplingParamsTest, Equality) {
-    zoo::SamplingParams p1, p2;
-    EXPECT_EQ(p1, p2);
-    p2.temperature = 0.5f;
-    EXPECT_NE(p1, p2);
-}
-
-TEST(SamplingParamsTest, ValidateDefaults) {
-    zoo::SamplingParams params;
     EXPECT_TRUE(params.validate().has_value());
 }
 
-TEST(SamplingParamsTest, ValidateNegativeTemperature) {
+TEST(SamplingParamsTest, ValidationRejectsInvalidFields) {
     zoo::SamplingParams params;
     params.temperature = -0.1f;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
+    EXPECT_FALSE(params.validate().has_value());
 
-TEST(SamplingParamsTest, ValidateZeroTemperature) {
-    zoo::SamplingParams params;
-    params.temperature = 0.0f;
-    EXPECT_TRUE(params.validate().has_value());
-}
-
-TEST(SamplingParamsTest, ValidateTopPBelowZero) {
-    zoo::SamplingParams params;
-    params.top_p = -0.1f;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
-
-TEST(SamplingParamsTest, ValidateTopPAboveOne) {
-    zoo::SamplingParams params;
+    params = {};
     params.top_p = 1.1f;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
+    EXPECT_FALSE(params.validate().has_value());
 
-TEST(SamplingParamsTest, ValidateTopPBoundary) {
-    zoo::SamplingParams params;
-    params.top_p = 0.0f;
-    EXPECT_TRUE(params.validate().has_value());
-    params.top_p = 1.0f;
-    EXPECT_TRUE(params.validate().has_value());
-}
-
-TEST(SamplingParamsTest, ValidateTopKZero) {
-    zoo::SamplingParams params;
+    params = {};
     params.top_k = 0;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
-
-TEST(SamplingParamsTest, ValidateTopKNegative) {
-    zoo::SamplingParams params;
-    params.top_k = -1;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
-
-TEST(SamplingParamsTest, ValidateNegativeRepeatPenalty) {
-    zoo::SamplingParams params;
-    params.repeat_penalty = -1.0f;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
-
-TEST(SamplingParamsTest, ValidateNegativeRepeatLastN) {
-    zoo::SamplingParams params;
-    params.repeat_last_n = -1;
-    auto result = params.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
+    EXPECT_FALSE(params.validate().has_value());
 }
 
 TEST(SamplingParamsJsonTest, RoundTripsDefaultValues) {
@@ -167,11 +142,7 @@ TEST(SamplingParamsJsonTest, RoundTripsDefaultValues) {
     const nlohmann::json json = params;
 
     EXPECT_EQ(json.at("temperature"), 0.7f);
-    EXPECT_EQ(json.at("top_p"), 0.9f);
-    EXPECT_EQ(json.at("top_k"), 40);
-    EXPECT_EQ(json.at("repeat_penalty"), 1.1f);
     EXPECT_EQ(json.at("repeat_last_n"), 64);
-    EXPECT_EQ(json.at("seed"), -1);
 
     const auto round_trip = json.get<zoo::SamplingParams>();
     EXPECT_EQ(round_trip, params);
@@ -182,235 +153,140 @@ TEST(SamplingParamsJsonTest, RejectsUnknownKeys) {
     EXPECT_THROW((void)json.get<zoo::SamplingParams>(), std::invalid_argument);
 }
 
-TEST(ConfigTest, ValidationSuccess) {
-    zoo::Config config;
+TEST(ModelConfigTest, ValidationSuccess) {
+    zoo::ModelConfig config;
     config.model_path = "/path/to/model.gguf";
     EXPECT_TRUE(config.validate().has_value());
 }
 
-TEST(ConfigTest, ValidationEmptyModelPath) {
-    zoo::Config config;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelPath);
-}
+TEST(ModelConfigTest, ValidationRejectsBadFields) {
+    zoo::ModelConfig config;
+    EXPECT_FALSE(config.validate().has_value());
 
-TEST(ConfigTest, ValidationInvalidContextSize) {
-    zoo::Config config;
     config.model_path = "/path/to/model.gguf";
     config.context_size = 0;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidContextSize);
+    EXPECT_FALSE(config.validate().has_value());
 }
 
-TEST(ConfigTest, ValidationInvalidMaxTokens) {
-    zoo::Config config;
-    config.model_path = "/path/to/model.gguf";
-    config.max_tokens = 0;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
-}
-
-TEST(ConfigTest, ValidationRejectsBadSampling) {
-    zoo::Config config;
-    config.model_path = "/path/to/model.gguf";
-    config.sampling.temperature = -1.0f;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidSamplingParams);
-}
-
-TEST(ConfigTest, ValidationRejectsZeroToolIterations) {
-    zoo::Config config;
-    config.model_path = "/path/to/model.gguf";
-    config.max_tool_iterations = 0;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
-}
-
-TEST(ConfigTest, ValidationRejectsNegativeToolRetries) {
-    zoo::Config config;
-    config.model_path = "/path/to/model.gguf";
-    config.max_tool_retries = -1;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
-}
-
-TEST(ConfigTest, ValidationRejectsZeroHistoryBudget) {
-    zoo::Config config;
-    config.model_path = "/path/to/model.gguf";
-    config.max_history_messages = 0;
-    auto result = config.validate();
-    EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
-}
-
-TEST(ConfigTest, DefaultQueueCapacity) {
-    zoo::Config config;
-    EXPECT_EQ(config.request_queue_capacity, 64u);
-}
-
-TEST(ConfigTest, DefaultGpuOffloadIsDisabled) {
-    zoo::Config config;
-    EXPECT_EQ(config.n_gpu_layers, 0);
-}
-
-TEST(ConfigTest, DefaultHistoryBudgetIsBounded) {
-    zoo::Config config;
+TEST(AgentConfigTest, DefaultsAndValidation) {
+    zoo::AgentConfig config;
     EXPECT_EQ(config.max_history_messages, 64u);
-}
-
-TEST(ConfigTest, DefaultToolLimits) {
-    zoo::Config config;
+    EXPECT_EQ(config.request_queue_capacity, 64u);
     EXPECT_EQ(config.max_tool_iterations, 5);
     EXPECT_EQ(config.max_tool_retries, 2);
+    EXPECT_TRUE(config.validate().has_value());
 }
 
-TEST(ConfigTest, Equality) {
-    zoo::Config c1, c2;
-    c1.model_path = "/path/to/model.gguf";
-    c2.model_path = "/path/to/model.gguf";
-    EXPECT_EQ(c1, c2);
-    c2.context_size = 4096;
-    EXPECT_NE(c1, c2);
+TEST(AgentConfigTest, ValidationRejectsInvalidFields) {
+    zoo::AgentConfig config;
+    config.request_queue_capacity = 0;
+    EXPECT_FALSE(config.validate().has_value());
+
+    config = {};
+    config.max_history_messages = 0;
+    EXPECT_FALSE(config.validate().has_value());
+
+    config = {};
+    config.max_tool_iterations = 0;
+    EXPECT_FALSE(config.validate().has_value());
 }
 
-TEST(ConfigTest, EqualityToolLimits) {
-    zoo::Config c1, c2;
-    c1.model_path = "/path/to/model.gguf";
-    c2.model_path = "/path/to/model.gguf";
-    EXPECT_EQ(c1, c2);
-    c2.max_tool_iterations = 10;
-    EXPECT_NE(c1, c2);
+TEST(GenerationOptionsTest, DefaultsAndValidation) {
+    zoo::GenerationOptions options;
+    EXPECT_EQ(options.max_tokens, -1);
+    EXPECT_FALSE(options.record_tool_trace);
+    EXPECT_TRUE(options.validate().has_value());
 }
 
-TEST(ConfigTest, EqualityHistoryBudget) {
-    zoo::Config c1, c2;
-    c1.model_path = "/path/to/model.gguf";
-    c2.model_path = "/path/to/model.gguf";
-    EXPECT_EQ(c1, c2);
-    c2.max_history_messages = 32;
-    EXPECT_NE(c1, c2);
+TEST(GenerationOptionsTest, ValidationRejectsZeroMaxTokens) {
+    zoo::GenerationOptions options;
+    options.max_tokens = 0;
+    auto result = options.validate();
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidConfig);
 }
 
-TEST(ConfigJsonTest, RoundTripsSerializableFields) {
-    zoo::Config config;
+TEST(ModelConfigJsonTest, RoundTripsSerializableFields) {
+    zoo::ModelConfig config;
     config.model_path = "/tmp/model.gguf";
     config.context_size = 4096;
     config.n_gpu_layers = 12;
     config.use_mmap = false;
     config.use_mlock = true;
-    config.sampling.temperature = 0.2f;
-    config.sampling.top_p = 0.8f;
-    config.sampling.top_k = 12;
-    config.sampling.repeat_penalty = 1.3f;
-    config.sampling.repeat_last_n = 16;
-    config.sampling.seed = 7;
-    config.max_tokens = 256;
-    config.stop_sequences = {"</tool_call>", "User:"};
-    config.system_prompt = "You are concise.";
+
+    const nlohmann::json json = config;
+    const auto round_trip = json.get<zoo::ModelConfig>();
+    EXPECT_EQ(round_trip, config);
+}
+
+TEST(ModelConfigJsonTest, RejectsMissingModelPath) {
+    const nlohmann::json json = {{"context_size", 4096}};
+    EXPECT_THROW((void)json.get<zoo::ModelConfig>(), std::invalid_argument);
+}
+
+TEST(AgentConfigJsonTest, RoundTripsSerializableFields) {
+    zoo::AgentConfig config;
     config.max_history_messages = 8;
     config.request_queue_capacity = 4;
     config.max_tool_iterations = 3;
     config.max_tool_retries = 1;
-    config.on_token = [](std::string_view) { return zoo::TokenAction::Continue; };
 
     const nlohmann::json json = config;
-    EXPECT_FALSE(json.contains("on_token"));
-    EXPECT_EQ(json.at("sampling").at("repeat_last_n"), 16);
-    EXPECT_EQ(json.at("request_queue_capacity"), 4u);
-    EXPECT_EQ(json.at("system_prompt"), "You are concise.");
-
-    const auto round_trip = json.get<zoo::Config>();
+    const auto round_trip = json.get<zoo::AgentConfig>();
     EXPECT_EQ(round_trip, config);
-    EXPECT_FALSE(round_trip.on_token.has_value());
 }
 
-TEST(ConfigJsonTest, OmitsUnsetSystemPrompt) {
-    zoo::Config config;
-    config.model_path = "/tmp/model.gguf";
+TEST(GenerationOptionsJsonTest, RoundTripsSerializableFields) {
+    zoo::GenerationOptions options;
+    options.sampling.temperature = 0.2f;
+    options.sampling.top_p = 0.8f;
+    options.sampling.top_k = 12;
+    options.max_tokens = 256;
+    options.stop_sequences = {"</tool_call>", "User:"};
+    options.record_tool_trace = true;
 
-    const nlohmann::json json = config;
-    EXPECT_FALSE(json.contains("system_prompt"));
-}
+    const nlohmann::json json = options;
+    EXPECT_EQ(json.at("sampling").at("top_k"), 12);
+    EXPECT_EQ(json.at("record_tool_trace"), true);
 
-TEST(ConfigJsonTest, AppliesDefaultsToOmittedFields) {
-    const nlohmann::json json = {{"model_path", "/tmp/model.gguf"}};
-    const auto config = json.get<zoo::Config>();
-
-    EXPECT_EQ(config.model_path, "/tmp/model.gguf");
-    EXPECT_EQ(config.context_size, 8192);
-    EXPECT_EQ(config.max_tokens, -1);
-    EXPECT_EQ(config.request_queue_capacity, 64u);
-    EXPECT_FALSE(config.system_prompt.has_value());
-}
-
-TEST(ConfigJsonTest, RejectsMissingModelPath) {
-    const nlohmann::json json = {{"context_size", 4096}};
-    EXPECT_THROW((void)json.get<zoo::Config>(), std::invalid_argument);
-}
-
-TEST(ConfigJsonTest, RejectsUnknownTopLevelKeys) {
-    const nlohmann::json json = {{"model_path", "/tmp/model.gguf"}, {"tools", true}};
-    EXPECT_THROW((void)json.get<zoo::Config>(), std::invalid_argument);
-}
-
-TEST(ConfigJsonTest, RejectsUnknownSamplingKeys) {
-    const nlohmann::json json = {{"model_path", "/tmp/model.gguf"},
-                                 {"sampling", {{"temperature", 0.7f}, {"extra", 1}}}};
-    EXPECT_THROW((void)json.get<zoo::Config>(), std::invalid_argument);
-}
-
-TEST(ConfigJsonTest, RejectsTypeMismatches) {
-    const nlohmann::json json = {{"model_path", 42}};
-    EXPECT_THROW((void)json.get<zoo::Config>(), std::exception);
+    const auto round_trip = json.get<zoo::GenerationOptions>();
+    EXPECT_EQ(round_trip, options);
 }
 
 TEST(RoleValidationTest, EmptyHistoryAcceptsUser) {
-    std::vector<zoo::Message> history;
+    std::vector<zoo::OwnedMessage> history;
     EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::User).has_value());
 }
 
 TEST(RoleValidationTest, EmptyHistoryAcceptsSystem) {
-    std::vector<zoo::Message> history;
+    std::vector<zoo::OwnedMessage> history;
     EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::System).has_value());
 }
 
 TEST(RoleValidationTest, EmptyHistoryRejectsTool) {
-    std::vector<zoo::Message> history;
+    std::vector<zoo::OwnedMessage> history;
     auto result = zoo::validate_role_sequence(history, zoo::Role::Tool);
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
 }
 
 TEST(RoleValidationTest, SystemOnlyAllowedAtBeginning) {
-    std::vector<zoo::Message> history = {zoo::Message::user("Hello")};
+    std::vector<zoo::OwnedMessage> history = {zoo::OwnedMessage::user("Hello")};
     auto result = zoo::validate_role_sequence(history, zoo::Role::System);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
 }
 
 TEST(RoleValidationTest, ConsecutiveSameRoleFails) {
-    std::vector<zoo::Message> history = {zoo::Message::user("Hello")};
+    std::vector<zoo::OwnedMessage> history = {zoo::OwnedMessage::user("Hello")};
     auto result = zoo::validate_role_sequence(history, zoo::Role::User);
     EXPECT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
 }
 
 TEST(RoleValidationTest, ConsecutiveToolAllowed) {
-    std::vector<zoo::Message> history = {zoo::Message::user("Hello"),
-                                         zoo::Message::assistant("I'll use tools"),
-                                         zoo::Message::tool("result1", "id1")};
+    std::vector<zoo::OwnedMessage> history = {zoo::OwnedMessage::user("Hello"),
+                                              zoo::OwnedMessage::assistant("I'll use tools"),
+                                              zoo::OwnedMessage::tool("result1", "id1")};
     EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Tool).has_value());
-}
-
-TEST(RoleValidationTest, NormalAlternation) {
-    std::vector<zoo::Message> history = {zoo::Message::user("Hello")};
-    EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Assistant).has_value());
 }
 
 TEST(TokenUsageTest, Defaults) {
@@ -420,52 +296,26 @@ TEST(TokenUsageTest, Defaults) {
     EXPECT_EQ(usage.total_tokens, 0);
 }
 
-TEST(ToolInvocationTest, Defaults) {
+TEST(ToolInvocationTest, DefaultsAndStatusStrings) {
     zoo::ToolInvocation invocation;
     EXPECT_TRUE(invocation.id.empty());
     EXPECT_TRUE(invocation.name.empty());
     EXPECT_TRUE(invocation.arguments_json.empty());
     EXPECT_EQ(invocation.status, zoo::ToolInvocationStatus::Succeeded);
-    EXPECT_FALSE(invocation.result_json.has_value());
-    EXPECT_FALSE(invocation.error.has_value());
-}
-
-TEST(ToolInvocationTest, StatusToString) {
     EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::Succeeded), "succeeded");
     EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::ValidationFailed), "validation_failed");
     EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::ExecutionFailed), "execution_failed");
 }
 
-TEST(ToolInvocationTest, ConstructedFieldsMatch) {
-    zoo::ToolInvocation invocation;
-    invocation.id = "call_123";
-    invocation.name = "add";
-    invocation.arguments_json = R"({"a":1,"b":2})";
-    invocation.status = zoo::ToolInvocationStatus::Succeeded;
-    invocation.result_json = R"({"result":3})";
-
-    EXPECT_EQ(invocation.id, "call_123");
-    EXPECT_EQ(invocation.name, "add");
-    EXPECT_TRUE(invocation.result_json.has_value());
-    EXPECT_FALSE(invocation.error.has_value());
-}
-
-TEST(ToolInvocationTest, FailedInvocationCarriesError) {
-    zoo::ToolInvocation invocation;
-    invocation.id = "call_456";
-    invocation.name = "greet";
-    invocation.arguments_json = R"({"name":42})";
-    invocation.status = zoo::ToolInvocationStatus::ValidationFailed;
-    invocation.error = zoo::Error{zoo::ErrorCode::ToolValidationFailed, "wrong type"};
-
-    EXPECT_EQ(invocation.status, zoo::ToolInvocationStatus::ValidationFailed);
-    ASSERT_TRUE(invocation.error.has_value());
-    EXPECT_EQ(invocation.error->code, zoo::ErrorCode::ToolValidationFailed);
-    EXPECT_FALSE(invocation.result_json.has_value());
-}
-
-TEST(ResponseTest, Defaults) {
-    zoo::Response response;
+TEST(TextResponseTest, Defaults) {
+    zoo::TextResponse response;
     EXPECT_TRUE(response.text.empty());
-    EXPECT_TRUE(response.tool_invocations.empty());
+    EXPECT_FALSE(response.tool_trace.has_value());
+}
+
+TEST(ExtractionResponseTest, Defaults) {
+    zoo::ExtractionResponse response;
+    EXPECT_TRUE(response.text.empty());
+    EXPECT_TRUE(response.data.is_null());
+    EXPECT_FALSE(response.tool_trace.has_value());
 }

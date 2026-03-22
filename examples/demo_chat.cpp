@@ -2,9 +2,10 @@
  * @file demo_chat.cpp
  * @brief Interactive CLI example for chatting with a locally hosted model.
  *
- * Configuration is loaded from JSON via `zoo::Config` serialization helpers,
- * and optional example tools are registered to demonstrate the agent tool loop
- * end to end.
+ * Configuration is loaded from JSON via split `zoo::ModelConfig`,
+ * `zoo::AgentConfig`, and `zoo::GenerationOptions` serialization helpers, and
+ * optional example tools are registered to demonstrate the agent tool loop end
+ * to end.
  *
  * Usage:
  *   ./demo_chat <config.json>
@@ -23,8 +24,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 static std::atomic<bool> g_interrupted{false};
 
@@ -54,27 +57,42 @@ static std::string get_current_time() {
 // ============================================================================
 
 /**
- * @brief Example-only configuration wrapper that extends `zoo::Config`.
+ * @brief Example-only configuration wrapper around Zoo-Keeper's split configs.
  */
 struct DemoConfig {
-    zoo::Config zoo;
+    zoo::ModelConfig model;
+    zoo::AgentConfig agent;
+    zoo::GenerationOptions generation;
+    std::optional<std::string> system_prompt;
     bool tools_enabled = true;
 };
 
-/// Parses the example-only config wrapper while delegating core fields to `zoo::Config`.
+/// Parses the example-only config wrapper while delegating nested config blocks.
 static void from_json(const nlohmann::json& j, DemoConfig& config) {
     if (!j.is_object()) {
         throw std::invalid_argument("Demo config must be a JSON object");
     }
 
     DemoConfig parsed;
-    nlohmann::json zoo_config_json = j;
-    if (auto it = j.find("tools"); it != j.end()) {
-        parsed.tools_enabled = it->get<bool>();
-        zoo_config_json.erase("tools");
+    if (auto it = j.find("model"); it != j.end()) {
+        parsed.model = it->get<zoo::ModelConfig>();
+    } else {
+        throw std::invalid_argument("Demo config must contain a model block");
     }
 
-    parsed.zoo = zoo_config_json.get<zoo::Config>();
+    if (auto it = j.find("agent"); it != j.end()) {
+        parsed.agent = it->get<zoo::AgentConfig>();
+    }
+    if (auto it = j.find("generation"); it != j.end()) {
+        parsed.generation = it->get<zoo::GenerationOptions>();
+    }
+    if (auto it = j.find("system_prompt"); it != j.end()) {
+        parsed.system_prompt = it->get<std::string>();
+    }
+    if (auto it = j.find("tools"); it != j.end()) {
+        parsed.tools_enabled = it->get<bool>();
+    }
+
     config = std::move(parsed);
 }
 
@@ -86,8 +104,14 @@ static DemoConfig load_config(const std::string& path) {
     }
 
     DemoConfig config = nlohmann::json::parse(file).get<DemoConfig>();
-    if (auto validation = config.zoo.validate(); !validation) {
-        throw std::runtime_error("Invalid Zoo config: " + validation.error().to_string());
+    if (auto validation = config.model.validate(); !validation) {
+        throw std::runtime_error("Invalid model config: " + validation.error().to_string());
+    }
+    if (auto validation = config.agent.validate(); !validation) {
+        throw std::runtime_error("Invalid agent config: " + validation.error().to_string());
+    }
+    if (auto validation = config.generation.validate(); !validation) {
+        throw std::runtime_error("Invalid generation config: " + validation.error().to_string());
     }
     return config;
 }
@@ -120,14 +144,15 @@ static void print_welcome(const DemoConfig& dc) {
     print_separator();
     std::cout << "Zoo-Keeper Demo Chat\n";
     print_separator();
-    std::cout << "  Model: " << dc.zoo.model_path << "\n";
-    std::cout << "  Context: " << dc.zoo.context_size << " tokens\n";
+    std::cout << "  Model: " << dc.model.model_path << "\n";
+    std::cout << "  Context: " << dc.model.context_size << " tokens\n";
     std::cout << "  Max tokens: "
-              << (dc.zoo.max_tokens == -1 ? "unlimited" : std::to_string(dc.zoo.max_tokens))
+              << (dc.generation.max_tokens == -1 ? "unlimited"
+                                                 : std::to_string(dc.generation.max_tokens))
               << "\n";
-    std::cout << "  Temperature: " << dc.zoo.sampling.temperature << "\n";
-    std::cout << "  GPU layers: " << dc.zoo.n_gpu_layers << "\n";
-    std::cout << "  System: " << dc.zoo.system_prompt.value_or("(none)") << "\n";
+    std::cout << "  Temperature: " << dc.generation.sampling.temperature << "\n";
+    std::cout << "  GPU layers: " << dc.model.n_gpu_layers << "\n";
+    std::cout << "  System: " << dc.system_prompt.value_or("(none)") << "\n";
     std::cout << "  Tools: " << (dc.tools_enabled ? "enabled" : "disabled") << "\n";
     print_separator();
     std::cout << "\nType a message and press Enter. Commands: /quit /clear /help\n\n";
@@ -139,8 +164,9 @@ static void print_usage(const char* prog) {
               << "Usage:\n"
               << "  " << prog << " <config.json>\n"
               << "  " << prog << " --help\n\n"
-              << "Config files use the documented zoo::Config JSON shape plus one\n"
-              << "example-only boolean field:\n"
+              << "Config files contain nested model / agent / generation blocks\n"
+              << "plus two example-only fields:\n"
+              << "  system_prompt   Initial system prompt applied after Agent::create()\n"
               << "  tools           Enable the bundled example tools (default: true)\n\n"
               << "See examples/config.example.json and docs/configuration.md for the\n"
               << "full config contract.\n";
@@ -174,12 +200,15 @@ int main(int argc, char** argv) {
 
     // Create agent
     std::cout << "Loading model...\n";
-    auto agent_result = zoo::Agent::create(dc.zoo);
+    auto agent_result = zoo::Agent::create(dc.model, dc.agent, dc.generation);
     if (!agent_result) {
         std::cerr << "Error: " << agent_result.error().to_string() << "\n";
         return 1;
     }
     auto agent = std::move(*agent_result);
+    if (dc.system_prompt) {
+        agent->set_system_prompt(*dc.system_prompt);
+    }
 
     // Register example tools
     if (dc.tools_enabled) {
@@ -232,19 +261,19 @@ int main(int argc, char** argv) {
         std::cout.flush();
         g_interrupted.store(false, std::memory_order_release);
 
-        auto handle = agent->chat(zoo::Message::user(line),
-                                  [](std::string_view token) { std::cout << token << std::flush; });
+        auto handle =
+            agent->chat(line, {}, [](std::string_view token) { std::cout << token << std::flush; });
 
         // Poll for Ctrl+C during generation
-        while (handle.future.wait_for(std::chrono::milliseconds(100)) ==
-               std::future_status::timeout) {
+        while (!handle.ready()) {
             if (g_interrupted.load(std::memory_order_acquire)) {
-                agent->cancel(handle.id);
+                agent->cancel(handle.id());
                 break;
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        auto result = handle.future.get();
+        auto result = handle.await_result();
 
         if (!result) {
             if (result.error().code == zoo::ErrorCode::RequestCancelled) {

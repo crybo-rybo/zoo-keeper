@@ -4,6 +4,7 @@
  */
 
 #include "zoo/core/types.hpp"
+#include "zoo/internal/core/stream_filter.hpp"
 
 #include <gtest/gtest.h>
 
@@ -39,6 +40,7 @@ struct Model::ToolCallingState {
     std::string grammar;
     bool grammar_lazy = false;
     std::vector<common_grammar_trigger> grammar_triggers;
+    ToolCallTriggerMatcher trigger_matcher;
     std::vector<std::string> preserved_tokens;
     std::vector<std::string> additional_stops;
     bool thinking_forced_open = false;
@@ -59,14 +61,14 @@ std::string peg_native_tool_template() {
 )JINJA";
 }
 
-zoo::Config make_config() {
-    zoo::Config config;
+zoo::ModelConfig make_config() {
+    zoo::ModelConfig config;
     config.model_path = "unused.gguf";
     return config;
 }
 
 TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     auto templates = common_chat_templates_init(nullptr, peg_native_tool_template());
     ASSERT_TRUE(templates);
@@ -108,7 +110,7 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
 }
 
 TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     auto templates = common_chat_templates_init(nullptr, peg_native_tool_template());
     ASSERT_TRUE(templates);
@@ -150,7 +152,7 @@ TEST(ModelToolCallingTest, AssistantWithToolCallsPreservesStructure) {
 }
 
 TEST(ModelToolCallingTest, PlainAssistantMessageWhenNoToolState) {
-    zoo::core::Model model(make_config());
+    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
 
     // No tool_state_ set, grammar_mode_ defaults to None.
     EXPECT_EQ(model.grammar_mode_, zoo::core::Model::GrammarMode::None);

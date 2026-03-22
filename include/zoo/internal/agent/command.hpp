@@ -25,7 +25,7 @@ struct SetSystemPromptCmd {
 
 /// Snapshots the current conversation history.
 struct GetHistoryCmd {
-    std::shared_ptr<std::promise<std::vector<Message>>> done;
+    std::shared_ptr<std::promise<HistorySnapshot>> done;
 };
 
 /// Clears the conversation history and KV cache.

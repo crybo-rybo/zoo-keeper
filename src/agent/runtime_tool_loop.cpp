@@ -9,39 +9,33 @@
 #include "zoo/internal/log.hpp"
 #include "zoo/tools/validation.hpp"
 #include <chrono>
-#include <unordered_map>
 
 namespace zoo::internal::agent {
 
-Expected<Response> AgentRuntime::process_request(const Request& request) {
-    if (request.extraction_schema.has_value()) {
-        return process_extraction_request(request);
-    }
-
+Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& request) {
     auto start_time = std::chrono::steady_clock::now();
 
-    std::optional<std::vector<Message>> original_history;
+    std::optional<HistorySnapshot> original_history;
     std::optional<ScopeExit> restore_history_guard;
+    std::optional<ScopeExit> trim_history_guard;
 
     if (request.history_mode == HistoryMode::Replace) {
-        original_history = backend_->get_history();
+        original_history = swap_history(*backend_, *request.messages);
         restore_history_guard.emplace(
-            [this, &original_history] { restore_history(*backend_, *original_history); });
-
-        if (auto load_result = load_history(*backend_, request.messages); !load_result) {
-            return std::unexpected(load_result.error());
-        }
+            [this, &original_history] { backend_->swap_history(std::move(*original_history)); });
     } else {
-        if (request.messages.size() != 1u) {
+        if (request.messages->size() != 1u) {
             return std::unexpected(
                 Error{ErrorCode::InvalidMessageSequence,
                       "Stateful chat requests must include exactly one message"});
         }
 
-        auto add_result = backend_->add_message(request.messages.front());
+        auto add_result = backend_->add_message(request.messages->front().view());
         if (!add_result) {
             return std::unexpected(add_result.error());
         }
+
+        trim_history_guard.emplace([this] { enforce_history_limit(); });
     }
 
     std::chrono::steady_clock::time_point first_token_time;
@@ -49,10 +43,12 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
     int total_completion_tokens = 0;
     int total_prompt_tokens = 0;
     std::vector<ToolInvocation> tool_invocations;
-    std::unordered_map<std::string, int> retry_counts;
+    bool tool_invoked = false;
+    std::vector<std::pair<std::string, int>> retry_counts;
     tools::ToolArgumentsValidator validator;
     int iteration = 0;
-    const int max_tool_iterations = config_.max_tool_iterations;
+    const int max_tool_iterations = agent_config_.max_tool_iterations;
+    const bool record_tool_trace = request.options->record_tool_trace;
     const bool has_tools = tool_registry_.size() > 0;
     const bool use_native_tool_calling =
         has_tools && tool_grammar_active_.load(std::memory_order_acquire);
@@ -82,21 +78,17 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 };
         };
 
-        std::optional<TokenCallback> callback;
-
-        if (request.streaming_callback) {
-            callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
+        auto callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
+            if (request.streaming_callback && *request.streaming_callback) {
                 (*request.streaming_callback)(token);
-                return TokenAction::Continue;
-            });
-        } else {
-            callback = make_metrics_callback(
-                [](std::string_view) -> TokenAction { return TokenAction::Continue; });
-        }
-
-        auto generated = backend_->generate_from_history(std::move(callback), [&request]() {
-            return request.cancelled && request.cancelled->load(std::memory_order_acquire);
+            }
+            return TokenAction::Continue;
         });
+
+        auto generated = backend_->generate_from_history(
+            *request.options, TokenCallback(callback), [&request]() {
+                return request.cancelled && request.cancelled->load(std::memory_order_acquire);
+            });
         if (!generated) {
             return std::unexpected(generated.error());
         }
@@ -144,19 +136,32 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
             // template rendering in subsequent turns.
             if (!structured_tool_calls.empty()) {
                 backend_->add_message(
-                    Message::assistant_with_tool_calls(response_text, structured_tool_calls));
+                    Message::assistant_with_tool_calls(response_text, structured_tool_calls)
+                        .view());
             } else {
-                backend_->add_message(Message::assistant(response_text));
+                backend_->add_message(Message::assistant(response_text).view());
             }
             backend_->finalize_response();
 
-            std::string args_json = tool_call.arguments.dump();
+            std::string args_json = structured_tool_calls.empty()
+                                        ? tool_call.arguments.dump()
+                                        : structured_tool_calls.front().arguments_json;
             if (auto validation_result = validator.validate(tool_call, tool_registry_);
                 !validation_result) {
                 const Error validation_error = validation_result.error();
-                auto& retry_count = retry_counts[tool_call.name];
+                int* retry_count = nullptr;
+                for (auto& entry : retry_counts) {
+                    if (entry.first == tool_call.name) {
+                        retry_count = &entry.second;
+                        break;
+                    }
+                }
+                if (!retry_count) {
+                    retry_counts.emplace_back(tool_call.name, 0);
+                    retry_count = &retry_counts.back().second;
+                }
 
-                if (retry_count >= config_.max_tool_retries) {
+                if (*retry_count >= agent_config_.max_tool_retries) {
                     ZOO_LOG("error", "tool retries exhausted for '%s': %s", tool_call.name.c_str(),
                             validation_error.message.c_str());
                     return std::unexpected(Error{ErrorCode::ToolRetriesExhausted,
@@ -164,17 +169,21 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                                                      "': " + validation_error.message});
                 }
 
-                ++retry_count;
+                ++(*retry_count);
                 ZOO_LOG("warn", "tool '%s' validation failed (retry %d/%d): %s",
-                        tool_call.name.c_str(), retry_count, config_.max_tool_retries,
+                        tool_call.name.c_str(), *retry_count, agent_config_.max_tool_retries,
                         validation_error.message.c_str());
 
                 std::string error_content = "Error: " + validation_error.message;
                 backend_->add_message(
-                    Message::tool(error_content + "\nPlease correct the arguments.", tool_call.id));
-                tool_invocations.push_back(ToolInvocation{
-                    tool_call.id, tool_call.name, std::move(args_json),
-                    ToolInvocationStatus::ValidationFailed, std::nullopt, validation_error});
+                    Message::tool(error_content + "\nPlease correct the arguments.", tool_call.id)
+                        .view());
+                tool_invoked = true;
+                if (record_tool_trace) {
+                    tool_invocations.push_back(ToolInvocation{
+                        tool_call.id, tool_call.name, std::move(args_json),
+                        ToolInvocationStatus::ValidationFailed, std::nullopt, validation_error});
+                }
                 continue;
             }
 
@@ -194,27 +203,32 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 status = ToolInvocationStatus::ExecutionFailed;
             }
 
-            backend_->add_message(Message::tool(std::move(tool_result_str), tool_call.id));
-            tool_invocations.push_back(
-                ToolInvocation{tool_call.id, tool_call.name, std::move(args_json), status,
-                               std::move(result_json), std::move(tool_error)});
+            backend_->add_message(Message::tool(std::move(tool_result_str), tool_call.id).view());
+            tool_invoked = true;
+            if (record_tool_trace) {
+                tool_invocations.push_back(
+                    ToolInvocation{tool_call.id, tool_call.name, std::move(args_json), status,
+                                   std::move(result_json), std::move(tool_error)});
+            }
             continue;
         }
 
-        if (response_text.empty() && !tool_invocations.empty() && iteration < max_tool_iterations) {
+        if (response_text.empty() && tool_invoked && iteration < max_tool_iterations) {
             backend_->add_message(
-                Message::user("Please respond to the user with the tool result."));
+                Message::user("Please respond to the user with the tool result.").view());
             continue;
         }
 
         auto end_time = std::chrono::steady_clock::now();
 
-        backend_->add_message(Message::assistant(response_text));
+        backend_->add_message(Message::assistant(response_text).view());
         backend_->finalize_response();
 
-        Response response;
+        TextResponse response;
         response.text = std::move(response_text);
-        response.tool_invocations = std::move(tool_invocations);
+        if (record_tool_trace && !tool_invocations.empty()) {
+            response.tool_trace = ToolTrace{std::move(tool_invocations)};
+        }
         response.usage.prompt_tokens = total_prompt_tokens;
         response.usage.completion_tokens = total_completion_tokens;
         response.usage.total_tokens = total_prompt_tokens + total_completion_tokens;

@@ -12,19 +12,77 @@
 #include "zoo/internal/log.hpp"
 #include "zoo/tools/registry.hpp"
 #include <cassert>
-#include <chrono>
-#include <functional>
 #include <thread>
-#include <variant>
 
 namespace zoo::internal::agent {
 
-// ---------------------------------------------------------------------------
-// Lifecycle
-// ---------------------------------------------------------------------------
+namespace {
 
-AgentRuntime::AgentRuntime(const Config& cfg, std::unique_ptr<AgentBackend> backend)
-    : config_(cfg), backend_(std::move(backend)), request_mailbox_(cfg.request_queue_capacity) {
+template <typename Result> struct ImmediateResultState {
+    std::optional<Expected<Result>> result;
+};
+
+template <typename Result>
+Expected<Result> await_immediate_handle(void* state, uint32_t, uint32_t) {
+    auto& immediate = *static_cast<ImmediateResultState<Result>*>(state);
+    if (!immediate.result.has_value()) {
+        return std::unexpected(
+            Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
+    }
+    auto result = std::move(*immediate.result);
+    immediate.result.reset();
+    return result;
+}
+
+template <typename Result> bool ready_immediate_handle(const void*, uint32_t, uint32_t) {
+    return true;
+}
+
+template <typename Result> void release_immediate_handle(void* state, uint32_t, uint32_t) {
+    auto& immediate = *static_cast<ImmediateResultState<Result>*>(state);
+    immediate.result.reset();
+}
+
+std::vector<Message> materialize_conversation(ConversationView messages) {
+    std::vector<Message> owned;
+    owned.reserve(messages.size());
+    for (size_t index = 0; index < messages.size(); ++index) {
+        owned.push_back(Message::from_view(messages[index]));
+    }
+    return owned;
+}
+
+HistorySnapshot trim_history_snapshot(HistorySnapshot snapshot, size_t max_history_messages) {
+    const bool has_system_prompt =
+        !snapshot.messages.empty() && snapshot.messages.front().role == Role::System;
+    const size_t non_system_messages = snapshot.messages.size() - (has_system_prompt ? 1u : 0u);
+    if (non_system_messages <= max_history_messages) {
+        return snapshot;
+    }
+
+    HistorySnapshot trimmed;
+    trimmed.messages.reserve((has_system_prompt ? 1u : 0u) + max_history_messages);
+    if (has_system_prompt) {
+        trimmed.messages.push_back(std::move(snapshot.messages.front()));
+    }
+
+    const size_t first_non_system = snapshot.messages.size() - max_history_messages;
+    for (size_t index = first_non_system; index < snapshot.messages.size(); ++index) {
+        trimmed.messages.push_back(std::move(snapshot.messages[index]));
+    }
+
+    return trimmed;
+}
+
+} // namespace
+
+AgentRuntime::AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
+                           GenerationOptions default_generation,
+                           std::unique_ptr<AgentBackend> backend)
+    : model_config_(std::move(model_config)), agent_config_(std::move(agent_config)),
+      default_generation_options_(std::move(default_generation)), backend_(std::move(backend)),
+      request_slots_(std::make_shared<RequestSlots>(agent_config_.request_queue_capacity)),
+      request_mailbox_(agent_config_.request_queue_capacity) {
     inference_thread_ = std::thread([this]() { inference_loop(); });
 }
 
@@ -48,151 +106,119 @@ bool AgentRuntime::is_running() const noexcept {
     return running_.load(std::memory_order_acquire);
 }
 
-// ---------------------------------------------------------------------------
-// Request submission (calling thread)
-// ---------------------------------------------------------------------------
-
-RequestHandle AgentRuntime::chat(Message message,
-                                 std::optional<std::function<void(std::string_view)>> callback) {
-    auto prepared = request_tracker_.prepare(std::move(message), std::move(callback));
-    RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
-    return handle;
+RequestHandle<TextResponse> AgentRuntime::chat(std::string_view user_message,
+                                               const GenerationOptions& options,
+                                               AsyncTextCallback callback) {
+    return chat(MessageView{Role::User, user_message}, options, std::move(callback));
 }
 
-RequestHandle
-AgentRuntime::complete(std::vector<Message> messages,
-                       std::optional<std::function<void(std::string_view)>> callback) {
-    auto prepared =
-        request_tracker_.prepare(std::move(messages), HistoryMode::Replace, std::move(callback));
-    RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-
-    if (prepared.request.messages.empty()) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::InvalidMessageSequence,
-                                               "Request must include at least one message"});
-        return handle;
-    }
-
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
-    return handle;
+RequestHandle<TextResponse> AgentRuntime::chat(MessageView message,
+                                               const GenerationOptions& options,
+                                               AsyncTextCallback callback) {
+    RequestPayload payload;
+    payload.messages.push_back(Message::from_view(message));
+    payload.history_mode = HistoryMode::Append;
+    payload.options = resolve_generation_options(options);
+    payload.streaming_callback = std::move(callback);
+    payload.result_kind = ResultKind::Text;
+    return enqueue_request<TextResponse>(std::move(payload));
 }
 
-RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema, Message message,
-                                    std::optional<std::function<void(std::string_view)>> callback) {
-    // Validate schema upfront on the calling thread (fail fast)
+RequestHandle<TextResponse> AgentRuntime::complete(ConversationView messages,
+                                                   const GenerationOptions& options,
+                                                   AsyncTextCallback callback) {
+    RequestPayload payload;
+    payload.messages = materialize_conversation(messages);
+    payload.history_mode = HistoryMode::Replace;
+    payload.options = resolve_generation_options(options);
+    payload.streaming_callback = std::move(callback);
+    payload.result_kind = ResultKind::Text;
+
+    if (payload.messages.empty()) {
+        return make_immediate_error_handle<TextResponse>(
+            Error{ErrorCode::InvalidMessageSequence, "Request must include at least one message"});
+    }
+
+    return enqueue_request<TextResponse>(std::move(payload));
+}
+
+RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
+                                                        std::string_view user_message,
+                                                        const GenerationOptions& options,
+                                                        AsyncTextCallback callback) {
+    return extract(output_schema, MessageView{Role::User, user_message}, options,
+                   std::move(callback));
+}
+
+RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
+                                                        MessageView message,
+                                                        const GenerationOptions& options,
+                                                        AsyncTextCallback callback) {
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
-        auto prepared = request_tracker_.prepare(std::move(message), std::move(callback));
-        RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-        request_tracker_.fail(handle.id,
-                              Error{ErrorCode::InvalidOutputSchema, params.error().message});
-        return handle;
+        return make_immediate_error_handle<ExtractionResponse>(
+            Error{ErrorCode::InvalidOutputSchema, params.error().message});
     }
 
-    auto prepared = request_tracker_.prepare(std::move(message), nlohmann::json(output_schema),
-                                             std::move(callback));
-    RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
-    return handle;
+    RequestPayload payload;
+    payload.messages.push_back(Message::from_view(message));
+    payload.history_mode = HistoryMode::Append;
+    payload.options = resolve_generation_options(options);
+    payload.streaming_callback = std::move(callback);
+    payload.extraction_schema = nlohmann::json(output_schema);
+    payload.result_kind = ResultKind::Extraction;
+    return enqueue_request<ExtractionResponse>(std::move(payload));
 }
 
-RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema,
-                                    std::vector<Message> messages,
-                                    std::optional<std::function<void(std::string_view)>> callback) {
-    // Validate schema upfront on the calling thread (fail fast)
+RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
+                                                        ConversationView messages,
+                                                        const GenerationOptions& options,
+                                                        AsyncTextCallback callback) {
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
-        auto prepared = request_tracker_.prepare(std::move(messages), HistoryMode::Replace,
-                                                 std::move(callback));
-        RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-        request_tracker_.fail(handle.id,
-                              Error{ErrorCode::InvalidOutputSchema, params.error().message});
-        return handle;
+        return make_immediate_error_handle<ExtractionResponse>(
+            Error{ErrorCode::InvalidOutputSchema, params.error().message});
     }
 
-    auto prepared = request_tracker_.prepare(std::move(messages), HistoryMode::Replace,
-                                             nlohmann::json(output_schema), std::move(callback));
-    RequestHandle handle{prepared.request.id, std::move(prepared.future)};
+    RequestPayload payload;
+    payload.messages = materialize_conversation(messages);
+    payload.history_mode = HistoryMode::Replace;
+    payload.options = resolve_generation_options(options);
+    payload.streaming_callback = std::move(callback);
+    payload.extraction_schema = nlohmann::json(output_schema);
+    payload.result_kind = ResultKind::Extraction;
 
-    if (prepared.request.messages.empty()) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::InvalidMessageSequence,
-                                               "Request must include at least one message"});
-        return handle;
+    if (payload.messages.empty()) {
+        return make_immediate_error_handle<ExtractionResponse>(
+            Error{ErrorCode::InvalidMessageSequence, "Request must include at least one message"});
     }
 
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
-    return handle;
+    return enqueue_request<ExtractionResponse>(std::move(payload));
 }
-
-// ---------------------------------------------------------------------------
-// Command submission (calling thread)
-// ---------------------------------------------------------------------------
 
 void AgentRuntime::cancel(RequestId id) {
-    request_tracker_.cancel(id);
+    request_slots_->cancel(id);
 }
 
-void AgentRuntime::set_system_prompt(const std::string& prompt) {
+void AgentRuntime::set_system_prompt(std::string_view prompt) {
     if (!running_.load(std::memory_order_acquire)) {
         return;
     }
 
     auto done = std::make_shared<std::promise<void>>();
     auto future = done->get_future();
-    if (!request_mailbox_.push_command(SetSystemPromptCmd{prompt, std::move(done)})) {
+    if (!request_mailbox_.push_command(SetSystemPromptCmd{std::string(prompt), std::move(done)})) {
         return;
     }
     future.get();
 }
 
-std::vector<Message> AgentRuntime::get_history() const {
+HistorySnapshot AgentRuntime::get_history() const {
     if (!running_.load(std::memory_order_acquire)) {
         return {};
     }
 
-    auto done = std::make_shared<std::promise<std::vector<Message>>>();
+    auto done = std::make_shared<std::promise<HistorySnapshot>>();
     auto future = done->get_future();
     if (!request_mailbox_.push_command(GetHistoryCmd{std::move(done)})) {
         return {};
@@ -213,10 +239,6 @@ void AgentRuntime::clear_history() {
     future.get();
 }
 
-// ---------------------------------------------------------------------------
-// Tool registration (calling thread)
-// ---------------------------------------------------------------------------
-
 Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
     assert(!inference_thread_.joinable() ||
            std::this_thread::get_id() != inference_thread_.get_id());
@@ -233,10 +255,6 @@ size_t AgentRuntime::tool_count() const noexcept {
     return tool_registry_.size();
 }
 
-// ---------------------------------------------------------------------------
-// Inference thread
-// ---------------------------------------------------------------------------
-
 void AgentRuntime::inference_loop() {
     try {
         while (running_.load(std::memory_order_acquire)) {
@@ -246,7 +264,7 @@ void AgentRuntime::inference_loop() {
             }
 
             std::visit(overloaded{
-                           [this](Request& request) { handle_request(request); },
+                           [this](QueuedRequest request) { handle_request(std::move(request)); },
                            [this](Command& cmd) { handle_command(cmd); },
                        },
                        *item_opt);
@@ -264,33 +282,37 @@ void AgentRuntime::inference_loop() {
     }
 }
 
-void AgentRuntime::handle_request(Request& request) {
-    auto promise = request.promise;
-
-    if (request.cancelled && request.cancelled->load(std::memory_order_acquire)) {
-        ZOO_LOG("info", "request %lu cancelled before processing",
-                static_cast<unsigned long>(request.id));
-        request_tracker_.fail(request.id, Error{ErrorCode::RequestCancelled, "Request cancelled"});
+void AgentRuntime::handle_request(QueuedRequest request) {
+    const auto active_request = request_slots_->active_request(request);
+    if (!active_request.has_value()) {
         return;
     }
 
-    Expected<Response> result;
+    if (active_request->cancelled && active_request->cancelled->load(std::memory_order_acquire)) {
+        request_slots_->resolve_error(
+            request.slot, request.generation,
+            Error{ErrorCode::RequestCancelled, "Request cancelled before processing"});
+        return;
+    }
+
     try {
-        result = process_request(request);
+        if (active_request->result_kind == ResultKind::Extraction) {
+            request_slots_->resolve_extraction(request.slot, request.generation,
+                                               process_extraction_request(*active_request));
+        } else {
+            request_slots_->resolve_text(request.slot, request.generation,
+                                         process_request(*active_request));
+        }
     } catch (const std::exception& e) {
         ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
-        result = std::unexpected(
+        request_slots_->resolve_error(
+            request.slot, request.generation,
             Error{ErrorCode::InferenceFailed, std::string("Unhandled exception: ") + e.what()});
     } catch (...) {
         ZOO_LOG("error", "unknown exception in inference thread");
-        result = std::unexpected(
+        request_slots_->resolve_error(
+            request.slot, request.generation,
             Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
-    }
-
-    request_tracker_.cleanup(request.id);
-
-    if (promise) {
-        promise->set_value(std::move(result));
     }
 }
 
@@ -325,29 +347,27 @@ void AgentRuntime::handle_command(Command& cmd) {
                cmd);
 }
 
-// ---------------------------------------------------------------------------
-// Shutdown helpers
-// ---------------------------------------------------------------------------
-
 void AgentRuntime::fail_pending(const Error& error) {
     running_.store(false, std::memory_order_release);
     request_mailbox_.shutdown();
 
     while (auto remaining = request_mailbox_.pop()) {
         std::visit(overloaded{
-                       [&](Request& request) { request_tracker_.fail(request.id, error); },
+                       [&](QueuedRequest request) {
+                           request_slots_->resolve_error(request.slot, request.generation, error);
+                       },
                        [](Command& cmd) { resolve_command_on_shutdown(cmd); },
                    },
                    *remaining);
     }
 
-    request_tracker_.fail_all(error);
+    request_slots_->fail_all(error);
 }
 
 void AgentRuntime::resolve_command_on_shutdown(Command& cmd) {
     std::visit(overloaded{
                    [](SetSystemPromptCmd& c) { c.done->set_value(); },
-                   [](GetHistoryCmd& c) { c.done->set_value(std::vector<Message>{}); },
+                   [](GetHistoryCmd& c) { c.done->set_value(HistorySnapshot{}); },
                    [](ClearHistoryCmd& c) { c.done->set_value(); },
                    [](RefreshToolCallingCmd& c) { c.done->set_value(false); },
                },
@@ -359,7 +379,6 @@ void AgentRuntime::update_tool_calling() {
         return;
     }
 
-    // Convert ToolMetadata → CoreToolInfo for the backend.
     auto metadata = tool_registry_.get_all_tool_metadata();
     std::vector<CoreToolInfo> tools;
     tools.reserve(metadata.size());
@@ -378,5 +397,87 @@ void AgentRuntime::update_tool_calling() {
     }
     future.get();
 }
+
+void AgentRuntime::enforce_history_limit() {
+    HistorySnapshot snapshot = backend_->get_history();
+    const bool has_system_prompt =
+        !snapshot.messages.empty() && snapshot.messages.front().role == Role::System;
+    const size_t non_system_messages = snapshot.messages.size() - (has_system_prompt ? 1u : 0u);
+    if (non_system_messages <= agent_config_.max_history_messages) {
+        return;
+    }
+
+    backend_->replace_history(
+        trim_history_snapshot(std::move(snapshot), agent_config_.max_history_messages));
+}
+
+GenerationOptions
+AgentRuntime::resolve_generation_options(const GenerationOptions& overrides) const {
+    if (overrides == GenerationOptions{}) {
+        return default_generation_options_;
+    }
+    return overrides;
+}
+
+template <typename Result>
+RequestHandle<Result> AgentRuntime::make_immediate_error_handle(Error error) {
+    auto state = std::make_shared<ImmediateResultState<Result>>();
+    state->result = std::unexpected(std::move(error));
+    return RequestHandle<Result>{0,
+                                 std::move(state),
+                                 0,
+                                 0,
+                                 &await_immediate_handle<Result>,
+                                 &ready_immediate_handle<Result>,
+                                 &release_immediate_handle<Result>};
+}
+
+template <typename Result>
+RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
+    if (!running_.load(std::memory_order_acquire)) {
+        return make_immediate_error_handle<Result>(
+            Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    if (auto validation = payload.options.validate(); !validation) {
+        return make_immediate_error_handle<Result>(validation.error());
+    }
+
+    auto reservation = request_slots_->emplace(std::move(payload));
+    if (!reservation) {
+        return make_immediate_error_handle<Result>(reservation.error());
+    }
+
+    RequestHandle<Result> handle;
+    if constexpr (std::same_as<Result, TextResponse>) {
+        handle = RequestHandle<Result>{reservation->id,
+                                       request_slots_,
+                                       reservation->slot,
+                                       reservation->generation,
+                                       &RequestSlots::await_text_handle,
+                                       &RequestSlots::ready_handle,
+                                       &RequestSlots::release_handle};
+    } else {
+        handle = RequestHandle<Result>{reservation->id,
+                                       request_slots_,
+                                       reservation->slot,
+                                       reservation->generation,
+                                       &RequestSlots::await_extraction_handle,
+                                       &RequestSlots::ready_handle,
+                                       &RequestSlots::release_handle};
+    }
+
+    if (!request_mailbox_.push_request(QueuedRequest{reservation->slot, reservation->generation})) {
+        request_slots_->resolve_error(reservation->slot, reservation->generation,
+                                      Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    return handle;
+}
+
+template RequestHandle<TextResponse> AgentRuntime::make_immediate_error_handle(Error error);
+template RequestHandle<ExtractionResponse> AgentRuntime::make_immediate_error_handle(Error error);
+template RequestHandle<TextResponse> AgentRuntime::enqueue_request(RequestPayload payload);
+template RequestHandle<ExtractionResponse> AgentRuntime::enqueue_request(RequestPayload payload);
 
 } // namespace zoo::internal::agent

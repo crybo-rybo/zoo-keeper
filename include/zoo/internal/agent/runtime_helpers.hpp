@@ -33,24 +33,15 @@ class ScopeExit {
 };
 
 /// Replace backend history with the given messages. Returns error on failure.
-inline Expected<void> load_history(AgentBackend& backend, const std::vector<Message>& messages) {
-    backend.clear_history();
-    for (const auto& message : messages) {
-        if (auto add_result = backend.add_message(message); !add_result) {
-            return std::unexpected(add_result.error());
-        }
-    }
-    return {};
+inline HistorySnapshot snapshot_from_messages(const std::vector<Message>& messages) {
+    HistorySnapshot snapshot;
+    snapshot.messages = messages;
+    return snapshot;
 }
 
-/// Restore backend history without a redundant KV-cache flush.
-inline void restore_history(AgentBackend& backend, std::vector<Message> messages) {
-    // Use replace_messages rather than clear_history() + add_message() to avoid
-    // a redundant KV-cache flush.  The next generation will re-render from
-    // position zero and naturally overwrite any stale entries left by the
-    // scoped inference; entries beyond the restored prompt length are harmless
-    // because causal attention never reaches them.
-    backend.replace_messages(std::move(messages));
+/// Replace backend history while returning the previous snapshot.
+inline HistorySnapshot swap_history(AgentBackend& backend, const std::vector<Message>& messages) {
+    return backend.swap_history(snapshot_from_messages(messages));
 }
 
 } // namespace zoo::internal::agent

@@ -24,7 +24,10 @@ void Model::initialize_global() {
     });
 }
 
-Model::Model(const Config& config) : config_(config) {}
+Model::Model(ModelConfig model_config, GenerationOptions default_generation)
+    : model_config_(std::move(model_config)),
+      default_generation_options_(std::move(default_generation)),
+      active_sampling_(default_generation_options_.sampling) {}
 
 void Model::LlamaModelDeleter::operator()(llama_model* model) const noexcept {
     if (model) {
@@ -52,18 +55,18 @@ void Model::ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const
 
 Model::~Model() = default;
 
-Expected<std::unique_ptr<Model>> Model::load(const Config& config) {
-    if (auto result = config.validate(); !result) {
+Expected<std::unique_ptr<Model>> Model::load(const ModelConfig& model_config,
+                                             const GenerationOptions& default_generation) {
+    if (auto result = model_config.validate(); !result) {
+        return std::unexpected(result.error());
+    }
+    if (auto result = default_generation.validate(); !result) {
         return std::unexpected(result.error());
     }
 
-    auto model = std::unique_ptr<Model>(new Model(config));
+    auto model = std::unique_ptr<Model>(new Model(model_config, default_generation));
     if (auto result = model->initialize(); !result) {
         return std::unexpected(result.error());
-    }
-
-    if (config.system_prompt) {
-        model->set_system_prompt(*config.system_prompt);
     }
 
     return model;

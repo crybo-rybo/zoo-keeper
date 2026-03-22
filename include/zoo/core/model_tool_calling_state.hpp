@@ -9,6 +9,7 @@
 #pragma once
 
 #include "model.hpp"
+#include "zoo/internal/core/stream_filter.hpp"
 
 #include <chat.h>
 #include <common.h>
@@ -23,6 +24,7 @@ struct Model::ToolCallingState {
     std::string grammar;
     bool grammar_lazy = false;
     std::vector<common_grammar_trigger> grammar_triggers;
+    ToolCallTriggerMatcher trigger_matcher;
     std::vector<std::string> preserved_tokens;
     std::vector<std::string> additional_stops;
     bool thinking_forced_open = false;

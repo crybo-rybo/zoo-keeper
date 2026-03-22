@@ -8,8 +8,6 @@
 #include "core/types.hpp"
 #include "tools/registry.hpp"
 #include <concepts>
-#include <exception>
-#include <future>
 #include <initializer_list>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -23,174 +21,210 @@
 namespace zoo {
 
 /**
- * @brief Handle returned by `Agent::chat()` or `Agent::complete()` for tracking and results.
+ * @brief Move-only async handle for one queued agent request.
  */
-struct RequestHandle {
-    RequestId id;                           ///< Request identifier accepted by the agent.
-    std::future<Expected<Response>> future; ///< Future resolved with the final response or error.
+template <typename Result> class RequestHandle {
+  public:
+    using AwaitFn = Expected<Result> (*)(void*, uint32_t, uint32_t);
+    using ReadyFn = bool (*)(const void*, uint32_t, uint32_t);
+    using ReleaseFn = void (*)(void*, uint32_t, uint32_t);
 
-    /// Creates an empty handle with an invalid request id.
-    RequestHandle() noexcept : id(0) {}
-    /**
-     * @brief Creates a handle bound to a live request future.
-     *
-     * @param id Assigned request identifier.
-     * @param future Future that resolves when processing completes.
-     */
-    RequestHandle(RequestId id, std::future<Expected<Response>> future)
-        : id(id), future(std::move(future)) {}
-    /// Moves ownership of the result future.
-    RequestHandle(RequestHandle&&) noexcept = default;
-    /// Moves ownership of the result future.
-    RequestHandle& operator=(RequestHandle&&) noexcept = default;
-    /// Request handles are non-copyable because `std::future` is move-only.
+    RequestHandle() noexcept = default;
+
+    RequestHandle(RequestId id, std::shared_ptr<void> state, uint32_t slot, uint32_t generation,
+                  AwaitFn await_fn, ReadyFn ready_fn, ReleaseFn release_fn) noexcept
+        : id_(id), state_(std::move(state)), slot_(slot), generation_(generation), await_(await_fn),
+          ready_(ready_fn), release_(release_fn) {}
+
+    ~RequestHandle() {
+        reset();
+    }
+
+    RequestHandle(RequestHandle&& other) noexcept {
+        *this = std::move(other);
+    }
+    RequestHandle& operator=(RequestHandle&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        reset();
+
+        id_ = other.id_;
+        state_ = std::move(other.state_);
+        slot_ = other.slot_;
+        generation_ = other.generation_;
+        await_ = other.await_;
+        ready_ = other.ready_;
+        release_ = other.release_;
+
+        other.id_ = 0;
+        other.slot_ = 0;
+        other.generation_ = 0;
+        other.await_ = nullptr;
+        other.ready_ = nullptr;
+        other.release_ = nullptr;
+        return *this;
+    }
+
     RequestHandle(const RequestHandle&) = delete;
-    /// Request handles are non-copyable because `std::future` is move-only.
     RequestHandle& operator=(const RequestHandle&) = delete;
+
+    [[nodiscard]] RequestId id() const noexcept {
+        return id_;
+    }
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return valid();
+    }
+
+    [[nodiscard]] bool valid() const noexcept {
+        return static_cast<bool>(state_) && await_ != nullptr && release_ != nullptr;
+    }
+
+    [[nodiscard]] bool ready() const {
+        return valid() && ready_(state_.get(), slot_, generation_);
+    }
+
+    Expected<Result> await_result() {
+        if (!valid()) {
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
+        }
+
+        auto result = await_(state_.get(), slot_, generation_);
+        id_ = 0;
+        state_.reset();
+        slot_ = 0;
+        generation_ = 0;
+        await_ = nullptr;
+        ready_ = nullptr;
+        release_ = nullptr;
+        return result;
+    }
+
+    void reset() noexcept {
+        if (!valid()) {
+            return;
+        }
+        release_(state_.get(), slot_, generation_);
+        id_ = 0;
+        state_.reset();
+        slot_ = 0;
+        generation_ = 0;
+        await_ = nullptr;
+        ready_ = nullptr;
+        release_ = nullptr;
+    }
+
+  private:
+    RequestId id_ = 0;
+    std::shared_ptr<void> state_;
+    uint32_t slot_ = 0;
+    uint32_t generation_ = 0;
+    AwaitFn await_ = nullptr;
+    ReadyFn ready_ = nullptr;
+    ReleaseFn release_ = nullptr;
 };
 
 /**
  * @brief Async orchestration layer built on top of `zoo::core::Model`.
- *
- * `Agent` owns a background inference thread, a request queue, and a tool
- * registry. It implements the tool loop of detect, validate, execute, inject,
- * and re-generate until the assistant produces a final user-visible response.
  */
 class Agent {
   public:
     /**
-     * @brief Creates and starts an agent from the supplied configuration.
-     *
-     * @param config Runtime configuration used to load the underlying model.
-     * @return A running agent, or an error if model creation fails.
+     * @brief Creates and starts an agent from split model, agent, and generation settings.
      */
-    static Expected<std::unique_ptr<Agent>> create(const Config& config);
+    static Expected<std::unique_ptr<Agent>>
+    create(const ModelConfig& model_config, const AgentConfig& agent_config = AgentConfig{},
+           const GenerationOptions& default_generation = GenerationOptions{});
 
-    /// Stops the worker thread and releases owned resources.
     ~Agent();
 
-    /// Agents own background state and cannot be copied.
     Agent(const Agent&) = delete;
-    /// Agents own background state and cannot be copied.
     Agent& operator=(const Agent&) = delete;
-    /// Agents own thread-affine state and cannot be moved.
     Agent(Agent&&) = delete;
-    /// Agents own thread-affine state and cannot be moved.
     Agent& operator=(Agent&&) = delete;
 
     /**
      * @brief Queues a user message for asynchronous processing.
-     *
-     * @param message User message to append to the conversation.
-     * @param callback Optional callback that receives streamed visible text.
-     * @return Handle containing the request id and result future. If the agent
-     *         is not running or the queue rejects the request, the future is
-     *         resolved immediately with an error.
      */
-    RequestHandle
-    chat(Message message,
-         std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+    RequestHandle<TextResponse> chat(std::string_view user_message,
+                                     const GenerationOptions& options = GenerationOptions{},
+                                     AsyncTextCallback callback = {});
+
+    /**
+     * @brief Queues a structured single-message request for asynchronous processing.
+     */
+    RequestHandle<TextResponse> chat(MessageView message,
+                                     const GenerationOptions& options = GenerationOptions{},
+                                     AsyncTextCallback callback = {});
 
     /**
      * @brief Queues a stateless completion against the supplied full message history.
-     *
-     * The request executes using only the provided messages and does not mutate
-     * the agent-global retained history. Registered tools, grammar state, and
-     * cancellation behavior remain shared with the agent instance.
-     *
-     * @param messages Full conversation history for one request-scoped completion.
-     * @param callback Optional callback that receives streamed visible text.
-     * @return Handle containing the request id and result future. If the agent
-     *         is not running or the queue rejects the request, the future is
-     *         resolved immediately with an error.
      */
-    RequestHandle
-    complete(std::vector<Message> messages,
-             std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+    RequestHandle<TextResponse> complete(ConversationView messages,
+                                         const GenerationOptions& options = GenerationOptions{},
+                                         AsyncTextCallback callback = {});
 
     /**
      * @brief Queues a structured extraction request (stateful).
-     *
-     * Appends the user message to the conversation history and constrains
-     * generation to produce JSON matching the supplied schema. The response
-     * includes `extracted_data` with the parsed JSON.
-     *
-     * @param output_schema JSON Schema describing the desired output structure.
-     * @param message User message to append before generation.
-     * @param callback Optional callback that receives streamed text.
-     * @return Handle containing the request id and result future.
      */
-    RequestHandle
-    extract(const nlohmann::json& output_schema, Message message,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+    RequestHandle<ExtractionResponse>
+    extract(const nlohmann::json& output_schema, std::string_view user_message,
+            const GenerationOptions& options = GenerationOptions{},
+            AsyncTextCallback callback = {});
+
+    /**
+     * @brief Queues a structured extraction request (stateful).
+     */
+    RequestHandle<ExtractionResponse>
+    extract(const nlohmann::json& output_schema, MessageView message,
+            const GenerationOptions& options = GenerationOptions{},
+            AsyncTextCallback callback = {});
 
     /**
      * @brief Queues a structured extraction request (stateless).
-     *
-     * Uses the provided messages without mutating agent history and constrains
-     * generation to produce JSON matching the supplied schema. The response
-     * includes `extracted_data` with the parsed JSON.
-     *
-     * @param output_schema JSON Schema describing the desired output structure.
-     * @param messages Full conversation history for one request-scoped extraction.
-     * @param callback Optional callback that receives streamed text.
-     * @return Handle containing the request id and result future.
      */
-    RequestHandle
-    extract(const nlohmann::json& output_schema, std::vector<Message> messages,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+    RequestHandle<ExtractionResponse>
+    extract(const nlohmann::json& output_schema, ConversationView messages,
+            const GenerationOptions& options = GenerationOptions{},
+            AsyncTextCallback callback = {});
 
     /**
      * @brief Requests cancellation of a queued or running request.
-     *
-     * Cancellation is cooperative. Requests that have already completed or have
-     * been cleaned up are unaffected.
-     *
-     * @param id Request identifier returned by `chat()`, `complete()`, or `extract()`.
      */
     void cancel(RequestId id);
 
     /**
      * @brief Replaces the current system prompt on the underlying model.
-     *
-     * This call blocks until the inference thread has applied the change. If a
-     * request is currently generating, the prompt update runs before the next
-     * queued request begins.
-     *
-     * @param prompt New system prompt content.
      */
-    void set_system_prompt(const std::string& prompt);
+    void set_system_prompt(std::string_view prompt);
 
     /// Stops the worker thread and prevents additional requests from being processed.
     void stop();
 
     /// Returns whether the background inference thread is still accepting work.
-    bool is_running() const noexcept;
+    [[nodiscard]] bool is_running() const noexcept;
 
-    /// Returns the immutable configuration used to create the agent.
-    const Config& get_config() const noexcept {
-        return config_;
+    [[nodiscard]] const ModelConfig& model_config() const noexcept {
+        return model_config_;
+    }
+
+    [[nodiscard]] const AgentConfig& agent_config() const noexcept {
+        return agent_config_;
+    }
+
+    [[nodiscard]] const GenerationOptions& default_generation_options() const noexcept {
+        return default_generation_options_;
     }
 
     /// Returns a history snapshot taken synchronously on the inference thread.
-    std::vector<Message> get_history() const;
+    [[nodiscard]] HistorySnapshot get_history() const;
 
     /// Clears history synchronously on the inference thread before later queued work.
     void clear_history();
 
-    /**
-     * @brief Registers a strongly typed tool and refreshes grammar constraints.
-     *
-     * This call blocks until the inference thread has applied the grammar
-     * refresh, so the tool is ready to use when the call returns.
-     *
-     * @tparam Func Callable type to register.
-     * @param name Public tool name.
-     * @param description Human-readable description for prompts and schemas.
-     * @param param_names Parameter names in callable argument order.
-     * @param func Callable implementation.
-     * @return Empty success when registered, or the underlying registry error.
-     */
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::initializer_list<std::string> param_names, Func func) {
@@ -198,16 +232,6 @@ class Agent {
                              std::move(func));
     }
 
-    /**
-     * @brief Registers a strongly typed tool and refreshes grammar constraints.
-     *
-     * @tparam Func Callable type to register.
-     * @param name Public tool name.
-     * @param description Human-readable description for prompts and schemas.
-     * @param param_names Parameter names in callable argument order.
-     * @param func Callable implementation.
-     * @return Empty success when registered, or the underlying registry error.
-     */
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::span<const std::string> param_names, Func func) {
@@ -220,16 +244,6 @@ class Agent {
         return register_tool(std::move(*definition));
     }
 
-    /**
-     * @brief Registers a tool using a prebuilt JSON Schema and a JSON-backed callable.
-     *
-     * @tparam Handler Callable type that accepts one JSON object and returns `Expected<json>`.
-     * @param name Public tool name.
-     * @param description Human-readable description for prompts and schemas.
-     * @param schema JSON Schema describing accepted arguments.
-     * @param handler JSON-backed callable implementation.
-     * @return Empty success when registered.
-     */
     template <typename Handler>
         requires tools::detail::is_json_handler_like_v<Handler>
     Expected<void> register_tool(const std::string& name, const std::string& description,
@@ -238,28 +252,21 @@ class Agent {
                              tools::ToolHandler(std::move(handler)));
     }
 
-    /**
-     * @brief Registers a tool using a prebuilt JSON Schema and JSON-backed handler.
-     *
-     * @param name Public tool name.
-     * @param description Human-readable description for prompts and schemas.
-     * @param schema JSON Schema describing accepted arguments.
-     * @param handler JSON-backed callable implementation.
-     * @return Empty success when registered.
-     */
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  nlohmann::json schema, tools::ToolHandler handler);
 
-    /// Returns the number of tools currently registered with the agent.
-    size_t tool_count() const noexcept;
+    [[nodiscard]] size_t tool_count() const noexcept;
 
   private:
     struct Impl;
 
-    Agent(Config config, std::unique_ptr<Impl> impl);
+    Agent(ModelConfig model_config, AgentConfig agent_config, GenerationOptions default_generation,
+          std::unique_ptr<Impl> impl);
     Expected<void> register_tool(tools::ToolDefinition definition);
 
-    Config config_;
+    ModelConfig model_config_;
+    AgentConfig agent_config_;
+    GenerationOptions default_generation_options_;
     std::unique_ptr<Impl> impl_;
 };
 

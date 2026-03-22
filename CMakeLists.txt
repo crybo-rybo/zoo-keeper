@@ -12,6 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ZOO_BUILD_TESTS "Build test suite" OFF)
 option(ZOO_BUILD_INTEGRATION_TESTS "Build integration test suite" OFF)
 option(ZOO_BUILD_EXAMPLES "Build examples" OFF)
+option(ZOO_BUILD_BENCHMARKS "Build local performance harnesses" OFF)
 option(ZOO_BUILD_DOCS "Build API documentation with Doxygen" OFF)
 option(ZOO_ENABLE_COVERAGE "Enable coverage instrumentation" OFF)
 option(ZOO_ENABLE_SANITIZERS "Enable ASan/TSan/UBSan" OFF)
@@ -138,6 +139,11 @@ endif()
 # Examples
 if(ZOO_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+# Benchmarks
+if(ZOO_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
 # Documentation
