@@ -5,5 +5,5 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON "$@"
+cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON "$@"
 cmake --build build
