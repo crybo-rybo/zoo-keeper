@@ -155,9 +155,6 @@ TEST(TokenAccountingTest, TrimHistoryDeductsToolCallCost) {
     auto r3 = model.add_message(zoo::Message::tool("result", "tc1"));
     ASSERT_TRUE(r3.has_value());
 
-    // Record estimate before the trim-triggering add.
-    int before_trim = model.estimated_tokens_;
-
     auto r4 = model.add_message(zoo::Message::user("second"));
     ASSERT_TRUE(r4.has_value());
 
@@ -168,7 +165,6 @@ TEST(TokenAccountingTest, TrimHistoryDeductsToolCallCost) {
     // (including the tool-call assistant message) should have been trimmed.
     // Verify the estimate actually decreased from the pre-trim baseline
     // relative to what was added (proving tool-call cost was deducted).
-    int after_trim = model.estimated_tokens_;
     EXPECT_GT(tool_msg_cost, 0);
     // The history should contain at most max_history_messages + system offset
     // messages, so cost should be lower than if nothing was trimmed.
