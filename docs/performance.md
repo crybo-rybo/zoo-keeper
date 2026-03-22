@@ -16,25 +16,33 @@ Build the repo-local benchmark target:
 scripts/build -DZOO_BUILD_BENCHMARKS=ON
 ```
 
-Run the synthetic hot-path benchmarks:
+Run the real-model benchmark harness:
 
 ```bash
-build/benchmarks/zoo_benchmarks
+build/benchmarks/zoo_benchmarks /path/to/model.gguf
 ```
 
-Run the same harness with a live GGUF model to exercise prompt rendering from retained history:
+Or supply the model path through the environment:
 
 ```bash
 ZOO_BENCHMARK_MODEL=/path/to/model.gguf build/benchmarks/zoo_benchmarks
 ```
 
-The harness currently covers:
+The harness is intentionally real-model-only. It currently covers:
 
-- stream trigger detection
-- stateless runtime completion overhead
-- extraction overhead
-- tool-loop overhead
-- live `Model::generate_from_history()` when a model path is supplied
+- `Model::generate()` against the retained stateful conversation path
+- `Model::generate_from_history()` against a supplied conversation snapshot
+
+For each benchmark case, the harness reports:
+
+- end-to-end latency
+- time to first token
+- decode throughput in tokens/second
+- effective prefill throughput in prompt tokens/second
+- prompt token counts
+- completion token counts
+
+If no GGUF path is supplied, the benchmark exits with an error instead of falling back to mocked or synthetic measurements.
 
 ## Layout Watchpoints
 
