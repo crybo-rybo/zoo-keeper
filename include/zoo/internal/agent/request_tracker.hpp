@@ -31,16 +31,7 @@ class RequestTracker {
     PreparedRequest
     prepare(Message message,
             std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
-        auto promise = std::make_shared<std::promise<Expected<Response>>>();
-        auto future = promise->get_future();
-        auto cancelled = std::make_shared<std::atomic<bool>>(false);
-        RequestId id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
-
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            requests_.emplace(id, State{promise, cancelled});
-        }
-
+        auto [promise, future, cancelled, id] = allocate();
         return PreparedRequest{
             Request(std::move(message), std::move(callback), promise, id, cancelled),
             std::move(future)};
@@ -49,16 +40,7 @@ class RequestTracker {
     PreparedRequest
     prepare(std::vector<Message> messages, HistoryMode history_mode,
             std::optional<std::function<void(std::string_view)>> callback = std::nullopt) {
-        auto promise = std::make_shared<std::promise<Expected<Response>>>();
-        auto future = promise->get_future();
-        auto cancelled = std::make_shared<std::atomic<bool>>(false);
-        RequestId id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
-
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            requests_.emplace(id, State{promise, cancelled});
-        }
-
+        auto [promise, future, cancelled, id] = allocate();
         return PreparedRequest{
             Request(std::move(messages), history_mode, std::move(callback), promise, id, cancelled),
             std::move(future)};
@@ -173,6 +155,25 @@ class RequestTracker {
     }
 
   private:
+    struct AllocatedState {
+        std::shared_ptr<std::promise<Expected<Response>>> promise;
+        std::future<Expected<Response>> future;
+        std::shared_ptr<std::atomic<bool>> cancelled;
+        RequestId id;
+    };
+
+    AllocatedState allocate() {
+        auto promise = std::make_shared<std::promise<Expected<Response>>>();
+        auto future = promise->get_future();
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        RequestId id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            requests_.emplace(id, State{promise, cancelled});
+        }
+        return {promise, std::move(future), cancelled, id};
+    }
+
     struct State {
         std::shared_ptr<std::promise<Expected<Response>>> promise;
         std::shared_ptr<std::atomic<bool>> cancelled;

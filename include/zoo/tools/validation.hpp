@@ -139,55 +139,9 @@ class ToolArgumentsValidator {
 [[nodiscard]] inline Expected<void>
 validate_json_against_schema(const nlohmann::json& data,
                              const std::vector<ToolParameter>& parameters) {
-    if (!data.is_object()) {
-        return std::unexpected(
-            Error{ErrorCode::ToolValidationFailed, "Data must be a JSON object"});
-    }
-
-    for (const auto& parameter : parameters) {
-        if (parameter.required && !data.contains(parameter.name)) {
-            return std::unexpected(Error{ErrorCode::ToolValidationFailed,
-                                         "Missing required field: " + parameter.name});
-        }
-    }
-
-    for (const auto& [key, value] : data.items()) {
-        const ToolParameter* found = nullptr;
-        for (const auto& parameter : parameters) {
-            if (parameter.name == key) {
-                found = &parameter;
-                break;
-            }
-        }
-
-        if (!found) {
-            return std::unexpected(
-                Error{ErrorCode::ToolValidationFailed, "Unexpected field: " + key});
-        }
-
-        if (!detail::json_matches_type(value, found->type)) {
-            return std::unexpected(Error{ErrorCode::ToolValidationFailed,
-                                         "Field '" + key + "' has wrong type: expected " +
-                                             std::string(tool_value_type_name(found->type))});
-        }
-
-        if (!found->enum_values.empty()) {
-            bool matched = false;
-            for (const auto& enum_value : found->enum_values) {
-                if (enum_value == value) {
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) {
-                return std::unexpected(
-                    Error{ErrorCode::ToolValidationFailed,
-                          "Field '" + key + "' must match one of the registered enum values"});
-            }
-        }
-    }
-
-    return {};
+    ToolCall synthetic{"", "", data};
+    ToolMetadata schema{"", "", {}, parameters};
+    return ToolArgumentsValidator{}.validate(synthetic, schema);
 }
 
 } // namespace zoo::tools
