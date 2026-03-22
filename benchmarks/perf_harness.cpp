@@ -93,7 +93,7 @@ double percentile(std::vector<double> values, double fraction) {
 }
 
 MetricSummary summarize_metric(const std::vector<BenchmarkSample>& samples,
-                               double BenchmarkSample::*member) {
+                               double BenchmarkSample::* member) {
     MetricSummary summary;
     if (samples.empty()) {
         return summary;
@@ -115,7 +115,7 @@ MetricSummary summarize_metric(const std::vector<BenchmarkSample>& samples,
 }
 
 TokenSummary summarize_tokens(const std::vector<BenchmarkSample>& samples,
-                              int BenchmarkSample::*member) {
+                              int BenchmarkSample::* member) {
     TokenSummary summary;
     if (samples.empty()) {
         return summary;
@@ -158,16 +158,16 @@ void print_result(const BenchmarkResult& result) {
     const auto print_metric = [](std::string_view label, const MetricSummary& summary,
                                  std::string_view unit) {
         std::cout << "  " << std::left << std::setw(14) << label << " avg=" << std::fixed
-                  << std::setprecision(2) << std::setw(9) << summary.average << " p50="
-                  << std::setw(9) << summary.p50 << " p95=" << std::setw(9) << summary.p95 << " "
-                  << unit << '\n';
+                  << std::setprecision(2) << std::setw(9) << summary.average
+                  << " p50=" << std::setw(9) << summary.p50 << " p95=" << std::setw(9)
+                  << summary.p95 << " " << unit << '\n';
     };
 
     const auto print_tokens = [](std::string_view label, const TokenSummary& summary) {
         std::cout << "  " << std::left << std::setw(14) << label << " avg=" << std::fixed
-                  << std::setprecision(2) << std::setw(9) << summary.average << " min="
-                  << std::setw(5) << summary.min << " max=" << std::setw(5) << summary.max
-                  << " tokens\n";
+                  << std::setprecision(2) << std::setw(9) << summary.average
+                  << " min=" << std::setw(5) << summary.min << " max=" << std::setw(5)
+                  << summary.max << " tokens\n";
     };
 
     std::cout << result.name << "  iterations=" << result.samples.size() << '\n';
@@ -182,8 +182,8 @@ void print_result(const BenchmarkResult& result) {
 template <typename Result>
 void require_success(const Expected<Result>& result, std::string_view benchmark_name) {
     if (!result) {
-        throw std::runtime_error(std::string(benchmark_name) + " failed: " +
-                                 result.error().to_string());
+        throw std::runtime_error(std::string(benchmark_name) +
+                                 " failed: " + result.error().to_string());
     }
 }
 
@@ -232,8 +232,8 @@ HistorySnapshot make_history_snapshot(std::string final_user_prompt) {
 }
 
 void run_live_model_benchmarks(const std::string& model_path) {
-    auto model_result = zoo::core::Model::load(make_model_config(model_path),
-                                               make_generation_options());
+    auto model_result =
+        zoo::core::Model::load(make_model_config(model_path), make_generation_options());
     require_success(model_result, "live_model.load");
     auto& model = *model_result;
 
@@ -250,10 +250,9 @@ void run_live_model_benchmarks(const std::string& model_path) {
             .latency_ms = static_cast<double>(response->metrics.latency_ms.count()),
             .ttft_ms = static_cast<double>(response->metrics.time_to_first_token_ms.count()),
             .decode_tokens_per_second = response->metrics.tokens_per_second,
-            .effective_prefill_tokens_per_second =
-                tokens_per_second(response->usage.prompt_tokens,
-                                  static_cast<double>(
-                                      response->metrics.time_to_first_token_ms.count())),
+            .effective_prefill_tokens_per_second = tokens_per_second(
+                response->usage.prompt_tokens,
+                static_cast<double>(response->metrics.time_to_first_token_ms.count())),
             .prompt_tokens = response->usage.prompt_tokens,
             .completion_tokens = response->usage.completion_tokens,
         };
@@ -265,14 +264,13 @@ void run_live_model_benchmarks(const std::string& model_path) {
         std::optional<Clock::time_point> first_token_time;
         int completion_tokens = 0;
         const auto start_time = Clock::now();
-        auto response = model->generate_from_history(
-            {}, [&](std::string_view) {
-                if (!first_token_time.has_value()) {
-                    first_token_time = Clock::now();
-                }
-                ++completion_tokens;
-                return zoo::TokenAction::Continue;
-            });
+        auto response = model->generate_from_history({}, [&](std::string_view) {
+            if (!first_token_time.has_value()) {
+                first_token_time = Clock::now();
+            }
+            ++completion_tokens;
+            return zoo::TokenAction::Continue;
+        });
         const auto end_time = Clock::now();
         require_success(response, "live_model.generate_history");
         g_benchmark_sink += response->text.size();
@@ -284,10 +282,9 @@ void run_live_model_benchmarks(const std::string& model_path) {
                 : 0.0;
         const double decode_tps =
             first_token_time.has_value()
-                ? tokens_per_second(
-                      completion_tokens,
-                      std::chrono::duration<double, std::milli>(end_time - *first_token_time)
-                          .count())
+                ? tokens_per_second(completion_tokens, std::chrono::duration<double, std::milli>(
+                                                           end_time - *first_token_time)
+                                                           .count())
                 : 0.0;
         return BenchmarkSample{
             .latency_ms = latency_ms,
@@ -314,7 +311,8 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "Zoo-Keeper benchmark harness\n";
-        std::cout << "sizeof(RequestHandle<TextResponse>)=" << sizeof(zoo::RequestHandle<TextResponse>)
+        std::cout << "sizeof(RequestHandle<TextResponse>)="
+                  << sizeof(zoo::RequestHandle<TextResponse>)
                   << " sizeof(MessageView)=" << sizeof(zoo::MessageView)
                   << " sizeof(OwnedMessage)=" << sizeof(zoo::OwnedMessage) << '\n';
 
