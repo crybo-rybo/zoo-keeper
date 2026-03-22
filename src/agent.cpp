@@ -15,7 +15,7 @@ namespace runtime = internal::agent;
 struct Agent::Impl {
     Impl(ModelConfig model_config, AgentConfig agent_config, GenerationOptions default_generation,
          std::unique_ptr<runtime::AgentBackend> owned_backend)
-        : runtime(std::move(model_config), std::move(agent_config), std::move(default_generation),
+        : runtime(std::move(model_config), agent_config, std::move(default_generation),
                   std::move(owned_backend)) {}
 
     runtime::AgentRuntime runtime;
@@ -48,7 +48,7 @@ Expected<std::unique_ptr<Agent>> Agent::create(const ModelConfig& model_config,
 
 Agent::Agent(ModelConfig model_config, AgentConfig agent_config,
              GenerationOptions default_generation, std::unique_ptr<Impl> impl)
-    : model_config_(std::move(model_config)), agent_config_(std::move(agent_config)),
+    : model_config_(std::move(model_config)), agent_config_(agent_config),
       default_generation_options_(std::move(default_generation)), impl_(std::move(impl)) {}
 
 Agent::~Agent() = default;

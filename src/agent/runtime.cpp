@@ -79,7 +79,7 @@ HistorySnapshot trim_history_snapshot(HistorySnapshot snapshot, size_t max_histo
 AgentRuntime::AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
                            GenerationOptions default_generation,
                            std::unique_ptr<AgentBackend> backend)
-    : model_config_(std::move(model_config)), agent_config_(std::move(agent_config)),
+    : model_config_(std::move(model_config)), agent_config_(agent_config),
       default_generation_options_(std::move(default_generation)), backend_(std::move(backend)),
       request_slots_(std::make_shared<RequestSlots>(agent_config_.request_queue_capacity)),
       request_mailbox_(agent_config_.request_queue_capacity) {
