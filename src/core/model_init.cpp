@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <llama.h>
+#include <log.h>
 
 namespace zoo::core {
 
@@ -18,11 +19,13 @@ Expected<void> Model::initialize() {
 
     llama_log_set(
         [](enum ggml_log_level level, const char* text, void*) {
-            if (level >= GGML_LOG_LEVEL_WARN) {
-                std::fprintf(stderr, "%s", text);
-            }
+            return;
+            // if (level >= GGML_LOG_LEVEL_WARN) {
+            //     std::fprintf(stderr, "%s", text);
+            // }
         },
         nullptr);
+    common_log_pause(common_log_main());
 
     auto model_params = llama_model_default_params();
     model_params.n_gpu_layers = config_.n_gpu_layers;
