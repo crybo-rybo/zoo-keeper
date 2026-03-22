@@ -277,6 +277,34 @@ TEST(AgentRuntimeTest, CompleteDoesNotMutatePersistentHistory) {
     EXPECT_EQ(runtime.get_history(), before);
 }
 
+TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("Once "), TokenAction::Continue);
+            EXPECT_EQ(on_token("upon "), TokenAction::Continue);
+            EXPECT_EQ(on_token("a time"), TokenAction::Continue);
+        }
+        return Expected<GenerationResult>(GenerationResult{"Once upon a time", 7, false, "", {}});
+    });
+
+    std::string streamed;
+    auto handle = runtime.chat(
+        "Tell me a story", GenerationOptions{},
+        [&](std::string_view token) { streamed.append(token.data(), token.size()); });
+
+    auto result = handle.await_result();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "Once upon a time");
+    EXPECT_EQ(streamed, "Once upon a time");
+    EXPECT_EQ(result->usage.prompt_tokens, 7);
+    EXPECT_EQ(result->usage.completion_tokens, 3);
+}
+
 TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();

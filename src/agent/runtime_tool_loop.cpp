@@ -66,24 +66,17 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
 
         int completion_tokens = 0;
 
-        auto make_metrics_callback = [&](auto inner_callback) -> TokenCallback {
-            return
-                [&, callback = std::move(inner_callback)](std::string_view token) -> TokenAction {
-                    if (!first_token_received) {
-                        first_token_time = std::chrono::steady_clock::now();
-                        first_token_received = true;
-                    }
-                    ++completion_tokens;
-                    return callback(token);
-                };
-        };
-
-        auto callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
+        auto callback = [&](std::string_view token) -> TokenAction {
             if (request.streaming_callback && *request.streaming_callback) {
                 (*request.streaming_callback)(token);
             }
+            if (!first_token_received) {
+                first_token_time = std::chrono::steady_clock::now();
+                first_token_received = true;
+            }
+            ++completion_tokens;
             return TokenAction::Continue;
-        });
+        };
 
         auto generated = backend_->generate_from_history(
             *request.options, TokenCallback(callback), [&request]() {
