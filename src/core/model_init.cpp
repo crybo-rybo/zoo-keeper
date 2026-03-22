@@ -19,10 +19,9 @@ Expected<void> Model::initialize() {
 
     llama_log_set(
         [](enum ggml_log_level level, const char* text, void*) {
-            return;
-            // if (level >= GGML_LOG_LEVEL_WARN) {
-            //     std::fprintf(stderr, "%s", text);
-            // }
+            if (level >= GGML_LOG_LEVEL_WARN) {
+                std::fprintf(stderr, "%s", text);
+            }
         },
         nullptr);
     common_log_pause(common_log_main());
