@@ -66,6 +66,7 @@ class AgentRuntime {
     Expected<Response> process_request(const Request& request);
     Expected<Response> process_extraction_request(const Request& request);
 
+    void submit_or_fail(RequestHandle& handle, Request request);
     void fail_pending(const Error& error);
     static void resolve_command_on_shutdown(Command& cmd);
     void update_tool_calling();

@@ -56,18 +56,7 @@ RequestHandle AgentRuntime::chat(Message message,
                                  std::optional<std::function<void(std::string_view)>> callback) {
     auto prepared = request_tracker_.prepare(std::move(message), std::move(callback));
     RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
+    submit_or_fail(handle, std::move(prepared.request));
     return handle;
 }
 
@@ -84,17 +73,7 @@ AgentRuntime::complete(std::vector<Message> messages,
         return handle;
     }
 
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
+    submit_or_fail(handle, std::move(prepared.request));
     return handle;
 }
 
@@ -113,18 +92,7 @@ RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema, Message
     auto prepared = request_tracker_.prepare(std::move(message), nlohmann::json(output_schema),
                                              std::move(callback));
     RequestHandle handle{prepared.request.id, std::move(prepared.future)};
-
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
+    submit_or_fail(handle, std::move(prepared.request));
     return handle;
 }
 
@@ -152,17 +120,7 @@ RequestHandle AgentRuntime::extract(const nlohmann::json& output_schema,
         return handle;
     }
 
-    if (!running_.load(std::memory_order_acquire)) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-        return handle;
-    }
-
-    if (!request_mailbox_.push_request(std::move(prepared.request))) {
-        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
-                                               "Request queue is full or agent is shutting down"});
-        return handle;
-    }
-
+    submit_or_fail(handle, std::move(prepared.request));
     return handle;
 }
 
@@ -323,6 +281,22 @@ void AgentRuntime::handle_command(Command& cmd) {
                    },
                },
                cmd);
+}
+
+// ---------------------------------------------------------------------------
+// Request submission helpers
+// ---------------------------------------------------------------------------
+
+void AgentRuntime::submit_or_fail(RequestHandle& handle, Request request) {
+    if (!running_.load(std::memory_order_acquire)) {
+        request_tracker_.fail(handle.id, Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+        return;
+    }
+
+    if (!request_mailbox_.push_request(std::move(request))) {
+        request_tracker_.fail(handle.id, Error{ErrorCode::QueueFull,
+                                               "Request queue is full or agent is shutting down"});
+    }
 }
 
 // ---------------------------------------------------------------------------
