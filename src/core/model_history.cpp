@@ -108,10 +108,43 @@ int Model::estimate_message_tokens(const Message& message) const {
     return total;
 }
 
+void Model::trim_history(size_t max_non_system_messages) {
+    const size_t system_offset =
+        (!messages_.empty() && messages_.front().role == Role::System) ? 1u : 0u;
+
+    if (messages_.size() <= system_offset + max_non_system_messages) {
+        return;
+    }
+
+    size_t erase_end = messages_.size() - max_non_system_messages;
+    if (erase_end < system_offset) {
+        erase_end = system_offset;
+    }
+
+    // Align to a user-message boundary so we don't start mid-exchange.
+    while (erase_end < messages_.size() && messages_[erase_end].role != Role::User) {
+        ++erase_end;
+    }
+
+    if (erase_end <= system_offset) {
+        return;
+    }
+
+    for (size_t index = system_offset; index < erase_end; ++index) {
+        estimated_tokens_ -= estimate_message_tokens(messages_[index]);
+    }
+    if (estimated_tokens_ < 0) {
+        estimated_tokens_ = 0;
+    }
+
+    messages_.erase(messages_.begin() + static_cast<std::ptrdiff_t>(system_offset),
+                    messages_.begin() + static_cast<std::ptrdiff_t>(erase_end));
+    note_history_rewrite();
+}
+
 void Model::trim_history_to_fit() {
-    // Direct `Model` use no longer applies an implicit history budget. The
-    // agent runtime owns retention policy and can scope/swap histories around
-    // requests without forcing an extra trim policy here.
+    // Called from add_message() — no longer applies an implicit budget.
+    // The agent runtime owns retention policy via trim_history().
 }
 
 void Model::rollback_last_message() noexcept {

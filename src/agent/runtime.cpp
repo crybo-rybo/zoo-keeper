@@ -52,28 +52,6 @@ std::vector<Message> materialize_conversation(ConversationView messages) {
     return owned;
 }
 
-HistorySnapshot trim_history_snapshot(HistorySnapshot snapshot, size_t max_history_messages) {
-    const bool has_system_prompt =
-        !snapshot.messages.empty() && snapshot.messages.front().role == Role::System;
-    const size_t non_system_messages = snapshot.messages.size() - (has_system_prompt ? 1u : 0u);
-    if (non_system_messages <= max_history_messages) {
-        return snapshot;
-    }
-
-    HistorySnapshot trimmed;
-    trimmed.messages.reserve((has_system_prompt ? 1u : 0u) + max_history_messages);
-    if (has_system_prompt) {
-        trimmed.messages.push_back(std::move(snapshot.messages.front()));
-    }
-
-    const size_t first_non_system = snapshot.messages.size() - max_history_messages;
-    for (size_t index = first_non_system; index < snapshot.messages.size(); ++index) {
-        trimmed.messages.push_back(std::move(snapshot.messages[index]));
-    }
-
-    return trimmed;
-}
-
 } // namespace
 
 AgentRuntime::AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
@@ -399,21 +377,12 @@ void AgentRuntime::update_tool_calling() {
 }
 
 void AgentRuntime::enforce_history_limit() {
-    HistorySnapshot snapshot = backend_->get_history();
-    const bool has_system_prompt =
-        !snapshot.messages.empty() && snapshot.messages.front().role == Role::System;
-    const size_t non_system_messages = snapshot.messages.size() - (has_system_prompt ? 1u : 0u);
-    if (non_system_messages <= agent_config_.max_history_messages) {
-        return;
-    }
-
-    backend_->replace_history(
-        trim_history_snapshot(std::move(snapshot), agent_config_.max_history_messages));
+    backend_->trim_history(agent_config_.max_history_messages);
 }
 
 GenerationOptions
 AgentRuntime::resolve_generation_options(const GenerationOptions& overrides) const {
-    if (overrides == GenerationOptions{}) {
+    if (overrides.is_default()) {
         return default_generation_options_;
     }
     return overrides;

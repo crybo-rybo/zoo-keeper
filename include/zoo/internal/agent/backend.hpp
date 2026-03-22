@@ -68,6 +68,8 @@ class AgentBackend {
     virtual void replace_history(HistorySnapshot snapshot) = 0;
     virtual HistorySnapshot swap_history(HistorySnapshot snapshot) = 0;
 
+    virtual void trim_history(size_t max_non_system_messages) = 0;
+
     /**
      * @brief Configures template-driven tool calling.
      *

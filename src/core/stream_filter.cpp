@@ -68,7 +68,7 @@ extract_word_triggers(const std::vector<common_grammar_trigger>& triggers) {
 
 size_t ToolCallWordTriggerFilter::first_trigger_match(std::string_view text) const {
     size_t earliest = std::string::npos;
-    for (const auto& trigger : word_triggers_) {
+    for (const auto& trigger : borrowed_triggers_) {
         const size_t pos = text.find(trigger);
         if (pos != std::string::npos && (earliest == std::string::npos || pos < earliest)) {
             earliest = pos;
@@ -79,7 +79,7 @@ size_t ToolCallWordTriggerFilter::first_trigger_match(std::string_view text) con
 
 size_t ToolCallWordTriggerFilter::buffered_suffix_len(std::string_view text) const {
     size_t longest = 0;
-    for (const auto& trigger : word_triggers_) {
+    for (const auto& trigger : borrowed_triggers_) {
         const size_t max_check = std::min(text.size(), trigger.size() - 1);
         for (size_t len = 1; len <= max_check; ++len) {
             if (text.substr(text.size() - len) == std::string_view(trigger).substr(0, len)) {

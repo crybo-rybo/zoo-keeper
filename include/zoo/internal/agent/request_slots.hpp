@@ -48,37 +48,43 @@ class RequestSlots {
   public:
     explicit RequestSlots(size_t capacity) : slots_() {
         slots_.reserve(capacity);
+        free_list_.reserve(capacity);
         for (size_t index = 0; index < capacity; ++index) {
-            slots_.push_back(std::make_unique<Slot>());
+            auto slot = std::make_unique<Slot>();
+            slot->index = static_cast<uint32_t>(index);
+            slots_.push_back(std::move(slot));
+        }
+        for (size_t index = capacity; index > 0; --index) {
+            free_list_.push_back(static_cast<uint32_t>(index - 1));
         }
     }
 
     [[nodiscard]] Expected<RequestReservation> emplace(RequestPayload payload) {
-        std::lock_guard<std::mutex> table_lock(mutex_);
-
-        for (size_t index = 0; index < slots_.size(); ++index) {
-            Slot& slot = *slots_[index];
-            std::lock_guard<std::mutex> slot_lock(slot.mutex);
-            if (slot.occupied) {
-                continue;
+        uint32_t slot_index;
+        {
+            std::lock_guard<std::mutex> table_lock(mutex_);
+            if (free_list_.empty()) {
+                return std::unexpected(
+                    Error{ErrorCode::QueueFull, "Request queue is full or agent is shutting down"});
             }
-
-            slot.occupied = true;
-            slot.orphaned = false;
-            slot.ready = false;
-            slot.request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
-            slot.cancelled.store(false, std::memory_order_release);
-            slot.payload = std::move(payload);
-            slot.result = std::monostate{};
-            return RequestReservation{
-                slot.request_id,
-                static_cast<uint32_t>(index),
-                slot.generation,
-            };
+            slot_index = free_list_.back();
+            free_list_.pop_back();
         }
 
-        return std::unexpected(
-            Error{ErrorCode::QueueFull, "Request queue is full or agent is shutting down"});
+        Slot& slot = *slots_[slot_index];
+        std::lock_guard<std::mutex> slot_lock(slot.mutex);
+        slot.occupied = true;
+        slot.orphaned = false;
+        slot.ready = false;
+        slot.request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+        slot.cancelled.store(false, std::memory_order_release);
+        slot.payload = std::move(payload);
+        slot.result = std::monostate{};
+        return RequestReservation{
+            slot.request_id,
+            slot_index,
+            slot.generation,
+        };
     }
 
     [[nodiscard]] std::optional<ActiveRequest>
@@ -154,7 +160,7 @@ class RequestSlots {
             }
 
             if (slot.orphaned) {
-                reset_locked(slot);
+                reset_locked_with_table(slot);
                 continue;
             }
 
@@ -170,15 +176,7 @@ class RequestSlots {
 
     [[nodiscard]] size_t size() const {
         std::lock_guard<std::mutex> table_lock(mutex_);
-        size_t occupied = 0;
-        for (const auto& slot_ptr : slots_) {
-            const Slot& slot = *slot_ptr;
-            std::lock_guard<std::mutex> slot_lock(slot.mutex);
-            if (slot.occupied) {
-                ++occupied;
-            }
-        }
-        return occupied;
+        return slots_.size() - free_list_.size();
     }
 
     [[nodiscard]] static bool ready_handle(const void* state, uint32_t slot, uint32_t generation) {
@@ -203,6 +201,7 @@ class RequestSlots {
     struct Slot {
         mutable std::mutex mutex;
         std::condition_variable cv;
+        uint32_t index = 0;
         uint32_t generation = 1;
         bool occupied = false;
         bool orphaned = false;
@@ -313,7 +312,7 @@ class RequestSlots {
         slot.orphaned = true;
     }
 
-    void reset_locked(Slot& slot) {
+    void clear_slot(Slot& slot) {
         slot.occupied = false;
         slot.orphaned = false;
         slot.ready = false;
@@ -327,9 +326,23 @@ class RequestSlots {
         }
     }
 
+    /// Reset a slot and return it to the free list (caller does NOT hold mutex_).
+    void reset_locked(Slot& slot) {
+        clear_slot(slot);
+        std::lock_guard<std::mutex> table_lock(mutex_);
+        free_list_.push_back(slot.index);
+    }
+
+    /// Reset a slot and return it to the free list (caller already holds mutex_).
+    void reset_locked_with_table(Slot& slot) {
+        clear_slot(slot);
+        free_list_.push_back(slot.index);
+    }
+
     mutable std::mutex mutex_;
     std::atomic<RequestId> next_request_id_{1};
     std::vector<std::unique_ptr<Slot>> slots_;
+    std::vector<uint32_t> free_list_;
 };
 
 } // namespace zoo::internal::agent

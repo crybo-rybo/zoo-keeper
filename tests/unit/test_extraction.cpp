@@ -98,6 +98,18 @@ class FakeBackend final : public AgentBackend {
         return previous;
     }
 
+    void trim_history(size_t max_non_system_messages) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const size_t system_offset =
+            (!history_.empty() && history_.front().role == zoo::Role::System) ? 1u : 0u;
+        if (history_.size() <= system_offset + max_non_system_messages) {
+            return;
+        }
+        size_t erase_count = history_.size() - system_offset - max_non_system_messages;
+        history_.erase(history_.begin() + static_cast<std::ptrdiff_t>(system_offset),
+                       history_.begin() + static_cast<std::ptrdiff_t>(system_offset + erase_count));
+    }
+
     bool set_tool_calling(const std::vector<zoo::CoreToolInfo>&) override {
         return true;
     }

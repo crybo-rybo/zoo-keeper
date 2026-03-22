@@ -13,6 +13,7 @@
 #include <chrono>
 #include <exception>
 #include <llama.h>
+#include <span>
 #include <string_view>
 
 namespace zoo::core {
@@ -60,10 +61,9 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     bool tool_stream_suppressed = false;
     std::optional<ToolCallWordTriggerFilter> word_trigger_filter;
     if (on_token && tool_state_ && grammar_mode_ == GrammarMode::NativeToolCall) {
-        auto word_triggers = tool_state_->trigger_matcher.word_triggers();
+        const auto& word_triggers = tool_state_->trigger_matcher.word_triggers();
         if (!word_triggers.empty()) {
-            word_trigger_filter.emplace(
-                std::vector<std::string>(word_triggers.begin(), word_triggers.end()));
+            word_trigger_filter.emplace(std::span<const std::string>(word_triggers));
         }
     }
 
@@ -403,7 +403,7 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
 }
 
 GenerationOptions Model::resolve_generation_options(const GenerationOptions& overrides) const {
-    if (overrides == GenerationOptions{}) {
+    if (overrides.is_default()) {
         return default_generation_options_;
     }
     return overrides;
