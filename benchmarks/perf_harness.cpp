@@ -93,7 +93,7 @@ double percentile(std::vector<double> values, double fraction) {
 }
 
 MetricSummary summarize_metric(const std::vector<BenchmarkSample>& samples,
-                               double BenchmarkSample::* member) {
+                               double BenchmarkSample::*member) {
     MetricSummary summary;
     if (samples.empty()) {
         return summary;
@@ -115,7 +115,7 @@ MetricSummary summarize_metric(const std::vector<BenchmarkSample>& samples,
 }
 
 TokenSummary summarize_tokens(const std::vector<BenchmarkSample>& samples,
-                              int BenchmarkSample::* member) {
+                              int BenchmarkSample::*member) {
     TokenSummary summary;
     if (samples.empty()) {
         return summary;

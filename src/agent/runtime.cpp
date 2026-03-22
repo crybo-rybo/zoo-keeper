@@ -264,7 +264,7 @@ void AgentRuntime::inference_loop() {
             }
 
             std::visit(overloaded{
-                           [this](QueuedRequest request) { handle_request(std::move(request)); },
+                           [this](QueuedRequest request) { handle_request(request); },
                            [this](Command& cmd) { handle_command(cmd); },
                        },
                        *item_opt);
