@@ -48,7 +48,7 @@ jobs:
           echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON
 
       - name: Run clang-tidy
         run: |
