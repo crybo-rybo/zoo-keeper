@@ -74,7 +74,7 @@ class GrammarBuilder {
                        literal(":") + " ws ";
 
             if (parameter.enum_values.empty()) {
-                grammar += primitive_rule_name(parameter.type) + "\n";
+                grammar += tool_value_type_name(parameter.type) + std::string("\n");
                 continue;
             }
 
@@ -133,20 +133,6 @@ class GrammarBuilder {
             sequence += prefix + "-param-" + std::to_string(index);
         }
         return sequence;
-    }
-
-    static std::string primitive_rule_name(ToolValueType type) {
-        switch (type) {
-        case ToolValueType::Integer:
-            return "integer";
-        case ToolValueType::Number:
-            return "number";
-        case ToolValueType::String:
-            return "string";
-        case ToolValueType::Boolean:
-            return "boolean";
-        }
-        return "string";
     }
 
     static std::string enum_literal(const nlohmann::json& value, ToolValueType type) {
