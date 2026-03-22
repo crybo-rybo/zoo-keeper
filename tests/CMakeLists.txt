@@ -6,9 +6,6 @@ add_executable(zoo_tests
     unit/test_types.cpp
     unit/test_tool_registry.cpp
     unit/test_tool_parser.cpp
-    unit/test_sentinel_parser.cpp
-    unit/test_sentinel_stream_filter.cpp
-    unit/test_grammar_builder.cpp
     unit/test_schema_grammar.cpp
     unit/test_error_recovery.cpp
     unit/test_tool_interceptor.cpp
@@ -18,6 +15,9 @@ add_executable(zoo_tests
     unit/test_agent_runtime.cpp
     unit/test_extraction.cpp
     unit/test_request_tracker.cpp
+    unit/test_model_tool_calling.cpp
+    unit/test_token_accounting.cpp
+    unit/test_streaming_filter.cpp
 )
 
 target_link_libraries(zoo_tests
@@ -32,6 +32,9 @@ target_include_directories(zoo_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/common
+        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/ggml/include
+        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/include
 )
 
 gtest_discover_tests(zoo_tests

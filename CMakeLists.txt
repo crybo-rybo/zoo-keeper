@@ -40,6 +40,7 @@ configure_file(
 )
 
 set(ZOO_BUILD_LLAMA_LINK_LIBRARIES
+    "$<TARGET_FILE:common>"
     "$<TARGET_FILE:llama>"
     "$<TARGET_FILE:ggml>"
     "$<TARGET_FILE:ggml-base>"
@@ -83,6 +84,8 @@ add_library(zoo STATIC
     src/core/model_prompt.cpp
     src/core/model_history.cpp
     src/core/model_sampling.cpp
+    src/core/model_tool_calling.cpp
+    src/core/stream_filter.cpp
 )
 target_include_directories(zoo PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -97,6 +100,7 @@ target_compile_features(zoo PUBLIC cxx_std_23)
 # through the target interface so installed-package consumers inherit it.
 target_link_libraries(zoo PRIVATE
     $<BUILD_INTERFACE:llama>
+    $<BUILD_INTERFACE:common>
     $<INSTALL_INTERFACE:ZooKeeper::llama>
 )
 set_property(TARGET zoo APPEND PROPERTY
@@ -150,6 +154,13 @@ install(TARGETS zoo zoo_core
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# llama.cpp's common library is not exported by upstream, but zoo.a depends
+# on it at link time.  Install it alongside our own archives so the install-
+# tree config can reference it.
+install(FILES $<TARGET_FILE:common>
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
 install(EXPORT ZooKeeperTargets
     FILE ZooKeeperTargets.cmake
     NAMESPACE ZooKeeper::
@@ -201,7 +212,7 @@ install(FILES
 )
 
 
-set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo -llama -lggml -lggml-base -lggml-cpu")
+set(ZOO_PKGCONFIG_LIBS "-L\${libdir} -lzoo -lcommon -llama -lggml -lggml-base -lggml-cpu")
 if(TARGET ggml-blas)
     string(APPEND ZOO_PKGCONFIG_LIBS " -lggml-blas")
 endif()

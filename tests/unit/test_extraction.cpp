@@ -28,6 +28,7 @@ using zoo::TokenCallback;
 using zoo::internal::agent::AgentBackend;
 using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
+using zoo::internal::agent::ParsedToolResponse;
 
 class FakeBackend final : public AgentBackend {
   public:
@@ -39,19 +40,9 @@ class FakeBackend final : public AgentBackend {
         generations_.push_back(std::move(action));
     }
 
-    void set_tool_grammar_supported(bool supported) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        tool_grammar_supported_ = supported;
-    }
-
     std::vector<std::string> operations() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return operations_;
-    }
-
-    std::string last_tool_grammar() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return last_tool_grammar_;
     }
 
     std::string last_schema_grammar_set() const {
@@ -111,11 +102,19 @@ class FakeBackend final : public AgentBackend {
         operations_.push_back("clear_history");
     }
 
-    bool set_tool_grammar(const std::string& grammar_str) override {
+    bool set_tool_calling(const std::vector<zoo::CoreToolInfo>& tools) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        last_tool_grammar_ = grammar_str;
-        operations_.push_back("set_tool_grammar");
-        return tool_grammar_supported_;
+        tool_calling_supported_ = !tools.empty();
+        operations_.push_back("set_tool_calling");
+        return tool_calling_supported_;
+    }
+
+    ParsedToolResponse parse_tool_response(const std::string& text) const override {
+        return ParsedToolResponse{text, {}};
+    }
+
+    const char* tool_calling_format_name() const noexcept override {
+        return "fake";
     }
 
     bool set_schema_grammar(const std::string& grammar_str) override {
@@ -127,7 +126,6 @@ class FakeBackend final : public AgentBackend {
 
     void clear_tool_grammar() override {
         std::lock_guard<std::mutex> lock(mutex_);
-        last_tool_grammar_.clear();
         operations_.push_back("clear_tool_grammar");
     }
 
@@ -142,9 +140,8 @@ class FakeBackend final : public AgentBackend {
     mutable std::vector<std::string> operations_;
     std::deque<GenerationAction> generations_;
     std::vector<Message> history_;
-    std::string last_tool_grammar_;
     std::string last_schema_grammar_set_;
-    bool tool_grammar_supported_ = true;
+    bool tool_calling_supported_ = true;
 };
 
 Config make_config() {
@@ -223,20 +220,23 @@ TEST(ExtractionTest, SchemaGrammarIsSetDuringExtraction) {
     EXPECT_NE(backend_ptr->last_schema_grammar_set().find("schema-0"), std::string::npos);
 }
 
-TEST(ExtractionTest, ToolGrammarRestoredAfterExtraction) {
+TEST(ExtractionTest, ToolCallingRestoredAfterExtraction) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
     AgentRuntime runtime(make_config(), std::move(backend));
 
-    // Register a tool to set up tool grammar
+    // Register a tool to set up tool calling
     auto definition = zoo::tools::detail::make_tool_definition(
         "greet", "Greet someone", std::vector<std::string>{"name"},
         [](std::string name) { return "Hi " + name; });
     ASSERT_TRUE(definition.has_value());
     ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
 
-    // Tool grammar should be active
-    EXPECT_FALSE(backend_ptr->last_tool_grammar().empty());
+    // Tool calling should have been configured
+    {
+        const auto ops = backend_ptr->operations();
+        EXPECT_NE(std::find(ops.begin(), ops.end(), "set_tool_calling"), ops.end());
+    }
 
     // Now do an extraction
     backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
@@ -248,17 +248,17 @@ TEST(ExtractionTest, ToolGrammarRestoredAfterExtraction) {
     auto result = handle.future.get();
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
 
-    // After extraction, tool grammar should be restored
+    // After extraction, tool calling should be restored
     const auto ops = backend_ptr->operations();
-    // Should see: set_tool_grammar (initial), set_schema_grammar (extraction),
-    // clear_tool_grammar (guard), set_tool_grammar (restore)
-    int set_tool_grammar_count = 0;
+    // Should see: set_tool_calling (initial), set_schema_grammar (extraction),
+    // clear_tool_grammar (guard), set_tool_calling (restore)
+    int set_tool_calling_count = 0;
     for (const auto& op : ops) {
-        if (op == "set_tool_grammar") {
-            ++set_tool_grammar_count;
+        if (op == "set_tool_calling") {
+            ++set_tool_calling_count;
         }
     }
-    EXPECT_GE(set_tool_grammar_count, 2); // At least initial + restore
+    EXPECT_GE(set_tool_calling_count, 2); // At least initial + restore
 }
 
 TEST(ExtractionTest, StreamingCallbackReceivesTokens) {

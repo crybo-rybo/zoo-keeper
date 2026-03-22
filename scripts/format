@@ -3,5 +3,5 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-find src include tests -type f \( -name '*.cpp' -o -name '*.hpp' \) | xargs clang-format -i
+find src include tests examples -type f \( -name '*.cpp' -o -name '*.hpp' \) | xargs clang-format -i
 echo "Formatting complete."

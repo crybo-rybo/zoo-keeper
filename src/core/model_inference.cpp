@@ -4,9 +4,10 @@
  */
 
 #include "zoo/core/model.hpp"
+#include "zoo/core/model_tool_calling_state.hpp"
 
 #include "zoo/internal/core/batch.hpp"
-#include "zoo/internal/tools/sentinel_stream_filter.hpp"
+#include "zoo/internal/core/stream_filter.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -55,12 +56,14 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
-    const bool is_tool_grammar = grammar_mode_ == GrammarMode::ToolCall;
-    bool in_tool_call = false;
     bool stopped_by_callback = false;
-    std::optional<tools::SentinelStreamFilter> stream_filter;
-    if (is_tool_grammar && on_token) {
-        stream_filter.emplace();
+    bool tool_stream_suppressed = false;
+    std::optional<ToolCallWordTriggerFilter> word_trigger_filter;
+    if (on_token && tool_state_ && grammar_mode_ == GrammarMode::NativeToolCall) {
+        auto word_triggers = extract_word_triggers(tool_state_->grammar_triggers);
+        if (!word_triggers.empty()) {
+            word_trigger_filter.emplace(std::move(word_triggers));
+        }
     }
 
     const int n_batch = static_cast<int>(llama_n_batch(ctx_.get()));
@@ -122,17 +125,6 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         generated_text.append(buff, static_cast<size_t>(n));
         ++token_count;
 
-        if (is_tool_grammar && !in_tool_call) {
-            static constexpr std::string_view kOpenTag = "<tool_call>";
-            const size_t check_start =
-                generated_text.size() > kOpenTag.size() + static_cast<size_t>(n)
-                    ? generated_text.size() - kOpenTag.size() - static_cast<size_t>(n)
-                    : 0;
-            if (generated_text.find(kOpenTag.data(), check_start) != std::string::npos) {
-                in_tool_call = true;
-            }
-        }
-
         if (!stop_sequences.empty()) {
             const size_t match_len = find_stop_sequence(generated_text, stop_sequences);
             if (match_len > 0) {
@@ -142,28 +134,37 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
         }
 
         if (on_token) {
-            std::string visible_chunk;
-            if (stream_filter) {
-                visible_chunk =
-                    stream_filter->consume(std::string_view(buff, static_cast<size_t>(n)));
-            } else {
-                visible_chunk.assign(buff, static_cast<size_t>(n));
-            }
-
-            if (!visible_chunk.empty()) {
-                auto action = invoke_token_callback(*on_token, visible_chunk);
-                if (!action) {
-                    return std::unexpected(action.error());
+            if (!tool_stream_suppressed) {
+                std::string visible_chunk;
+                if (word_trigger_filter) {
+                    visible_chunk = word_trigger_filter->consume(
+                        std::string_view(buff, static_cast<size_t>(n)));
+                    tool_stream_suppressed = word_trigger_filter->suppressing();
+                } else {
+                    visible_chunk.assign(buff, static_cast<size_t>(n));
                 }
-                if (*action == TokenAction::Stop) {
-                    stopped_by_callback = true;
-                    break;
+
+                // For regex-style triggers we can only detect once the full
+                // accumulated text matches, so suppress the current fragment
+                // before forwarding anything visible from it.
+                if (!tool_stream_suppressed && tool_state_ &&
+                    grammar_mode_ == GrammarMode::NativeToolCall &&
+                    is_tool_trigger_detected(generated_text, tool_state_->grammar_triggers)) {
+                    tool_stream_suppressed = true;
+                    visible_chunk.clear();
+                }
+
+                if (!visible_chunk.empty()) {
+                    auto action = invoke_token_callback(*on_token, visible_chunk);
+                    if (!action) {
+                        return std::unexpected(action.error());
+                    }
+                    if (*action == TokenAction::Stop) {
+                        stopped_by_callback = true;
+                        break;
+                    }
                 }
             }
-        }
-
-        if (in_tool_call && generated_text.ends_with("</tool_call>")) {
-            break;
         }
 
         if (token_count >= effective_max || current_pos >= context_size_) {
@@ -187,8 +188,8 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
 
     llama_batch_free(ar_batch);
 
-    if (on_token && stream_filter && !stopped_by_callback) {
-        std::string trailing = stream_filter->finalize();
+    if (on_token && word_trigger_filter && !tool_stream_suppressed && !stopped_by_callback) {
+        std::string trailing = word_trigger_filter->finalize();
         if (!trailing.empty()) {
             auto action = invoke_token_callback(*on_token, trailing);
             if (!action) {
@@ -235,6 +236,25 @@ Expected<Response> Model::generate(const std::string& user_message,
         return std::unexpected(prompt_result.error());
     }
 
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        if (tool_grammar_str_.empty()) {
+            sampler_ = create_sampler_chain();
+            if (!sampler_) {
+                rollback_last_message();
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
+            }
+        } else if (!rebuild_sampler_with_tool_grammar()) {
+            rollback_last_message();
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
+        }
+    } else if (grammar_mode_ == GrammarMode::Schema && !rebuild_sampler_with_schema_grammar()) {
+        rollback_last_message();
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
+    }
+
     auto tokens_result = tokenize(*prompt_result);
     if (!tokens_result) {
         rollback_last_message();
@@ -243,8 +263,16 @@ Expected<Response> Model::generate(const std::string& user_message,
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
+    // Merge config stop sequences with tool-calling additional stops.
+    auto all_stops = config_.stop_sequences;
+    if (tool_state_) {
+        for (const auto& s : tool_state_->additional_stops) {
+            all_stops.push_back(s);
+        }
+    }
+
     auto generate_result =
-        run_inference(*tokens_result, config_.max_tokens, config_.stop_sequences,
+        run_inference(*tokens_result, config_.max_tokens, all_stops,
                       std::optional<TokenCallback>(wrapped_callback), should_cancel);
 
     if (!generate_result) {
@@ -253,15 +281,29 @@ Expected<Response> Model::generate(const std::string& user_message,
     }
 
     std::string generated_text = std::move(*generate_result);
-    messages_.push_back(Message::assistant(generated_text));
-    estimated_tokens_ += estimate_tokens(generated_text) + kTemplateOverheadPerMessage;
+
+    // When native tool calling is active, parse the output to extract
+    // structured tool calls for proper history round-tripping.
+    if (grammar_mode_ == GrammarMode::NativeToolCall && tool_state_) {
+        auto parsed = parse_tool_response(generated_text);
+        if (!parsed.tool_calls.empty()) {
+            messages_.push_back(Message::assistant_with_tool_calls(std::move(parsed.content),
+                                                                   std::move(parsed.tool_calls)));
+        } else {
+            messages_.push_back(Message::assistant(std::move(parsed.content)));
+        }
+    } else {
+        messages_.push_back(Message::assistant(std::move(generated_text)));
+    }
+
+    estimated_tokens_ += estimate_message_tokens(messages_.back());
     note_history_append();
     finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
 
     Response response;
-    response.text = std::move(generated_text);
+    response.text = messages_.back().content;
     response.usage.prompt_tokens = prompt_tokens;
     response.usage.completion_tokens = completion_tokens;
     response.usage.total_tokens = prompt_tokens + completion_tokens;
@@ -286,15 +328,25 @@ Expected<Response> Model::generate(const std::string& user_message,
 Expected<Model::GenerationResult>
 Model::generate_from_history(std::optional<TokenCallback> on_token,
                              CancellationCallback should_cancel) {
-    if (grammar_mode_ == GrammarMode::ToolCall) {
-        rebuild_sampler_with_grammar();
-    } else if (grammar_mode_ == GrammarMode::Schema) {
-        rebuild_sampler_with_schema_grammar();
-    }
-
     auto prompt_result = render_prompt_delta();
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
+    }
+
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        if (tool_grammar_str_.empty()) {
+            sampler_ = create_sampler_chain();
+            if (!sampler_) {
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
+            }
+        } else if (!rebuild_sampler_with_tool_grammar()) {
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
+        }
+    } else if (grammar_mode_ == GrammarMode::Schema && !rebuild_sampler_with_schema_grammar()) {
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
     }
 
     auto tokens_result = tokenize(*prompt_result);
@@ -304,17 +356,35 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
-    auto text_result = run_inference(*tokens_result, config_.max_tokens, config_.stop_sequences,
-                                     on_token, should_cancel);
+    // Merge config stop sequences with tool-calling additional stops.
+    auto all_stops = config_.stop_sequences;
+    if (tool_state_) {
+        for (const auto& s : tool_state_->additional_stops) {
+            all_stops.push_back(s);
+        }
+    }
+
+    auto text_result =
+        run_inference(*tokens_result, config_.max_tokens, all_stops, on_token, should_cancel);
 
     if (!text_result) {
         return std::unexpected(text_result.error());
     }
 
-    const bool tool_detected = (grammar_mode_ == GrammarMode::ToolCall) &&
-                               (text_result->find("<tool_call>") != std::string::npos);
+    // Tool call detection: if tool calling is active, parse the output and
+    // return the structured result so callers avoid a redundant re-parse.
+    bool tool_detected = false;
+    std::string parsed_content;
+    std::vector<ToolCallInfo> parsed_tool_calls;
+    if (grammar_mode_ == GrammarMode::NativeToolCall) {
+        auto parsed = parse_tool_response(*text_result);
+        tool_detected = !parsed.tool_calls.empty();
+        parsed_content = std::move(parsed.content);
+        parsed_tool_calls = std::move(parsed.tool_calls);
+    }
 
-    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected};
+    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected,
+                            std::move(parsed_content), std::move(parsed_tool_calls)};
 }
 
 } // namespace zoo::core

@@ -5,6 +5,7 @@
 
 #include "zoo/internal/agent/runtime.hpp"
 
+#include "zoo/core/model.hpp"
 #include "zoo/internal/agent/runtime_helpers.hpp"
 #include "zoo/internal/log.hpp"
 #include "zoo/internal/tools/grammar.hpp"
@@ -50,23 +51,25 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
         }
     }
 
-    // Set schema grammar, restore previous grammar on exit
-    const bool had_tool_grammar = tool_grammar_active_.load(std::memory_order_acquire);
+    // Set schema grammar, restore previous tool calling state on exit
+    const bool had_tool_calling = tool_grammar_active_.load(std::memory_order_acquire);
 
     if (!backend_->set_schema_grammar(grammar_str)) {
         return std::unexpected(
             Error{ErrorCode::ExtractionFailed, "Failed to initialize schema grammar"});
     }
 
-    ScopeExit grammar_guard([this, had_tool_grammar] {
+    ScopeExit grammar_guard([this, had_tool_calling] {
         backend_->clear_tool_grammar();
-        if (had_tool_grammar) {
+        if (had_tool_calling) {
+            // Restore native tool calling by re-sending tool metadata.
             auto metadata = tool_registry_.get_all_tool_metadata();
-            auto tool_grammar = tools::GrammarBuilder::build(metadata);
-            bool restored = false;
-            if (!tool_grammar.empty()) {
-                restored = backend_->set_tool_grammar(tool_grammar);
+            std::vector<CoreToolInfo> tools;
+            tools.reserve(metadata.size());
+            for (const auto& tm : metadata) {
+                tools.push_back(CoreToolInfo{tm.name, tm.description, tm.parameters_schema.dump()});
             }
+            bool restored = backend_->set_tool_calling(tools);
             tool_grammar_active_.store(restored, std::memory_order_release);
         }
     });

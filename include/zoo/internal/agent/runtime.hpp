@@ -58,7 +58,6 @@ class AgentRuntime {
 
     Expected<void> register_tool(tools::ToolDefinition definition);
     size_t tool_count() const noexcept;
-    std::string build_tool_system_prompt(const std::string& base_prompt) const;
 
   private:
     void inference_loop();
@@ -69,7 +68,7 @@ class AgentRuntime {
 
     void fail_pending(const Error& error);
     static void resolve_command_on_shutdown(Command& cmd);
-    void update_tool_grammar();
+    void update_tool_calling();
 
     Config config_;
     std::unique_ptr<AgentBackend> backend_;

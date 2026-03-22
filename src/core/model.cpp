@@ -5,8 +5,13 @@
 
 #include "zoo/core/model.hpp"
 
+#include <chat.h>
+#include <common.h>
 #include <llama.h>
 #include <mutex>
+
+// ToolCallingState must be complete before ~Model() = default is instantiated.
+#include "zoo/core/model_tool_calling_state.hpp"
 
 namespace zoo::core {
 
@@ -36,6 +41,12 @@ void Model::LlamaContextDeleter::operator()(llama_context* context) const noexce
 void Model::LlamaSamplerDeleter::operator()(llama_sampler* sampler) const noexcept {
     if (sampler) {
         llama_sampler_free(sampler);
+    }
+}
+
+void Model::ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const noexcept {
+    if (tmpls) {
+        common_chat_templates_free(tmpls);
     }
 }
 

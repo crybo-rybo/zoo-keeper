@@ -28,7 +28,7 @@ using zoo::TokenCallback;
 using zoo::internal::agent::AgentBackend;
 using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
-
+using zoo::internal::agent::ParsedToolResponse;
 class FakeBackend final : public AgentBackend {
   public:
     using GenerationAction = std::function<Expected<GenerationResult>(std::optional<TokenCallback>,
@@ -39,19 +39,9 @@ class FakeBackend final : public AgentBackend {
         generations_.push_back(std::move(action));
     }
 
-    void set_tool_grammar_supported(bool supported) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        tool_grammar_supported_ = supported;
-    }
-
     std::vector<std::string> operations() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return operations_;
-    }
-
-    std::string last_tool_grammar() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return last_tool_grammar_;
     }
 
     Expected<void> add_message(const Message& message) override {
@@ -106,11 +96,45 @@ class FakeBackend final : public AgentBackend {
         operations_.push_back("clear_history");
     }
 
-    bool set_tool_grammar(const std::string& grammar_str) override {
+    bool set_tool_calling(const std::vector<zoo::CoreToolInfo>& tools) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        last_tool_grammar_ = grammar_str;
-        operations_.push_back("set_tool_grammar");
-        return tool_grammar_supported_;
+        tool_calling_supported_ = !tools.empty();
+        operations_.push_back("set_tool_calling");
+        return tool_calling_supported_;
+    }
+
+    ParsedToolResponse parse_tool_response(const std::string& text) const override {
+        ParsedToolResponse result;
+
+        const std::string open_tag = "<tool_call>";
+        const std::string close_tag = "</tool_call>";
+        auto start = text.find(open_tag);
+        auto end = text.find(close_tag);
+        if (start != std::string::npos && end != std::string::npos) {
+            auto json_str = text.substr(start + open_tag.size(), end - start - open_tag.size());
+            auto j = nlohmann::json::parse(json_str, nullptr, false);
+            if (!j.is_discarded()) {
+                zoo::ToolCallInfo tc;
+                tc.id = j.value("id", "");
+                tc.name = j.value("name", "");
+                if (j.contains("arguments")) {
+                    tc.arguments_json = j["arguments"].dump();
+                }
+                result.tool_calls.push_back(std::move(tc));
+            }
+            // Content is everything outside the tool call tags
+            result.content = text.substr(0, start);
+            if (end + close_tag.size() < text.size()) {
+                result.content += text.substr(end + close_tag.size());
+            }
+        } else {
+            result.content = text;
+        }
+        return result;
+    }
+
+    const char* tool_calling_format_name() const noexcept override {
+        return "fake";
     }
 
     bool set_schema_grammar(const std::string& grammar_str) override {
@@ -122,7 +146,6 @@ class FakeBackend final : public AgentBackend {
 
     void clear_tool_grammar() override {
         std::lock_guard<std::mutex> lock(mutex_);
-        last_tool_grammar_.clear();
         operations_.push_back("clear_tool_grammar");
     }
 
@@ -137,8 +160,7 @@ class FakeBackend final : public AgentBackend {
     mutable std::vector<std::string> operations_;
     std::deque<GenerationAction> generations_;
     std::vector<Message> history_;
-    std::string last_tool_grammar_;
-    bool tool_grammar_supported_ = true;
+    bool tool_calling_supported_ = true;
 };
 
 Config make_config() {
@@ -326,7 +348,11 @@ TEST(AgentRuntimeTest, ToolValidationRetryExhaustionReturnsToolRetriesExhausted)
 
     register_single_int_tool(runtime, "double_value", "Doubles a number",
                              [](int value) { return value * 2; });
-    EXPECT_FALSE(backend_ptr->last_tool_grammar().empty());
+    // Verify that tool calling was configured after registration
+    {
+        const auto ops = backend_ptr->operations();
+        EXPECT_NE(std::find(ops.begin(), ops.end(), "set_tool_calling"), ops.end());
+    }
 
     backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
         return Expected<GenerationResult>(
@@ -400,6 +426,31 @@ TEST(AgentRuntimeTest, SuccessfulToolCallPopulatesToolInvocations) {
     ASSERT_TRUE(inv.result_json.has_value());
     EXPECT_EQ(*inv.result_json, "{\"result\":10}");
     EXPECT_FALSE(inv.error.has_value());
+}
+
+TEST(AgentRuntimeTest, ToolEnabledFencedCodeReplyCompletesWithoutSpuriousToolCalls) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_config(), std::move(backend));
+
+    register_single_int_tool(runtime, "double_value", "Doubles a number",
+                             [](int value) { return value * 2; });
+
+    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            GenerationResult{"```python\nprint(\"hello world\")\n```", 6, false});
+    });
+
+    auto handle = runtime.chat(Message::user("Write a fenced Python hello world example."));
+    auto result = handle.future.get();
+
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "```python\nprint(\"hello world\")\n```");
+    EXPECT_TRUE(result->tool_invocations.empty());
+
+    const auto ops = backend_ptr->operations();
+    EXPECT_LT(index_of(ops, "set_tool_calling"), index_of(ops, "generate"));
+    EXPECT_LT(index_of(ops, "generate"), index_of(ops, "finalize"));
 }
 
 TEST(AgentRuntimeTest, ValidationFailureThenSuccessPopulatesToolInvocations) {
@@ -675,34 +726,6 @@ TEST(AgentRuntimeTest, CompleteRejectsEmptyMessageHistory) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::InvalidMessageSequence);
-}
-
-TEST(AgentRuntimeTest, BuildToolSystemPromptUsesPublishedGrammarSnapshot) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
-
-    backend_ptr->set_tool_grammar_supported(true);
-    register_single_int_tool(runtime, "adder", "Adds a number",
-                             [](int value) { return value + 1; });
-
-    std::string prompt = runtime.build_tool_system_prompt("base");
-    EXPECT_NE(prompt.find("<tool_call>"), std::string::npos);
-    EXPECT_EQ(prompt.find("respond with a JSON object"), std::string::npos);
-}
-
-TEST(AgentRuntimeTest, BuildToolSystemPromptFallsBackToJsonWhenGrammarRefreshFails) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
-
-    backend_ptr->set_tool_grammar_supported(false);
-    register_single_int_tool(runtime, "adder", "Adds a number",
-                             [](int value) { return value + 1; });
-
-    std::string prompt = runtime.build_tool_system_prompt("base");
-    EXPECT_NE(prompt.find("respond with a JSON object"), std::string::npos);
-    EXPECT_EQ(prompt.find("<tool_call>"), std::string::npos);
 }
 
 } // namespace

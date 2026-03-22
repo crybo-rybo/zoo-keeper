@@ -7,8 +7,6 @@
 
 #include "zoo/internal/agent/runtime_helpers.hpp"
 #include "zoo/internal/log.hpp"
-#include "zoo/internal/tools/interceptor.hpp"
-#include "zoo/tools/parser.hpp"
 #include "zoo/tools/validation.hpp"
 #include <chrono>
 #include <unordered_map>
@@ -56,10 +54,11 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
     int iteration = 0;
     const int max_tool_iterations = config_.max_tool_iterations;
     const bool has_tools = tool_registry_.size() > 0;
-    const bool use_grammar_path = has_tools && tool_grammar_active_.load(std::memory_order_acquire);
+    const bool use_native_tool_calling =
+        has_tools && tool_grammar_active_.load(std::memory_order_acquire);
 
-    ZOO_LOG("debug", "processing request %lu (tools=%d, grammar=%d)",
-            static_cast<unsigned long>(request.id), has_tools, use_grammar_path);
+    ZOO_LOG("debug", "processing request %lu (tools=%d, native_tc=%d)",
+            static_cast<unsigned long>(request.id), has_tools, use_native_tool_calling);
 
     while (iteration < max_tool_iterations) {
         ++iteration;
@@ -84,22 +83,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
         };
 
         std::optional<TokenCallback> callback;
-        std::optional<tools::ToolCallInterceptor> interceptor;
 
-        if (use_grammar_path) {
-            if (request.streaming_callback) {
-                callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
-                    (*request.streaming_callback)(token);
-                    return TokenAction::Continue;
-                });
-            } else {
-                callback = make_metrics_callback(
-                    [](std::string_view) -> TokenAction { return TokenAction::Continue; });
-            }
-        } else if (has_tools) {
-            interceptor.emplace(request.streaming_callback);
-            callback = make_metrics_callback(interceptor->make_callback());
-        } else if (request.streaming_callback) {
+        if (request.streaming_callback) {
             callback = make_metrics_callback([&](std::string_view token) -> TokenAction {
                 (*request.streaming_callback)(token);
                 return TokenAction::Continue;
@@ -121,23 +106,48 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
 
         std::optional<tools::ToolCall> detected_tool_call;
         std::string response_text;
+        std::vector<ToolCallInfo> structured_tool_calls;
 
-        if (use_grammar_path && generated->tool_call_detected) {
-            auto sentinel_result = tools::ToolCallParser::parse_sentinel(generated->text);
-            detected_tool_call = std::move(sentinel_result.tool_call);
-            response_text = std::move(sentinel_result.text_before);
-        } else if (interceptor) {
-            auto intercept_result = interceptor->finalize();
-            detected_tool_call = std::move(intercept_result.tool_call);
-            response_text = std::move(intercept_result.full_text);
+        if (use_native_tool_calling && generated->tool_call_detected) {
+            // Prefer the pre-parsed result from generate_from_history() to
+            // avoid a redundant parse. Fall back to parse_tool_response()
+            // when pre-parsed data is absent (e.g. test fakes).
+            if (!generated->tool_calls.empty()) {
+                response_text = std::move(generated->parsed_content);
+                structured_tool_calls = std::move(generated->tool_calls);
+            } else {
+                auto parsed = backend_->parse_tool_response(generated->text);
+                response_text = std::move(parsed.content);
+                structured_tool_calls = std::move(parsed.tool_calls);
+            }
+
+            if (!structured_tool_calls.empty()) {
+                const auto& first_tc = structured_tool_calls.front();
+                tools::ToolCall tc;
+                tc.id = first_tc.id;
+                tc.name = first_tc.name;
+                try {
+                    tc.arguments = nlohmann::json::parse(first_tc.arguments_json);
+                } catch (const nlohmann::json::exception&) {
+                    tc.arguments = nlohmann::json::object();
+                }
+                detected_tool_call = std::move(tc);
+            }
         } else {
             response_text = std::move(generated->text);
         }
 
         if (detected_tool_call.has_value()) {
             const auto& tool_call = *detected_tool_call;
-            backend_->add_message(
-                Message::assistant(use_grammar_path ? generated->text : response_text));
+
+            // Store assistant message with structured tool calls for proper
+            // template rendering in subsequent turns.
+            if (!structured_tool_calls.empty()) {
+                backend_->add_message(
+                    Message::assistant_with_tool_calls(response_text, structured_tool_calls));
+            } else {
+                backend_->add_message(Message::assistant(response_text));
+            }
             backend_->finalize_response();
 
             std::string args_json = tool_call.arguments.dump();
@@ -168,8 +178,8 @@ Expected<Response> AgentRuntime::process_request(const Request& request) {
                 continue;
             }
 
-            ZOO_LOG("info", "invoking tool '%s' (iteration %d, grammar=%d)", tool_call.name.c_str(),
-                    iteration, use_grammar_path);
+            ZOO_LOG("info", "invoking tool '%s' (iteration %d, native_tc=%d)",
+                    tool_call.name.c_str(), iteration, use_native_tool_calling);
             auto invoke_result = tool_registry_.invoke(tool_call.name, tool_call.arguments);
             std::string tool_result_str;
             std::optional<std::string> result_json;

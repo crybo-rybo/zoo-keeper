@@ -65,8 +65,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    agent->set_system_prompt(agent->build_tool_system_prompt(
-        "You are a retrieval assistant. Use tools when they are relevant."));
+    agent->set_system_prompt("You are a retrieval assistant. Use tools when they are relevant.");
 
     auto handle = agent->chat(zoo::Message::user(
         "Search the docs for llama.cpp. Use a limit of 5 results and keep the answer brief."));

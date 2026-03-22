@@ -19,8 +19,12 @@ find_dependency(nlohmann_json 3.11 CONFIG)
 
 if(NOT TARGET ZooKeeper::llama AND TARGET llama)
     add_library(ZooKeeper::llama INTERFACE IMPORTED)
+    # llama.cpp's common library is installed alongside zoo but is not part of
+    # the llama CMake export set.  Reference it by path so consumers pick it up.
     set_property(TARGET ZooKeeper::llama PROPERTY
-        INTERFACE_LINK_LIBRARIES llama
+        INTERFACE_LINK_LIBRARIES
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libcommon.a"
+            llama
     )
 endif()
 

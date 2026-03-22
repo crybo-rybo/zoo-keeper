@@ -5,10 +5,12 @@
 
 #include "zoo/core/model.hpp"
 
+#include <chat.h>
 #include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <llama.h>
+#include <log.h>
 
 namespace zoo::core {
 
@@ -22,6 +24,7 @@ Expected<void> Model::initialize() {
             }
         },
         nullptr);
+    common_log_pause(common_log_main());
 
     auto model_params = llama_model_default_params();
     model_params.n_gpu_layers = config_.n_gpu_layers;
@@ -66,20 +69,22 @@ Expected<void> Model::initialize() {
             Error{ErrorCode::BackendInitFailed, "Failed to create sampler chain"});
     }
 
-    const char* tmpl = llama_model_chat_template(llama_model.get(), nullptr);
-    prompt_state_ = {};
-
-    if (!tmpl) {
+    // Initialize the Jinja2 chat template system from model metadata.
+    auto chat_tmpls =
+        ChatTemplatesHandle(common_chat_templates_init(llama_model.get(), "").release());
+    if (!chat_tmpls || !common_chat_templates_source(chat_tmpls.get())) {
         return std::unexpected(
             Error{ErrorCode::TemplateRenderFailed, "Model has no chat template"});
     }
+
+    prompt_state_ = {};
 
     llama_model_ = std::move(llama_model);
     ctx_ = std::move(ctx);
     sampler_ = std::move(sampler);
     context_size_ = context_size;
     vocab_ = vocab;
-    tmpl_ = tmpl;
+    chat_templates_ = std::move(chat_tmpls);
 
     return {};
 }
