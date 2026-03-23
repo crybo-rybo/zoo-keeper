@@ -144,7 +144,7 @@ jobs:
           submodules: recursive
 
       - name: Build with sanitizers
-        run: scripts/build-all.sh -DZOO_ENABLE_SANITIZERS=ON
+        run: scripts/rebuild.sh -DZOO_ENABLE_SANITIZERS=ON
 
       - name: Run tests under sanitizers
         run: scripts/test.sh
@@ -164,7 +164,7 @@ jobs:
           sudo apt-get install -y lcov
 
       - name: Build with coverage
-        run: scripts/build-all.sh -DZOO_ENABLE_COVERAGE=ON
+        run: scripts/rebuild.sh -DZOO_ENABLE_COVERAGE=ON
 
       - name: Run tests
         run: scripts/test.sh
