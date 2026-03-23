@@ -32,10 +32,9 @@ target_include_directories(zoo_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/common
-        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/ggml/include
-        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/include
 )
+
+zoo_mark_llama_includes_as_system(zoo_tests)
 
 gtest_discover_tests(zoo_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -44,6 +43,7 @@ gtest_discover_tests(zoo_tests
 )
 
 zoo_set_warnings(zoo_tests PRIVATE)
+zoo_enable_warnings_as_errors(zoo_tests)
 zoo_enable_coverage(zoo_tests)
 zoo_enable_sanitizers(zoo_tests)
 

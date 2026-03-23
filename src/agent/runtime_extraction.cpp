@@ -15,11 +15,12 @@
 
 namespace zoo::internal::agent {
 
-Expected<Response> AgentRuntime::process_extraction_request(const Request& request) {
+Expected<ExtractionResponse>
+AgentRuntime::process_extraction_request(const ActiveRequest& request) {
     auto start_time = std::chrono::steady_clock::now();
 
     // Normalize schema and build GBNF grammar
-    auto params = tools::detail::normalize_schema(*request.extraction_schema);
+    auto params = tools::detail::normalize_schema(request.extraction_schema->value());
     if (!params) {
         return std::unexpected(Error{ErrorCode::InvalidOutputSchema, params.error().message});
     }
@@ -27,28 +28,27 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
     std::string grammar_str = tools::GrammarBuilder::build_schema(*params);
 
     // Save/restore history for stateless (Replace) mode
-    std::optional<std::vector<Message>> original_history;
+    std::optional<HistorySnapshot> original_history;
     std::optional<ScopeExit> restore_history_guard;
+    std::optional<ScopeExit> trim_history_guard;
 
     if (request.history_mode == HistoryMode::Replace) {
-        original_history = backend_->get_history();
+        original_history = swap_history(*backend_, *request.messages);
         restore_history_guard.emplace(
-            [this, &original_history] { restore_history(*backend_, *original_history); });
-
-        if (auto load_result = load_history(*backend_, request.messages); !load_result) {
-            return std::unexpected(load_result.error());
-        }
+            [this, &original_history] { backend_->swap_history(std::move(*original_history)); });
     } else {
-        if (request.messages.size() != 1u) {
+        if (request.messages->size() != 1u) {
             return std::unexpected(
                 Error{ErrorCode::InvalidMessageSequence,
                       "Stateful extraction requests must include exactly one message"});
         }
 
-        auto add_result = backend_->add_message(request.messages.front());
+        auto add_result = backend_->add_message(request.messages->front().view());
         if (!add_result) {
             return std::unexpected(add_result.error());
         }
+
+        trim_history_guard.emplace([this] { enforce_history_limit(); });
     }
 
     // Set schema grammar, restore previous tool calling state on exit
@@ -79,31 +79,23 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
     bool first_token_received = false;
     int completion_tokens = 0;
 
-    std::optional<TokenCallback> callback;
-    if (request.streaming_callback) {
-        callback = [&](std::string_view token) -> TokenAction {
-            if (!first_token_received) {
-                first_token_time = std::chrono::steady_clock::now();
-                first_token_received = true;
-            }
-            ++completion_tokens;
+    auto callback = [&](std::string_view token) -> TokenAction {
+        if (!first_token_received) {
+            first_token_time = std::chrono::steady_clock::now();
+            first_token_received = true;
+        }
+        ++completion_tokens;
+        if (request.streaming_callback && *request.streaming_callback) {
             (*request.streaming_callback)(token);
-            return TokenAction::Continue;
-        };
-    } else {
-        callback = [&](std::string_view) -> TokenAction {
-            if (!first_token_received) {
-                first_token_time = std::chrono::steady_clock::now();
-                first_token_received = true;
-            }
-            ++completion_tokens;
-            return TokenAction::Continue;
-        };
-    }
+        }
+        return TokenAction::Continue;
+    };
 
-    auto generated = backend_->generate_from_history(std::move(callback), [&request]() {
+    auto cancellation_check = [&request]() {
         return request.cancelled && request.cancelled->load(std::memory_order_acquire);
-    });
+    };
+    auto generated = backend_->generate_from_history(*request.options, TokenCallback(callback),
+                                                     cancellation_check);
     if (!generated) {
         return std::unexpected(generated.error());
     }
@@ -125,14 +117,14 @@ Expected<Response> AgentRuntime::process_extraction_request(const Request& reque
     }
 
     // Commit the assistant response to history
-    backend_->add_message(Message::assistant(generated->text));
+    backend_->add_message(Message::assistant(generated->text).view());
     backend_->finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
 
-    Response response;
+    ExtractionResponse response;
     response.text = std::move(generated->text);
-    response.extracted_data = std::move(extracted);
+    response.data = std::move(extracted);
     response.usage.prompt_tokens = generated->prompt_tokens;
     response.usage.completion_tokens = completion_tokens;
     response.usage.total_tokens = generated->prompt_tokens + completion_tokens;

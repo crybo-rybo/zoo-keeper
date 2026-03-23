@@ -13,53 +13,89 @@ namespace zoo {
 namespace runtime = internal::agent;
 
 struct Agent::Impl {
-    explicit Impl(const Config& cfg, std::unique_ptr<runtime::AgentBackend> owned_backend)
-        : runtime(cfg, std::move(owned_backend)) {}
+    Impl(ModelConfig model_config, AgentConfig agent_config, GenerationOptions default_generation,
+         std::unique_ptr<runtime::AgentBackend> owned_backend)
+        : runtime(std::move(model_config), agent_config, std::move(default_generation),
+                  std::move(owned_backend)) {}
 
     runtime::AgentRuntime runtime;
 };
 
-Expected<std::unique_ptr<Agent>> Agent::create(const Config& config) {
-    auto model_result = core::Model::load(config);
+Expected<std::unique_ptr<Agent>> Agent::create(const ModelConfig& model_config,
+                                               const AgentConfig& agent_config,
+                                               const GenerationOptions& default_generation) {
+    if (auto result = model_config.validate(); !result) {
+        return std::unexpected(result.error());
+    }
+    if (auto result = agent_config.validate(); !result) {
+        return std::unexpected(result.error());
+    }
+    if (auto result = default_generation.validate(); !result) {
+        return std::unexpected(result.error());
+    }
+
+    auto model_result = core::Model::load(model_config, default_generation);
     if (!model_result) {
         return std::unexpected(model_result.error());
     }
 
     auto backend = runtime::make_model_backend(std::move(*model_result));
-    auto agent_impl = std::make_unique<Impl>(config, std::move(backend));
-    return std::unique_ptr<Agent>(new Agent(config, std::move(agent_impl)));
+    auto agent_impl =
+        std::make_unique<Impl>(model_config, agent_config, default_generation, std::move(backend));
+    return std::unique_ptr<Agent>(
+        new Agent(model_config, agent_config, default_generation, std::move(agent_impl)));
 }
 
-Agent::Agent(Config config, std::unique_ptr<Impl> impl)
-    : config_(std::move(config)), impl_(std::move(impl)) {}
+Agent::Agent(ModelConfig model_config, AgentConfig agent_config,
+             GenerationOptions default_generation, std::unique_ptr<Impl> impl)
+    : model_config_(std::move(model_config)), agent_config_(agent_config),
+      default_generation_options_(std::move(default_generation)), impl_(std::move(impl)) {}
 
 Agent::~Agent() = default;
 
-RequestHandle Agent::chat(Message message,
-                          std::optional<std::function<void(std::string_view)>> callback) {
-    return impl_->runtime.chat(std::move(message), std::move(callback));
+RequestHandle<TextResponse> Agent::chat(std::string_view user_message,
+                                        const GenerationOptions& options,
+                                        AsyncTextCallback callback) {
+    return impl_->runtime.chat(user_message, options, std::move(callback));
 }
 
-RequestHandle Agent::complete(std::vector<Message> messages,
-                              std::optional<std::function<void(std::string_view)>> callback) {
-    return impl_->runtime.complete(std::move(messages), std::move(callback));
+RequestHandle<TextResponse> Agent::chat(MessageView message, const GenerationOptions& options,
+                                        AsyncTextCallback callback) {
+    return impl_->runtime.chat(message, options, std::move(callback));
 }
 
-RequestHandle Agent::extract(const nlohmann::json& output_schema, Message message,
-                             std::optional<std::function<void(std::string_view)>> callback) {
-    return impl_->runtime.extract(output_schema, std::move(message), std::move(callback));
+RequestHandle<TextResponse> Agent::complete(ConversationView messages,
+                                            const GenerationOptions& options,
+                                            AsyncTextCallback callback) {
+    return impl_->runtime.complete(messages, options, std::move(callback));
 }
 
-RequestHandle Agent::extract(const nlohmann::json& output_schema, std::vector<Message> messages,
-                             std::optional<std::function<void(std::string_view)>> callback) {
-    return impl_->runtime.extract(output_schema, std::move(messages), std::move(callback));
+RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
+                                                 std::string_view user_message,
+                                                 const GenerationOptions& options,
+                                                 AsyncTextCallback callback) {
+    return impl_->runtime.extract(output_schema, user_message, options, std::move(callback));
+}
+
+RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
+                                                 MessageView message,
+                                                 const GenerationOptions& options,
+                                                 AsyncTextCallback callback) {
+    return impl_->runtime.extract(output_schema, message, options, std::move(callback));
+}
+
+RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
+                                                 ConversationView messages,
+                                                 const GenerationOptions& options,
+                                                 AsyncTextCallback callback) {
+    return impl_->runtime.extract(output_schema, messages, options, std::move(callback));
 }
 
 void Agent::cancel(RequestId id) {
     impl_->runtime.cancel(id);
 }
 
-void Agent::set_system_prompt(const std::string& prompt) {
+void Agent::set_system_prompt(std::string_view prompt) {
     impl_->runtime.set_system_prompt(prompt);
 }
 
@@ -71,7 +107,7 @@ bool Agent::is_running() const noexcept {
     return impl_->runtime.is_running();
 }
 
-std::vector<Message> Agent::get_history() const {
+HistorySnapshot Agent::get_history() const {
     return impl_->runtime.get_history();
 }
 

@@ -8,7 +8,6 @@
 #include "command.hpp"
 #include "request.hpp"
 #include <condition_variable>
-#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -17,7 +16,7 @@
 namespace zoo::internal::agent {
 
 /// A single item popped from the mailbox: either a queued request or a control command.
-using WorkItem = std::variant<Request, Command>;
+using WorkItem = std::variant<QueuedRequest, Command>;
 
 /**
  * @brief Thread-safe dual-lane mailbox for the agent runtime.
@@ -29,20 +28,18 @@ using WorkItem = std::variant<Request, Command>;
  */
 class RuntimeMailbox {
   public:
-    explicit RuntimeMailbox(size_t request_capacity = 0)
-        : request_capacity_(request_capacity), shutdown_(false) {}
+    explicit RuntimeMailbox(size_t request_capacity = 0) : shutdown_(false) {
+        (void)request_capacity;
+    }
 
     /**
      * @brief Enqueues one request when capacity and shutdown state permit it.
      *
      * @return `true` when the request was accepted.
      */
-    bool push_request(Request request) {
+    bool push_request(QueuedRequest request) {
         std::unique_lock<std::mutex> lock(mutex_);
         if (shutdown_) {
-            return false;
-        }
-        if (request_capacity_ > 0 && requests_.size() >= request_capacity_) {
             return false;
         }
 
@@ -87,7 +84,7 @@ class RuntimeMailbox {
         }
 
         if (!requests_.empty()) {
-            Request req = std::move(requests_.front());
+            QueuedRequest req = std::move(requests_.front());
             requests_.pop();
             return req;
         }
@@ -115,11 +112,10 @@ class RuntimeMailbox {
     }
 
   private:
-    std::queue<Request> requests_;
+    std::queue<QueuedRequest> requests_;
     std::queue<Command> commands_;
     mutable std::mutex mutex_;
     std::condition_variable cv_;
-    size_t request_capacity_;
     bool shutdown_;
 };
 

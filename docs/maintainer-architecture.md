@@ -42,7 +42,7 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 | `internal/agent/backend.*` | Runtime-to-model seam |
 | `internal/agent/backend_model.*` | Production adapter around `zoo::core::Model` |
 | `internal/agent/mailbox.hpp` | Request and command queueing |
-| `internal/agent/request_tracker.hpp` | Request ids, futures, cancellation flags, cleanup |
+| `internal/agent/request_slots.hpp` | Slot-backed request state, cancellation, await/release |
 | `internal/agent/command.hpp` | Typed control operations applied on the inference thread |
 
 Keep responsibilities narrow. If a change affects queueing, cancellation, command routing, and request execution at once, it usually belongs in a smaller extracted unit instead.

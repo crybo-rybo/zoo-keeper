@@ -48,7 +48,7 @@ jobs:
           echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON
 
       - name: Run clang-tidy
         run: |
@@ -94,10 +94,10 @@ jobs:
           echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Build
-        run: scripts/build -DZOO_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra }}
+        run: scripts/build-all.sh ${{ matrix.cmake_extra }}
 
       - name: Run tests
-        run: scripts/test
+        run: scripts/test.sh
 
   package-consumer-smoke:
     runs-on: ubuntu-latest
@@ -144,10 +144,10 @@ jobs:
           submodules: recursive
 
       - name: Build with sanitizers
-        run: scripts/build -DZOO_ENABLE_SANITIZERS=ON
+        run: scripts/rebuild.sh -DZOO_ENABLE_SANITIZERS=ON
 
       - name: Run tests under sanitizers
-        run: scripts/test
+        run: scripts/test.sh
 
   coverage:
     runs-on: ubuntu-latest
@@ -164,10 +164,10 @@ jobs:
           sudo apt-get install -y lcov
 
       - name: Build with coverage
-        run: scripts/build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_INTEGRATION_TESTS=ON
+        run: scripts/rebuild.sh -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
 
       - name: Run tests
-        run: scripts/test
+        run: scripts/test.sh
 
       - name: Capture coverage
         run: |

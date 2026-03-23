@@ -15,16 +15,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    zoo::Config config;
-    config.model_path = argv[1];
-    config.context_size = 4096;
-    config.max_tokens = 256;
-    config.n_gpu_layers = 0;
-    config.sampling.temperature = 0.0f;
-    config.sampling.top_p = 1.0f;
-    config.sampling.top_k = 1;
+    zoo::ModelConfig model_config;
+    model_config.model_path = argv[1];
+    model_config.context_size = 4096;
+    model_config.n_gpu_layers = 0;
 
-    auto agent_result = zoo::Agent::create(config);
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 256;
+    generation.record_tool_trace = true;
+    generation.sampling.temperature = 0.0f;
+    generation.sampling.top_p = 1.0f;
+    generation.sampling.top_k = 1;
+
+    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
     if (!agent_result) {
         std::cerr << agent_result.error().to_string() << '\n';
         return 1;
@@ -67,25 +70,27 @@ int main(int argc, char** argv) {
 
     agent->set_system_prompt("You are a retrieval assistant. Use tools when they are relevant.");
 
-    auto handle = agent->chat(zoo::Message::user(
-        "Search the docs for llama.cpp. Use a limit of 5 results and keep the answer brief."));
-    auto response = handle.future.get();
+    auto handle = agent->chat(
+        "Search the docs for llama.cpp. Use a limit of 5 results and keep the answer brief.");
+    auto response = handle.await_result();
     if (!response) {
         std::cerr << response.error().to_string() << '\n';
         return 1;
     }
 
     std::cout << response->text << "\n\n";
-    for (const auto& invocation : response->tool_invocations) {
-        std::cout << invocation.name << " [" << zoo::to_string(invocation.status) << "]\n";
-        std::cout << "args: " << invocation.arguments_json << '\n';
-        if (invocation.result_json) {
-            std::cout << "result: " << *invocation.result_json << '\n';
+    if (response->tool_trace) {
+        for (const auto& invocation : response->tool_trace->invocations) {
+            std::cout << invocation.name << " [" << zoo::to_string(invocation.status) << "]\n";
+            std::cout << "args: " << invocation.arguments_json << '\n';
+            if (invocation.result_json) {
+                std::cout << "result: " << *invocation.result_json << '\n';
+            }
+            if (invocation.error) {
+                std::cout << "error: " << invocation.error->to_string() << '\n';
+            }
+            std::cout << '\n';
         }
-        if (invocation.error) {
-            std::cout << "error: " << invocation.error->to_string() << '\n';
-        }
-        std::cout << '\n';
     }
 
     return 0;

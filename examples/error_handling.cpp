@@ -35,20 +35,22 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    zoo::Config config;
-    config.model_path = argv[1];
-    config.max_tokens = 64;
-    config.n_gpu_layers = 0;
+    zoo::ModelConfig model_config;
+    model_config.model_path = argv[1];
+    model_config.n_gpu_layers = 0;
 
-    auto agent_result = zoo::Agent::create(config);
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 64;
+
+    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
     if (!agent_result) {
         print_error(agent_result.error());
         return 1;
     }
 
     auto& agent = *agent_result;
-    auto handle = agent->chat(zoo::Message::user("Say hello in one sentence."));
-    auto response = handle.future.get();
+    auto handle = agent->chat("Say hello in one sentence.");
+    auto response = handle.await_result();
     if (!response) {
         print_error(response.error());
         return 1;

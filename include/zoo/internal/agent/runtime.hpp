@@ -7,7 +7,7 @@
 
 #include "backend.hpp"
 #include "mailbox.hpp"
-#include "request_tracker.hpp"
+#include "request_slots.hpp"
 #include "zoo/agent.hpp"
 #include <atomic>
 #include <memory>
@@ -24,7 +24,8 @@ namespace zoo::internal::agent {
  */
 class AgentRuntime {
   public:
-    AgentRuntime(const Config& cfg, std::unique_ptr<AgentBackend> backend);
+    AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
+                 GenerationOptions default_generation, std::unique_ptr<AgentBackend> backend);
     ~AgentRuntime();
 
     AgentRuntime(const AgentRuntime&) = delete;
@@ -32,28 +33,34 @@ class AgentRuntime {
     AgentRuntime(AgentRuntime&&) = delete;
     AgentRuntime& operator=(AgentRuntime&&) = delete;
 
-    RequestHandle
-    chat(Message message,
-         std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
-
-    RequestHandle
-    complete(std::vector<Message> messages,
-             std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
-
-    RequestHandle
-    extract(const nlohmann::json& output_schema, Message message,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
-
-    RequestHandle
-    extract(const nlohmann::json& output_schema, std::vector<Message> messages,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt);
+    RequestHandle<TextResponse> chat(std::string_view user_message,
+                                     const GenerationOptions& options = GenerationOptions{},
+                                     AsyncTextCallback callback = {});
+    RequestHandle<TextResponse> chat(MessageView message,
+                                     const GenerationOptions& options = GenerationOptions{},
+                                     AsyncTextCallback callback = {});
+    RequestHandle<TextResponse> complete(ConversationView messages,
+                                         const GenerationOptions& options = GenerationOptions{},
+                                         AsyncTextCallback callback = {});
+    RequestHandle<ExtractionResponse>
+    extract(const nlohmann::json& output_schema, std::string_view user_message,
+            const GenerationOptions& options = GenerationOptions{},
+            AsyncTextCallback callback = {});
+    RequestHandle<ExtractionResponse>
+    extract(const nlohmann::json& output_schema, MessageView message,
+            const GenerationOptions& options = GenerationOptions{},
+            AsyncTextCallback callback = {});
+    RequestHandle<ExtractionResponse>
+    extract(const nlohmann::json& output_schema, ConversationView messages,
+            const GenerationOptions& options = GenerationOptions{},
+            AsyncTextCallback callback = {});
 
     void cancel(RequestId id);
-    void set_system_prompt(const std::string& prompt);
+    void set_system_prompt(std::string_view prompt);
     void stop();
     bool is_running() const noexcept;
 
-    std::vector<Message> get_history() const;
+    HistorySnapshot get_history() const;
     void clear_history();
 
     Expected<void> register_tool(tools::ToolDefinition definition);
@@ -61,20 +68,25 @@ class AgentRuntime {
 
   private:
     void inference_loop();
-    void handle_request(Request& request);
+    void handle_request(QueuedRequest request);
     void handle_command(Command& cmd);
-    Expected<Response> process_request(const Request& request);
-    Expected<Response> process_extraction_request(const Request& request);
+    Expected<TextResponse> process_request(const ActiveRequest& request);
+    Expected<ExtractionResponse> process_extraction_request(const ActiveRequest& request);
 
-    void submit_or_fail(RequestHandle& handle, Request request);
     void fail_pending(const Error& error);
     static void resolve_command_on_shutdown(Command& cmd);
     void update_tool_calling();
+    void enforce_history_limit();
+    template <typename Result> RequestHandle<Result> make_immediate_error_handle(Error error);
+    template <typename Result> RequestHandle<Result> enqueue_request(RequestPayload payload);
+    GenerationOptions resolve_generation_options(const GenerationOptions& overrides) const;
 
-    Config config_;
+    ModelConfig model_config_;
+    AgentConfig agent_config_;
+    GenerationOptions default_generation_options_;
     std::unique_ptr<AgentBackend> backend_;
     tools::ToolRegistry tool_registry_;
-    RequestTracker request_tracker_;
+    std::shared_ptr<RequestSlots> request_slots_;
     mutable RuntimeMailbox request_mailbox_;
     std::thread inference_thread_;
     std::atomic<bool> running_{true};

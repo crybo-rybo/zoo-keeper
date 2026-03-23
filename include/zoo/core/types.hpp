@@ -6,11 +6,16 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace zoo {
@@ -46,86 +51,301 @@ enum class Role {
 }
 
 /**
- * @brief Structured tool call data attached to assistant messages.
+ * @brief Lightweight non-owning callable reference for synchronous hot paths.
  *
- * When an assistant response contains one or more tool invocations, the
- * parsed tool calls are stored here rather than as opaque text, enabling
- * format-independent round-tripping through any model's chat template.
+ * `FunctionRef` does not extend the lifetime of the callable it references.
+ * It is intended only for immediate use by the callee.
  */
-struct ToolCallInfo {
-    std::string id;             ///< Correlation identifier for the tool call.
-    std::string name;           ///< Tool name the model wants to invoke.
-    std::string arguments_json; ///< Serialized JSON arguments.
+template <typename Signature> class FunctionRef;
 
-    bool operator==(const ToolCallInfo& other) const = default;
+template <typename Result, typename... Args> class FunctionRef<Result(Args...)> {
+  public:
+    constexpr FunctionRef() noexcept = default;
+    constexpr FunctionRef(std::nullptr_t) noexcept {}
+
+    /// Prevent binding to temporaries that would dangle.
+    template <typename Callable>
+        requires(!std::same_as<std::remove_cvref_t<Callable>, FunctionRef> &&
+                 !std::is_lvalue_reference_v<Callable>)
+    FunctionRef(Callable&&) = delete;
+
+    template <typename Callable>
+        requires(!std::same_as<std::remove_cvref_t<Callable>, FunctionRef> &&
+                 std::is_invocable_r_v<Result, Callable&, Args...>)
+    FunctionRef(Callable& callable) noexcept
+        : object_(static_cast<void*>(std::addressof(callable))),
+          callback_([](void* object, Args... args) -> Result {
+              return std::invoke(*static_cast<Callable*>(object), std::forward<Args>(args)...);
+          }) {}
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return callback_ != nullptr;
+    }
+
+    Result operator()(Args... args) const {
+        return callback_(object_, std::forward<Args>(args)...);
+    }
+
+  private:
+    using Callback = Result (*)(void*, Args...);
+
+    void* object_ = nullptr;
+    Callback callback_ = nullptr;
 };
 
 /**
- * @brief Represents one message in the conversation history.
+ * @brief Structured tool call view attached to assistant messages.
  */
-struct Message {
-    Role role;           ///< Speaker role associated with the message.
-    std::string content; ///< Raw message content passed to the model.
-    std::optional<std::string>
-        tool_call_id; ///< Tool call correlation identifier for tool responses.
+struct ToolCallView {
+    std::string_view id;
+    std::string_view name;
+    std::string_view arguments_json;
 
-    /// Structured tool calls for assistant messages (empty for other roles).
-    std::vector<ToolCallInfo> tool_calls;
+    bool operator==(const ToolCallView& other) const = default;
+};
+
+/**
+ * @brief Owning structured tool call record.
+ */
+struct OwnedToolCall {
+    std::string id;
+    std::string name;
+    std::string arguments_json;
+
+    [[nodiscard]] ToolCallView view() const noexcept {
+        return ToolCallView{id, name, arguments_json};
+    }
+
+    [[nodiscard]] static OwnedToolCall from_view(const ToolCallView& view) {
+        return OwnedToolCall{
+            std::string(view.id),
+            std::string(view.name),
+            std::string(view.arguments_json),
+        };
+    }
+
+    bool operator==(const OwnedToolCall& other) const = default;
+};
+
+/**
+ * @brief Lightweight span over either borrowed or owned tool call metadata.
+ */
+class ToolCallSpan {
+  public:
+    constexpr ToolCallSpan() noexcept = default;
+    constexpr explicit ToolCallSpan(std::span<const ToolCallView> borrowed) noexcept
+        : storage_(Storage::Borrowed), borrowed_(borrowed) {}
+    constexpr explicit ToolCallSpan(std::span<const OwnedToolCall> owned) noexcept
+        : storage_(Storage::Owned), owned_(owned) {}
+
+    [[nodiscard]] size_t size() const noexcept {
+        return storage_ == Storage::Owned ? owned_.size() : borrowed_.size();
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return size() == 0;
+    }
+
+    [[nodiscard]] ToolCallView operator[](size_t index) const noexcept {
+        return storage_ == Storage::Owned ? owned_[index].view() : borrowed_[index];
+    }
+
+  private:
+    enum class Storage { Borrowed, Owned };
+
+    Storage storage_ = Storage::Borrowed;
+    std::span<const ToolCallView> borrowed_{};
+    std::span<const OwnedToolCall> owned_{};
+};
+
+/**
+ * @brief Non-owning view of one message in a conversation.
+ */
+class MessageView {
+  public:
+    constexpr MessageView() noexcept = default;
+    constexpr MessageView(Role role, std::string_view content,
+                          std::string_view tool_call_id = {}) noexcept
+        : role_(role), content_(content), tool_call_id_(tool_call_id) {}
+    constexpr MessageView(Role role, std::string_view content,
+                          std::span<const ToolCallView> tool_calls) noexcept
+        : role_(role), content_(content), tool_calls_(tool_calls) {}
+    constexpr MessageView(Role role, std::string_view content, std::string_view tool_call_id,
+                          std::span<const ToolCallView> tool_calls) noexcept
+        : role_(role), content_(content), tool_call_id_(tool_call_id), tool_calls_(tool_calls) {}
+    constexpr MessageView(Role role, std::string_view content,
+                          std::span<const OwnedToolCall> tool_calls) noexcept
+        : role_(role), content_(content), tool_calls_(tool_calls) {}
+    constexpr MessageView(Role role, std::string_view content, std::string_view tool_call_id,
+                          std::span<const OwnedToolCall> tool_calls) noexcept
+        : role_(role), content_(content), tool_call_id_(tool_call_id), tool_calls_(tool_calls) {}
+
+    [[nodiscard]] Role role() const noexcept {
+        return role_;
+    }
+
+    [[nodiscard]] std::string_view content() const noexcept {
+        return content_;
+    }
+
+    [[nodiscard]] std::string_view tool_call_id() const noexcept {
+        return tool_call_id_;
+    }
+
+    [[nodiscard]] bool has_tool_call_id() const noexcept {
+        return !tool_call_id_.empty();
+    }
+
+    [[nodiscard]] ToolCallSpan tool_calls() const noexcept {
+        return tool_calls_;
+    }
+
+    bool operator==(const MessageView& other) const noexcept {
+        if (role_ != other.role_ || content_ != other.content_ ||
+            tool_call_id_ != other.tool_call_id_) {
+            return false;
+        }
+        if (tool_calls_.size() != other.tool_calls_.size()) {
+            return false;
+        }
+        for (size_t index = 0; index < tool_calls_.size(); ++index) {
+            if (!(tool_calls_[index] == other.tool_calls_[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+  private:
+    Role role_ = Role::User;
+    std::string_view content_{};
+    std::string_view tool_call_id_{};
+    ToolCallSpan tool_calls_{};
+};
+
+/**
+ * @brief Owning message stored in retained history or request snapshots.
+ */
+struct OwnedMessage {
+    Role role = Role::User;                ///< Speaker role associated with the message.
+    std::string content;                   ///< Raw message content passed to the model.
+    std::string tool_call_id;              ///< Tool call correlation identifier for tool responses.
+    std::vector<OwnedToolCall> tool_calls; ///< Structured tool calls for assistant messages.
+
+    [[nodiscard]] MessageView view() const noexcept {
+        return MessageView(role, content, tool_call_id, std::span<const OwnedToolCall>(tool_calls));
+    }
+
+    [[nodiscard]] static OwnedMessage from_view(const MessageView& view) {
+        OwnedMessage owned;
+        owned.role = view.role();
+        owned.content = std::string(view.content());
+        owned.tool_call_id = std::string(view.tool_call_id());
+        owned.tool_calls.reserve(view.tool_calls().size());
+        for (size_t index = 0; index < view.tool_calls().size(); ++index) {
+            owned.tool_calls.push_back(OwnedToolCall::from_view(view.tool_calls()[index]));
+        }
+        return owned;
+    }
 
     /**
      * @brief Creates a system message.
-     *
-     * @param content Instructional content to prepend to the conversation.
-     * @return A message tagged with `Role::System`.
      */
-    static Message system(std::string content) {
-        return Message{Role::System, std::move(content), std::nullopt, {}};
+    [[nodiscard]] static OwnedMessage system(std::string content) {
+        return OwnedMessage{Role::System, std::move(content), {}, {}};
     }
 
     /**
      * @brief Creates a user message.
-     *
-     * @param content User-authored content.
-     * @return A message tagged with `Role::User`.
      */
-    static Message user(std::string content) {
-        return Message{Role::User, std::move(content), std::nullopt, {}};
+    [[nodiscard]] static OwnedMessage user(std::string content) {
+        return OwnedMessage{Role::User, std::move(content), {}, {}};
     }
 
     /**
      * @brief Creates an assistant message.
-     *
-     * @param content Assistant-authored content.
-     * @return A message tagged with `Role::Assistant`.
      */
-    static Message assistant(std::string content) {
-        return Message{Role::Assistant, std::move(content), std::nullopt, {}};
+    [[nodiscard]] static OwnedMessage assistant(std::string content) {
+        return OwnedMessage{Role::Assistant, std::move(content), {}, {}};
     }
 
     /**
      * @brief Creates an assistant message with structured tool calls.
-     *
-     * @param content Visible text before/around the tool calls.
-     * @param calls Parsed tool call metadata.
-     * @return A message tagged with `Role::Assistant` carrying tool call data.
      */
-    static Message assistant_with_tool_calls(std::string content, std::vector<ToolCallInfo> calls) {
-        return Message{Role::Assistant, std::move(content), std::nullopt, std::move(calls)};
+    [[nodiscard]] static OwnedMessage assistant_with_tool_calls(std::string content,
+                                                                std::vector<OwnedToolCall> calls) {
+        return OwnedMessage{Role::Assistant, std::move(content), {}, std::move(calls)};
     }
 
     /**
      * @brief Creates a tool response message.
-     *
-     * @param content Serialized tool output.
-     * @param tool_call_id Identifier of the originating tool call.
-     * @return A message tagged with `Role::Tool`.
      */
-    static Message tool(std::string content, std::string tool_call_id) {
-        return Message{Role::Tool, std::move(content), std::move(tool_call_id), {}};
+    [[nodiscard]] static OwnedMessage tool(std::string content, std::string tool_call_id) {
+        return OwnedMessage{Role::Tool, std::move(content), std::move(tool_call_id), {}};
     }
 
-    /// Compares two messages including role, content, and tool call correlation.
-    bool operator==(const Message& other) const = default;
+    bool operator==(const OwnedMessage& other) const = default;
+};
+
+/// Transitional alias retained for internal code and existing consumers.
+using Message = OwnedMessage;
+/// Transitional alias retained for internal code and existing consumers.
+using ToolCallInfo = OwnedToolCall;
+
+/**
+ * @brief Borrowed read-only message sequence used by request-scoped APIs.
+ */
+class ConversationView {
+  public:
+    constexpr ConversationView() noexcept = default;
+    constexpr explicit ConversationView(std::span<const MessageView> borrowed) noexcept
+        : storage_(Storage::Borrowed), borrowed_(borrowed) {}
+    constexpr explicit ConversationView(std::span<const OwnedMessage> owned) noexcept
+        : storage_(Storage::Owned), owned_(owned) {}
+
+    [[nodiscard]] size_t size() const noexcept {
+        return storage_ == Storage::Owned ? owned_.size() : borrowed_.size();
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return size() == 0;
+    }
+
+    [[nodiscard]] MessageView operator[](size_t index) const noexcept {
+        return storage_ == Storage::Owned ? owned_[index].view() : borrowed_[index];
+    }
+
+  private:
+    enum class Storage { Borrowed, Owned };
+
+    Storage storage_ = Storage::Borrowed;
+    std::span<const MessageView> borrowed_{};
+    std::span<const OwnedMessage> owned_{};
+};
+
+/**
+ * @brief Owning snapshot of retained history.
+ */
+struct HistorySnapshot {
+    std::vector<OwnedMessage> messages;
+
+    [[nodiscard]] ConversationView view() const noexcept {
+        return ConversationView(std::span<const OwnedMessage>(messages));
+    }
+
+    [[nodiscard]] size_t size() const noexcept {
+        return messages.size();
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return messages.empty();
+    }
+
+    [[nodiscard]] const OwnedMessage& operator[](size_t index) const noexcept {
+        return messages[index];
+    }
+
+    bool operator==(const HistorySnapshot& other) const = default;
 };
 
 /**
@@ -181,22 +401,10 @@ struct Error {
     std::string message;                ///< Human-readable error summary.
     std::optional<std::string> context; ///< Optional contextual detail for diagnostics.
 
-    /**
-     * @brief Constructs an error payload.
-     *
-     * @param code Error category.
-     * @param message Human-readable description of the failure.
-     * @param context Optional additional diagnostic context.
-     */
     Error(ErrorCode code, std::string message, std::optional<std::string> context = std::nullopt)
         : code(code), message(std::move(message)), context(std::move(context)) {}
 
-    /**
-     * @brief Formats the error as a single log-friendly string.
-     *
-     * @return String containing the numeric code, message, and optional context.
-     */
-    std::string to_string() const {
+    [[nodiscard]] std::string to_string() const {
         std::string result = "[" + std::to_string(static_cast<int>(code)) + "] " + message;
         if (context.has_value()) {
             result += " | Context: " + *context;
@@ -204,7 +412,6 @@ struct Error {
         return result;
     }
 
-    /// Compares two errors including code, message, and optional context.
     bool operator==(const Error& other) const = default;
 };
 
@@ -222,15 +429,9 @@ struct SamplingParams {
     int top_k = 40;              ///< Limits candidate selection to the top-k tokens.
     float repeat_penalty = 1.1f; ///< Penalty applied to recently seen tokens.
     int repeat_last_n = 64;      ///< Number of trailing tokens considered for repetition penalty.
-    int seed = -1; ///< RNG seed. Negative values delegate seeding to the current time.
+    int seed = -1;               ///< RNG seed. Negative values delegate seeding to the runtime.
 
-    /**
-     * @brief Validates the sampling configuration.
-     *
-     * @return Empty success on valid parameters, or an `InvalidSamplingParams`
-     *         error describing the first invalid field.
-     */
-    Expected<void> validate() const {
+    [[nodiscard]] Expected<void> validate() const {
         if (temperature < 0.0f) {
             return std::unexpected(
                 Error{ErrorCode::InvalidSamplingParams,
@@ -258,7 +459,6 @@ struct SamplingParams {
         return {};
     }
 
-    /// Compares two sampling configurations field-by-field.
     bool operator==(const SamplingParams& other) const = default;
 };
 
@@ -271,19 +471,24 @@ enum class TokenAction {
 };
 
 /**
- * @brief Callback invoked for streamed token fragments.
+ * @brief Callback invoked for streamed token fragments in synchronous generation.
  */
-using TokenCallback = std::function<TokenAction(std::string_view)>;
+using TokenCallback = FunctionRef<TokenAction(std::string_view)>;
 
 /**
  * @brief Callback queried by generation loops to decide whether work should stop.
  */
-using CancellationCallback = std::function<bool()>;
+using CancellationCallback = FunctionRef<bool()>;
 
 /**
- * @brief Runtime configuration used to load a model and create an agent.
+ * @brief Async streaming callback stored by the agent runtime.
  */
-struct Config {
+using AsyncTextCallback = std::function<void(std::string_view)>;
+
+/**
+ * @brief Model loading and backend configuration.
+ */
+struct ModelConfig {
     std::string model_path;  ///< Filesystem path to the GGUF model.
     int context_size = 8192; ///< Requested context window size in tokens.
     int n_gpu_layers =
@@ -291,31 +496,7 @@ struct Config {
     bool use_mmap = true;   ///< Whether to memory-map the model file.
     bool use_mlock = false; ///< Whether to lock model pages in memory.
 
-    SamplingParams sampling; ///< Sampling behavior for generation.
-
-    int max_tokens = -1; ///< Maximum number of generated tokens, or `-1` for no explicit cap.
-    std::vector<std::string>
-        stop_sequences; ///< User-defined stop sequences applied during generation.
-
-    std::optional<std::string>
-        system_prompt;                ///< Optional system prompt inserted at the start of history.
-    size_t max_history_messages = 64; ///< Maximum number of non-system history messages retained.
-
-    size_t request_queue_capacity = 64; ///< Maximum number of pending requests accepted by `Agent`.
-
-    int max_tool_iterations = 5; ///< Maximum detect/execute/respond iterations per request.
-    int max_tool_retries = 2;    ///< Maximum validation retries for malformed tool calls.
-
-    std::optional<TokenCallback>
-        on_token; ///< Optional default token callback used by direct model generation.
-
-    /**
-     * @brief Validates the configuration before model initialization.
-     *
-     * @return Empty success on valid configuration, or the first encountered
-     *         validation error.
-     */
-    Expected<void> validate() const {
+    [[nodiscard]] Expected<void> validate() const {
         if (model_path.empty()) {
             return std::unexpected(
                 Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
@@ -324,16 +505,29 @@ struct Config {
             return std::unexpected(
                 Error{ErrorCode::InvalidContextSize, "Context size must be positive"});
         }
-        if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
-        }
+        return {};
+    }
+
+    bool operator==(const ModelConfig& other) const = default;
+};
+
+/**
+ * @brief Agent queue, retention, and tool-loop policy configuration.
+ */
+struct AgentConfig {
+    size_t max_history_messages = 64;   ///< Maximum number of non-system messages retained.
+    size_t request_queue_capacity = 64; ///< Fixed number of request slots the agent may own.
+    int max_tool_iterations = 5;        ///< Maximum detect/execute/respond iterations per request.
+    int max_tool_retries = 2;           ///< Maximum validation retries for malformed tool calls.
+
+    [[nodiscard]] Expected<void> validate() const {
         if (max_history_messages == 0) {
             return std::unexpected(
                 Error{ErrorCode::InvalidConfig, "max_history_messages must be >= 1"});
         }
-        if (auto result = sampling.validate(); !result) {
-            return result;
+        if (request_queue_capacity == 0) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "request_queue_capacity must be >= 1"});
         }
         if (max_tool_iterations < 1) {
             return std::unexpected(
@@ -348,23 +542,32 @@ struct Config {
         return {};
     }
 
-    /**
-     * @brief Compares two configurations, excluding transient callbacks.
-     *
-     * The `on_token` callback is intentionally omitted because function objects
-     * are not meaningfully comparable.
-     */
-    bool operator==(const Config& other) const {
-        return model_path == other.model_path && context_size == other.context_size &&
-               n_gpu_layers == other.n_gpu_layers && use_mmap == other.use_mmap &&
-               use_mlock == other.use_mlock && sampling == other.sampling &&
-               max_tokens == other.max_tokens && stop_sequences == other.stop_sequences &&
-               system_prompt == other.system_prompt &&
-               max_history_messages == other.max_history_messages &&
-               request_queue_capacity == other.request_queue_capacity &&
-               max_tool_iterations == other.max_tool_iterations &&
-               max_tool_retries == other.max_tool_retries;
+    bool operator==(const AgentConfig& other) const = default;
+};
+
+/**
+ * @brief Per-call generation behavior shared by model and agent operations.
+ */
+struct GenerationOptions {
+    SamplingParams sampling; ///< Sampling behavior for generation.
+    int max_tokens = -1;     ///< Completion cap, or `-1` for the context-limited maximum.
+    std::vector<std::string> stop_sequences; ///< User-defined stop sequences.
+    bool record_tool_trace = false;          ///< When true, materialize detailed tool diagnostics.
+
+    [[nodiscard]] Expected<void> validate() const {
+        if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
+        }
+        return sampling.validate();
     }
+
+    [[nodiscard]] bool is_default() const noexcept {
+        return max_tokens == -1 && stop_sequences.empty() && !record_tool_trace &&
+               sampling == SamplingParams{};
+    }
+
+    bool operator==(const GenerationOptions& other) const = default;
 };
 
 /**
@@ -375,7 +578,6 @@ struct TokenUsage {
     int completion_tokens = 0; ///< Tokens emitted during generation.
     int total_tokens = 0;      ///< Sum of prompt and completion tokens.
 
-    /// Compares two token-usage snapshots.
     bool operator==(const TokenUsage& other) const = default;
 };
 
@@ -385,9 +587,8 @@ struct TokenUsage {
 struct Metrics {
     std::chrono::milliseconds latency_ms{0};             ///< End-to-end request latency.
     std::chrono::milliseconds time_to_first_token_ms{0}; ///< Delay until the first streamed token.
-    double tokens_per_second = 0.0; ///< Throughput measured after the first token arrives.
+    double tokens_per_second = 0.0; ///< Throughput after the first token arrives.
 
-    /// Compares two metric snapshots.
     bool operator==(const Metrics& other) const = default;
 };
 
@@ -397,10 +598,9 @@ struct Metrics {
 enum class ToolInvocationStatus {
     Succeeded,        ///< Tool arguments validated and the handler returned a result.
     ValidationFailed, ///< Parsed arguments did not satisfy the registered schema.
-    ExecutionFailed   ///< The handler returned or raised an execution failure.
+    ExecutionFailed   ///< The handler returned an execution failure.
 };
 
-/// Returns a human-readable string for a tool invocation status.
 [[nodiscard]] inline const char* to_string(ToolInvocationStatus status) noexcept {
     switch (status) {
     case ToolInvocationStatus::Succeeded:
@@ -414,35 +614,55 @@ enum class ToolInvocationStatus {
 }
 
 /**
- * @brief Structured record of one attempted tool call during agent execution.
+ * @brief Structured record of one attempted tool call.
  */
 struct ToolInvocation {
-    std::string id;   ///< Correlation identifier parsed from or derived for the tool call.
-    std::string name; ///< Registered tool name the model attempted to invoke.
+    std::string id;             ///< Correlation identifier parsed from model output.
+    std::string name;           ///< Registered tool name the model attempted to invoke.
     std::string arguments_json; ///< Serialized arguments exactly as parsed from model output.
     ToolInvocationStatus status = ToolInvocationStatus::Succeeded; ///< Final outcome category.
     std::optional<std::string> result_json; ///< Serialized handler result when execution succeeded.
-    std::optional<Error>
-        error; ///< Validation or execution error details when the attempt did not succeed.
+    std::optional<Error> error; ///< Validation or execution error when the attempt failed.
 
-    /// Compares two tool invocation records field-by-field.
     bool operator==(const ToolInvocation& other) const = default;
 };
 
 /**
- * @brief Final response returned by model or agent generation.
+ * @brief Optional diagnostic trace materialized only when explicitly requested.
  */
-struct Response {
-    std::string text; ///< Assistant-visible response text.
-    TokenUsage usage; ///< Prompt and completion token usage.
-    Metrics metrics;  ///< Latency and throughput data.
-    std::vector<ToolInvocation>
-        tool_invocations; ///< Explicit tool invocation attempts recorded during the agentic loop.
-    std::optional<nlohmann::json>
-        extracted_data; ///< Parsed structured output from `extract()` calls, nullopt otherwise.
+struct ToolTrace {
+    std::vector<ToolInvocation> invocations;
 
-    /// Compares two responses field-by-field.
-    bool operator==(const Response& other) const = default;
+    [[nodiscard]] bool empty() const noexcept {
+        return invocations.empty();
+    }
+
+    bool operator==(const ToolTrace& other) const = default;
+};
+
+/**
+ * @brief Text generation result for chat/complete/generate.
+ */
+struct TextResponse {
+    std::string text;                    ///< Assistant-visible response text.
+    TokenUsage usage;                    ///< Prompt and completion token usage.
+    Metrics metrics;                     ///< Latency and throughput data.
+    std::optional<ToolTrace> tool_trace; ///< Tool diagnostics when explicitly requested.
+
+    bool operator==(const TextResponse& other) const = default;
+};
+
+/**
+ * @brief Structured extraction result for `extract()`.
+ */
+struct ExtractionResponse {
+    std::string text;                    ///< Raw generated JSON text.
+    nlohmann::json data;                 ///< Parsed schema-conforming structured output.
+    TokenUsage usage;                    ///< Prompt and completion token usage.
+    Metrics metrics;                     ///< Latency and throughput data.
+    std::optional<ToolTrace> tool_trace; ///< Tool diagnostics when explicitly requested.
+
+    bool operator==(const ExtractionResponse& other) const = default;
 };
 
 /**
@@ -450,22 +670,24 @@ struct Response {
  */
 using RequestId = uint64_t;
 
+namespace detail {
+
+inline Role message_role(const MessageView& message) noexcept {
+    return message.role();
+}
+
+inline Role message_role(const OwnedMessage& message) noexcept {
+    return message.role;
+}
+
+} // namespace detail
+
 /**
- * @brief Validates whether a new message role can be appended to `messages`.
- *
- * Rules enforced today:
- * - a tool response cannot be the first message,
- * - system messages are only allowed at the start of history,
- * - non-tool roles may not repeat consecutively.
- *
- * @param messages Existing conversation history.
- * @param role Role to validate as the next appended message.
- * @return Empty success when the role may be appended, otherwise an
- *         `InvalidMessageSequence` error.
+ * @brief Validates whether a new message role can be appended to an existing history.
  */
-[[nodiscard]] inline Expected<void> validate_role_sequence(const std::vector<Message>& messages,
-                                                           Role role) {
-    if (messages.empty()) {
+template <typename History>
+[[nodiscard]] inline Expected<void> validate_role_sequence(const History& messages, Role role) {
+    if (messages.size() == 0) {
         if (role == Role::Tool) {
             return std::unexpected(Error{ErrorCode::InvalidMessageSequence,
                                          "First message cannot be a tool response"});
@@ -478,7 +700,7 @@ using RequestId = uint64_t;
                                      "System message only allowed at the beginning"});
     }
 
-    const Role last_role = messages.back().role;
+    const Role last_role = detail::message_role(messages[messages.size() - 1]);
     if (role == last_role && role != Role::Tool) {
         return std::unexpected(
             Error{ErrorCode::InvalidMessageSequence,

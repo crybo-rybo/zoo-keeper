@@ -1,61 +1,74 @@
 #include "zoo/internal/core/stream_filter.hpp"
 #include <common.h>
-#include <regex>
 
 namespace zoo::core {
 
-bool is_tool_trigger_detected(const std::string& text,
-                              const std::vector<common_grammar_trigger>& triggers) {
+ToolCallTriggerMatcher::ToolCallTriggerMatcher(
+    const std::vector<common_grammar_trigger>& triggers) {
+    word_triggers_.reserve(triggers.size());
+    regex_triggers_.reserve(triggers.size());
+
     for (const auto& trigger : triggers) {
         if (trigger.value.empty()) {
             continue;
         }
+
         switch (trigger.type) {
         case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-            if (text.find(trigger.value) != std::string::npos) {
-                return true;
-            }
+            word_triggers_.push_back(trigger.value);
             break;
         case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
-            try {
-                if (std::regex_search(text, std::regex(trigger.value))) {
-                    return true;
-                }
-            } catch (const std::regex_error&) {
-                // Malformed pattern — skip.
-            }
-            break;
         case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL:
             try {
-                if (std::regex_match(text, std::regex(trigger.value))) {
-                    return true;
-                }
+                regex_triggers_.push_back(
+                    RegexTrigger{std::regex(trigger.value),
+                                 trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL});
             } catch (const std::regex_error&) {
-                // Malformed pattern — skip.
+                // Malformed pattern: ignore it so runtime generation can continue.
             }
             break;
         case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
-            // Token-id triggers cannot be checked at the text level.
             break;
         }
     }
+}
+
+bool ToolCallTriggerMatcher::is_detected(std::string_view text) const {
+    for (const auto& trigger : word_triggers_) {
+        if (text.find(trigger) != std::string_view::npos) {
+            return true;
+        }
+    }
+
+    for (const auto& trigger : regex_triggers_) {
+        if (trigger.full_match) {
+            if (std::regex_match(text.begin(), text.end(), trigger.regex)) {
+                return true;
+            }
+            continue;
+        }
+
+        if (std::regex_search(text.begin(), text.end(), trigger.regex)) {
+            return true;
+        }
+    }
+
     return false;
+}
+
+bool is_tool_trigger_detected(const std::string& text,
+                              const std::vector<common_grammar_trigger>& triggers) {
+    return ToolCallTriggerMatcher(triggers).is_detected(text);
 }
 
 std::vector<std::string>
 extract_word_triggers(const std::vector<common_grammar_trigger>& triggers) {
-    std::vector<std::string> words;
-    for (const auto& trigger : triggers) {
-        if (trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_WORD && !trigger.value.empty()) {
-            words.push_back(trigger.value);
-        }
-    }
-    return words;
+    return ToolCallTriggerMatcher(triggers).word_triggers();
 }
 
 size_t ToolCallWordTriggerFilter::first_trigger_match(std::string_view text) const {
     size_t earliest = std::string::npos;
-    for (const auto& trigger : word_triggers_) {
+    for (const auto& trigger : borrowed_triggers_) {
         const size_t pos = text.find(trigger);
         if (pos != std::string::npos && (earliest == std::string::npos || pos < earliest)) {
             earliest = pos;
@@ -66,7 +79,7 @@ size_t ToolCallWordTriggerFilter::first_trigger_match(std::string_view text) con
 
 size_t ToolCallWordTriggerFilter::buffered_suffix_len(std::string_view text) const {
     size_t longest = 0;
-    for (const auto& trigger : word_triggers_) {
+    for (const auto& trigger : borrowed_triggers_) {
         const size_t max_check = std::min(text.size(), trigger.size() - 1);
         for (size_t len = 1; len <= max_check; ++len) {
             if (text.substr(text.size() - len) == std::string_view(trigger).substr(0, len)) {

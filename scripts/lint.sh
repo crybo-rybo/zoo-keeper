@@ -3,6 +3,6 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-cmake -B build -DZOO_BUILD_TESTS=ON -DCMAKE_CXX_FLAGS="-Werror"
+scripts/build-all.sh -DZOO_WARNINGS_AS_ERRORS=ON
 cmake --build build
 echo "Lint (warning-free build) passed."

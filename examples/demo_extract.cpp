@@ -11,6 +11,7 @@
 
 #include <zoo/zoo.hpp>
 
+#include <array>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -23,16 +24,12 @@ static void print_separator(const std::string& title) {
     std::cout << "\n-- " << title << " " << std::string(55 - title.size(), '-') << "\n";
 }
 
-static void print_result(const zoo::Expected<zoo::Response>& response) {
+static void print_result(const zoo::Expected<zoo::ExtractionResponse>& response) {
     if (!response) {
         std::cerr << "Error: " << response.error().to_string() << "\n";
         return;
     }
-    if (!response->extracted_data) {
-        std::cerr << "Error: extracted_data is empty\n";
-        return;
-    }
-    std::cout << "Result: " << response->extracted_data->dump(2) << "\n";
+    std::cout << "Result: " << response->data.dump(2) << "\n";
     std::cout << "Tokens: " << response->usage.completion_tokens << " completion, "
               << response->usage.prompt_tokens << " prompt\n";
 }
@@ -57,9 +54,9 @@ static void run_entity_extraction(zoo::Agent& agent) {
         {"additionalProperties", false}};
 
     std::cout << "Input:  \"Alice Chen is the lead engineer. She turned 34 last Tuesday.\"\n";
-    auto handle = agent.extract(
-        schema, zoo::Message::user("Alice Chen is the lead engineer. She turned 34 last Tuesday."));
-    print_result(handle.future.get());
+    auto handle =
+        agent.extract(schema, "Alice Chen is the lead engineer. She turned 34 last Tuesday.");
+    print_result(handle.await_result());
 }
 
 /**
@@ -84,10 +81,13 @@ static void run_sentiment_classification(zoo::Agent& agent) {
         "The cinematography was stunning but the pacing dragged in the second act.";
     std::cout << "Input:  \"" << review << "\"\n";
 
-    auto handle = agent.extract(
-        schema, {zoo::Message::system("Classify the overall sentiment of the review."),
-                 zoo::Message::user(review)});
-    print_result(handle.future.get());
+    const std::array<zoo::MessageView, 2> messages = {
+        zoo::MessageView{zoo::Role::System, "Classify the overall sentiment of the review."},
+        zoo::MessageView{zoo::Role::User, review},
+    };
+    auto handle =
+        agent.extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)});
+    print_result(handle.await_result());
 }
 
 /**
@@ -109,11 +109,10 @@ static void run_numeric_extraction(zoo::Agent& agent) {
     std::cout << "Stream: ";
     std::cout.flush();
 
-    auto handle =
-        agent.extract(schema, zoo::Message::user("The delivery contains 48 individual cartons."),
-                      [](std::string_view token) { std::cout << token << std::flush; });
+    auto handle = agent.extract(schema, "The delivery contains 48 individual cartons.", {},
+                                [](std::string_view token) { std::cout << token << std::flush; });
 
-    auto response = handle.future.get();
+    auto response = handle.await_result();
     std::cout << "\n";
     print_result(response);
 }
@@ -128,18 +127,20 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    zoo::Config config;
-    config.model_path = argv[1];
-    config.context_size = 4096;
-    config.max_tokens = 64;
-    config.n_gpu_layers = 0;
-    config.sampling.temperature = 0.0f;
-    config.sampling.top_p = 1.0f;
-    config.sampling.top_k = 1;
-    config.sampling.seed = 42;
+    zoo::ModelConfig model_config;
+    model_config.model_path = argv[1];
+    model_config.context_size = 4096;
+    model_config.n_gpu_layers = 0;
 
-    std::cout << "Loading model: " << config.model_path << "\n";
-    auto agent_result = zoo::Agent::create(config);
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 64;
+    generation.sampling.temperature = 0.0f;
+    generation.sampling.top_p = 1.0f;
+    generation.sampling.top_k = 1;
+    generation.sampling.seed = 42;
+
+    std::cout << "Loading model: " << model_config.model_path << "\n";
+    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
     if (!agent_result) {
         std::cerr << "Error: " << agent_result.error().to_string() << "\n";
         return 1;

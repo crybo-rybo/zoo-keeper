@@ -74,6 +74,7 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
     state->grammar = std::move(params.grammar);
     state->grammar_lazy = params.grammar_lazy;
     state->grammar_triggers = std::move(params.grammar_triggers);
+    state->trigger_matcher = ToolCallTriggerMatcher(state->grammar_triggers);
     state->preserved_tokens = std::move(params.preserved_tokens);
     state->additional_stops = std::move(params.additional_stops);
     state->thinking_forced_open = params.thinking_forced_open;
@@ -100,11 +101,11 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
 // parse_tool_response
 // ---------------------------------------------------------------------------
 
-Model::ParsedResponse Model::parse_tool_response(const std::string& text) const {
+Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
     ParsedResponse result;
 
     if (!tool_state_) {
-        result.content = text;
+        result.content = std::string(text);
         return result;
     }
 
@@ -116,9 +117,9 @@ Model::ParsedResponse Model::parse_tool_response(const std::string& text) const 
 
     common_chat_msg parsed;
     try {
-        parsed = common_chat_parse(text, false, syntax);
+        parsed = common_chat_parse(std::string(text), false, syntax);
     } catch (const std::exception&) {
-        result.content = text;
+        result.content = std::string(text);
         return result;
     }
 

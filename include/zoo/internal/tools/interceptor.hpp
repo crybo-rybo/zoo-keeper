@@ -56,7 +56,7 @@ class ToolCallInterceptor {
      *
      * @return Callback suitable for `TokenCallback`.
      */
-    TokenCallback make_callback() {
+    std::function<TokenAction(std::string_view)> make_callback() {
         return [this](std::string_view token) -> TokenAction {
             full_text_.append(token.data(), token.size());
             return process_token(token);

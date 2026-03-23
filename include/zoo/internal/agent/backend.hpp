@@ -52,20 +52,23 @@ class AgentBackend {
   public:
     virtual ~AgentBackend() = default;
 
-    virtual Expected<void> add_message(const Message& message) = 0;
+    virtual Expected<void> add_message(MessageView message) = 0;
     virtual Expected<GenerationResult>
-    generate_from_history(std::optional<TokenCallback> on_token,
+    generate_from_history(const GenerationOptions& options, TokenCallback on_token,
                           CancellationCallback should_cancel) = 0;
     virtual void finalize_response() = 0;
 
-    virtual void set_system_prompt(const std::string& prompt) = 0;
-    virtual std::vector<Message> get_history() const = 0;
+    virtual void set_system_prompt(std::string_view prompt) = 0;
+    virtual HistorySnapshot get_history() const = 0;
     virtual void clear_history() = 0;
 
     /**
      * @brief Replaces the retained message history without flushing the KV cache.
      */
-    virtual void replace_messages(std::vector<Message> messages) = 0;
+    virtual void replace_history(HistorySnapshot snapshot) = 0;
+    virtual HistorySnapshot swap_history(HistorySnapshot snapshot) = 0;
+
+    virtual void trim_history(size_t max_non_system_messages) = 0;
 
     /**
      * @brief Configures template-driven tool calling.
@@ -89,7 +92,7 @@ class AgentBackend {
     /**
      * @brief Parses a generated text into structured content and tool calls.
      */
-    virtual ParsedToolResponse parse_tool_response(const std::string& text) const = 0;
+    virtual ParsedToolResponse parse_tool_response(std::string_view text) const = 0;
 
     /// Returns the name of the detected tool calling format.
     virtual const char* tool_calling_format_name() const noexcept = 0;

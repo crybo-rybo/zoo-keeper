@@ -14,12 +14,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    zoo::Config config;
-    config.model_path = argv[1];
-    config.max_tokens = 128;
-    config.n_gpu_layers = 0;
+    zoo::ModelConfig model_config;
+    model_config.model_path = argv[1];
+    model_config.n_gpu_layers = 0;
 
-    auto model_result = zoo::core::Model::load(config);
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 128;
+
+    auto model_result = zoo::core::Model::load(model_config, generation);
     if (!model_result) {
         std::cerr << model_result.error().to_string() << '\n';
         return 1;

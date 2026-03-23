@@ -15,13 +15,14 @@ class ModelBackend final : public AgentBackend {
   public:
     explicit ModelBackend(std::unique_ptr<core::Model> model) : model_(std::move(model)) {}
 
-    Expected<void> add_message(const Message& message) override {
+    Expected<void> add_message(MessageView message) override {
         return model_->add_message(message);
     }
 
-    Expected<GenerationResult> generate_from_history(std::optional<TokenCallback> on_token,
+    Expected<GenerationResult> generate_from_history(const GenerationOptions& options,
+                                                     TokenCallback on_token,
                                                      CancellationCallback should_cancel) override {
-        auto result = model_->generate_from_history(std::move(on_token), std::move(should_cancel));
+        auto result = model_->generate_from_history(options, on_token, should_cancel);
         if (!result) {
             return std::unexpected(result.error());
         }
@@ -34,17 +35,24 @@ class ModelBackend final : public AgentBackend {
     void finalize_response() override {
         model_->finalize_response();
     }
-    void set_system_prompt(const std::string& prompt) override {
+    void set_system_prompt(std::string_view prompt) override {
         model_->set_system_prompt(prompt);
     }
-    std::vector<Message> get_history() const override {
+    HistorySnapshot get_history() const override {
         return model_->get_history();
     }
     void clear_history() override {
         model_->clear_history();
     }
-    void replace_messages(std::vector<Message> messages) override {
-        model_->replace_messages(std::move(messages));
+    void replace_history(HistorySnapshot snapshot) override {
+        model_->replace_history(std::move(snapshot));
+    }
+    HistorySnapshot swap_history(HistorySnapshot snapshot) override {
+        return model_->swap_history(std::move(snapshot));
+    }
+
+    void trim_history(size_t max_non_system_messages) override {
+        model_->trim_history(max_non_system_messages);
     }
 
     bool set_tool_calling(const std::vector<CoreToolInfo>& tools) override {
@@ -59,7 +67,7 @@ class ModelBackend final : public AgentBackend {
         model_->clear_tool_grammar();
     }
 
-    ParsedToolResponse parse_tool_response(const std::string& text) const override {
+    ParsedToolResponse parse_tool_response(std::string_view text) const override {
         auto parsed = model_->parse_tool_response(text);
         return ParsedToolResponse{std::move(parsed.content), std::move(parsed.tool_calls)};
     }

@@ -1,104 +1,113 @@
 /**
  * @file test_request_tracker.cpp
- * @brief Unit tests for agent request tracking and cancellation bookkeeping.
+ * @brief Unit tests for slot-backed async request storage.
  */
 
-#include "zoo/internal/agent/request_tracker.hpp"
+#include "zoo/internal/agent/request_slots.hpp"
 #include <gtest/gtest.h>
 
-TEST(RequestTrackerTest, PrepareAssignsIncreasingRequestIds) {
-    zoo::internal::agent::RequestTracker tracker;
+namespace {
 
-    auto first = tracker.prepare(zoo::Message::user("first"));
-    auto second = tracker.prepare(zoo::Message::user("second"));
+using zoo::Error;
+using zoo::ErrorCode;
+using zoo::Expected;
+using zoo::GenerationOptions;
+using zoo::HistorySnapshot;
+using zoo::Message;
+using zoo::TextResponse;
+using zoo::internal::agent::HistoryMode;
+using zoo::internal::agent::QueuedRequest;
+using zoo::internal::agent::RequestPayload;
+using zoo::internal::agent::RequestSlots;
+using zoo::internal::agent::ResultKind;
 
-    EXPECT_EQ(first.request.id, 1u);
-    EXPECT_EQ(second.request.id, 2u);
-    EXPECT_EQ(tracker.size(), 2u);
+RequestPayload make_text_request(std::string text) {
+    RequestPayload payload;
+    payload.messages.push_back(Message::user(std::move(text)));
+    payload.history_mode = HistoryMode::Append;
+    payload.options = GenerationOptions{};
+    payload.result_kind = ResultKind::Text;
+    return payload;
 }
 
-TEST(RequestTrackerTest, CancelSetsSharedCancellationFlag) {
-    zoo::internal::agent::RequestTracker tracker;
+} // namespace
 
-    auto prepared = tracker.prepare(zoo::Message::user("cancel me"));
-    ASSERT_TRUE(prepared.request.cancelled);
-    EXPECT_FALSE(prepared.request.cancelled->load(std::memory_order_acquire));
+TEST(RequestSlotsTest, EmplaceAssignsIncreasingRequestIds) {
+    RequestSlots slots(2);
 
-    tracker.cancel(prepared.request.id);
+    auto first = slots.emplace(make_text_request("first"));
+    auto second = slots.emplace(make_text_request("second"));
 
-    EXPECT_TRUE(prepared.request.cancelled->load(std::memory_order_acquire));
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(first->id, 1u);
+    EXPECT_EQ(second->id, 2u);
+    EXPECT_EQ(slots.size(), 2u);
 }
 
-TEST(RequestTrackerTest, PrepareVectorPayloadPreservesMessagesAndHistoryMode) {
-    zoo::internal::agent::RequestTracker tracker;
+TEST(RequestSlotsTest, CancelMarksActiveRequestFlag) {
+    RequestSlots slots(1);
 
-    std::vector<zoo::Message> messages = {zoo::Message::system("prompt"),
-                                          zoo::Message::user("hello")};
-    auto prepared =
-        tracker.prepare(std::move(messages), zoo::internal::agent::HistoryMode::Replace);
+    auto reservation = slots.emplace(make_text_request("cancel me"));
+    ASSERT_TRUE(reservation.has_value());
 
-    EXPECT_EQ(prepared.request.id, 1u);
-    EXPECT_EQ(prepared.request.history_mode, zoo::internal::agent::HistoryMode::Replace);
-    ASSERT_EQ(prepared.request.messages.size(), 2u);
-    EXPECT_EQ(prepared.request.messages[0], zoo::Message::system("prompt"));
-    EXPECT_EQ(prepared.request.messages[1], zoo::Message::user("hello"));
+    auto active = slots.active_request(QueuedRequest{reservation->slot, reservation->generation});
+    ASSERT_TRUE(active.has_value());
+    ASSERT_NE(active->cancelled, nullptr);
+    EXPECT_FALSE(active->cancelled->load(std::memory_order_acquire));
+
+    slots.cancel(reservation->id);
+
+    auto after_cancel =
+        slots.active_request(QueuedRequest{reservation->slot, reservation->generation});
+    ASSERT_TRUE(after_cancel.has_value());
+    EXPECT_TRUE(after_cancel->cancelled->load(std::memory_order_acquire));
 }
 
-TEST(RequestTrackerTest, FailResolvesFutureWithErrorAndCleansUpState) {
-    zoo::internal::agent::RequestTracker tracker;
+TEST(RequestSlotsTest, ResolveErrorPropagatesThroughAwaitHandle) {
+    RequestSlots slots(1);
 
-    auto prepared = tracker.prepare(zoo::Message::user("fail me"));
-    ASSERT_TRUE(tracker.fail(prepared.request.id,
-                             zoo::Error{zoo::ErrorCode::QueueFull, "Request queue is full"}));
+    auto reservation = slots.emplace(make_text_request("fail me"));
+    ASSERT_TRUE(reservation.has_value());
 
-    auto result = prepared.future.get();
+    slots.resolve_error(reservation->slot, reservation->generation,
+                        Error{ErrorCode::QueueFull, "Request queue is full"});
+
+    auto result =
+        RequestSlots::await_text_handle(&slots, reservation->slot, reservation->generation);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::QueueFull);
-    EXPECT_EQ(tracker.size(), 0u);
+    EXPECT_EQ(result.error().code, ErrorCode::QueueFull);
+    EXPECT_EQ(slots.size(), 0u);
 }
 
-TEST(RequestTrackerTest, CleanupRemovesTrackedRequest) {
-    zoo::internal::agent::RequestTracker tracker;
+TEST(RequestSlotsTest, ReleaseBeforeResolveDropsResultAndFreesSlot) {
+    RequestSlots slots(1);
 
-    auto prepared = tracker.prepare(zoo::Message::user("done"));
-    EXPECT_EQ(tracker.size(), 1u);
+    auto reservation = slots.emplace(make_text_request("orphan"));
+    ASSERT_TRUE(reservation.has_value());
 
-    tracker.cleanup(prepared.request.id);
+    RequestSlots::release_handle(&slots, reservation->slot, reservation->generation);
+    slots.resolve_text(reservation->slot, reservation->generation,
+                       Expected<TextResponse>(TextResponse{.text = "done"}));
 
-    EXPECT_EQ(tracker.size(), 0u);
-    EXPECT_FALSE(
-        tracker.fail(prepared.request.id, zoo::Error{zoo::ErrorCode::Unknown, "already removed"}));
+    EXPECT_EQ(slots.size(), 0u);
 }
 
-TEST(RequestTrackerTest, CancelNonExistentIdIsNoOp) {
-    zoo::internal::agent::RequestTracker tracker;
+TEST(RequestSlotsTest, FailAllResolvesOutstandingRequests) {
+    RequestSlots slots(2);
 
-    tracker.cancel(999);
-    EXPECT_EQ(tracker.size(), 0u);
-}
+    auto first = slots.emplace(make_text_request("one"));
+    auto second = slots.emplace(make_text_request("two"));
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
 
-TEST(RequestTrackerTest, FailReturnsFalseForUnknownId) {
-    zoo::internal::agent::RequestTracker tracker;
+    slots.fail_all(Error{ErrorCode::AgentNotRunning, "shutdown"});
 
-    EXPECT_FALSE(tracker.fail(42, zoo::Error{zoo::ErrorCode::Unknown, "not tracked"}));
-}
+    auto r1 = RequestSlots::await_text_handle(&slots, first->slot, first->generation);
+    auto r2 = RequestSlots::await_text_handle(&slots, second->slot, second->generation);
 
-TEST(RequestTrackerTest, FailAllResolvesAllTrackedRequests) {
-    zoo::internal::agent::RequestTracker tracker;
-
-    auto first = tracker.prepare(zoo::Message::user("one"));
-    auto second = tracker.prepare(zoo::Message::user("two"));
-    EXPECT_EQ(tracker.size(), 2u);
-
-    tracker.fail_all(zoo::Error{zoo::ErrorCode::AgentNotRunning, "shutdown"});
-
-    EXPECT_EQ(tracker.size(), 0u);
-
-    auto r1 = first.future.get();
     ASSERT_FALSE(r1.has_value());
-    EXPECT_EQ(r1.error().code, zoo::ErrorCode::AgentNotRunning);
-
-    auto r2 = second.future.get();
     ASSERT_FALSE(r2.has_value());
-    EXPECT_EQ(r2.error().code, zoo::ErrorCode::AgentNotRunning);
+    EXPECT_EQ(r1.error().code, ErrorCode::AgentNotRunning);
+    EXPECT_EQ(r2.error().code, ErrorCode::AgentNotRunning);
 }

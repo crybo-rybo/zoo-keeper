@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -42,17 +43,23 @@ std::optional<std::filesystem::path> live_model_path() {
     return std::nullopt;
 }
 
-zoo::Config make_base_config(const std::filesystem::path& model_path) {
-    zoo::Config config;
-    config.model_path = model_path.string();
-    config.context_size = 2048;
-    config.max_tokens = 24;
-    config.n_gpu_layers = 0;
-    config.max_history_messages = 8;
-    config.sampling.temperature = 0.0f;
-    config.sampling.top_p = 1.0f;
-    config.sampling.top_k = 1;
-    config.sampling.seed = 7;
+struct TestConfig {
+    zoo::ModelConfig model;
+    zoo::AgentConfig agent;
+    zoo::GenerationOptions generation;
+};
+
+TestConfig make_base_config(const std::filesystem::path& model_path) {
+    TestConfig config;
+    config.model.model_path = model_path.string();
+    config.model.context_size = 2048;
+    config.model.n_gpu_layers = 0;
+    config.agent.max_history_messages = 8;
+    config.generation.max_tokens = 24;
+    config.generation.sampling.temperature = 0.0f;
+    config.generation.sampling.top_p = 1.0f;
+    config.generation.sampling.top_k = 1;
+    config.generation.sampling.seed = 7;
     return config;
 }
 
@@ -71,7 +78,7 @@ class LiveModelIntegrationTest : public ::testing::Test {
         model_path_ = *model_path;
     }
 
-    zoo::Config config() const {
+    TestConfig config() const {
         return make_base_config(model_path_);
     }
 
@@ -85,7 +92,8 @@ TEST(ModelIntegrationTest, LoadRejectsIncompleteVendoredFixture) {
     ASSERT_TRUE(std::filesystem::exists(model_path))
         << "Expected vendored llama.cpp vocabulary fixture at " << model_path.string();
 
-    auto result = zoo::core::Model::load(make_base_config(model_path));
+    auto cfg = make_base_config(model_path);
+    auto result = zoo::core::Model::load(cfg.model, cfg.generation);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::ModelLoadFailed);
 }
@@ -95,13 +103,15 @@ TEST(AgentIntegrationTest, CreatePropagatesModelLoadFailures) {
     ASSERT_TRUE(std::filesystem::exists(model_path))
         << "Expected vendored llama.cpp vocabulary fixture at " << model_path.string();
 
-    auto result = zoo::Agent::create(make_base_config(model_path));
+    auto cfg = make_base_config(model_path);
+    auto result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::ModelLoadFailed);
 }
 
 TEST_F(LiveModelIntegrationTest, ModelGeneratesAndTracksHistory) {
-    auto model_result = zoo::core::Model::load(config());
+    const auto cfg = config();
+    auto model_result = zoo::core::Model::load(cfg.model, cfg.generation);
     ASSERT_TRUE(model_result.has_value()) << model_result.error().to_string();
 
     auto& model = *model_result;
@@ -113,54 +123,60 @@ TEST_F(LiveModelIntegrationTest, ModelGeneratesAndTracksHistory) {
 
     const auto history = model->get_history();
     ASSERT_GE(history.size(), 3u);
-    EXPECT_EQ(history.front().role, zoo::Role::System);
+    EXPECT_EQ(history[0].role, zoo::Role::System);
     EXPECT_EQ(history[1].role, zoo::Role::User);
-    EXPECT_EQ(history.back().role, zoo::Role::Assistant);
+    EXPECT_EQ(history[history.size() - 1].role, zoo::Role::Assistant);
 }
 
 TEST_F(LiveModelIntegrationTest, AgentChatsAndStreams) {
-    auto agent_result = zoo::Agent::create(config());
+    const auto cfg = config();
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
 
     auto& agent = *agent_result;
     agent->set_system_prompt("Reply briefly.");
 
     std::string streamed;
-    auto handle = agent->chat(zoo::Message::user("Say hello in one short sentence."),
+    auto handle = agent->chat("Say hello in one short sentence.", {},
                               [&](std::string_view token) { streamed.append(token); });
 
-    auto response = handle.future.get();
+    auto response = handle.await_result();
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
     EXPECT_FALSE(response->text.empty());
     EXPECT_FALSE(streamed.empty());
 
     const auto history = agent->get_history();
     ASSERT_GE(history.size(), 3u);
-    EXPECT_EQ(history.front().role, zoo::Role::System);
+    EXPECT_EQ(history[0].role, zoo::Role::System);
     EXPECT_EQ(history[1].role, zoo::Role::User);
-    EXPECT_EQ(history.back().role, zoo::Role::Assistant);
+    EXPECT_EQ(history[history.size() - 1].role, zoo::Role::Assistant);
 }
 
 TEST_F(LiveModelIntegrationTest, AgentCompleteDoesNotMutatePersistentHistory) {
-    auto agent_result = zoo::Agent::create(config());
+    const auto cfg = config();
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
 
     auto& agent = *agent_result;
     agent->set_system_prompt("Reply briefly.");
 
-    auto persistent = agent->chat(zoo::Message::user("Say hello in one short sentence."));
-    auto persistent_response = persistent.future.get();
+    auto persistent = agent->chat("Say hello in one short sentence.");
+    auto persistent_response = persistent.await_result();
     ASSERT_TRUE(persistent_response.has_value()) << persistent_response.error().to_string();
 
     const auto before = agent->get_history();
     ASSERT_GE(before.size(), 3u);
 
     std::string streamed;
-    auto scoped = agent->complete({zoo::Message::system("Reply in exactly three words."),
-                                   zoo::Message::user("Say hello politely.")},
-                                  [&](std::string_view token) { streamed.append(token); });
+    const std::array<zoo::MessageView, 2> scoped_messages = {
+        zoo::MessageView{zoo::Role::System, "Reply in exactly three words."},
+        zoo::MessageView{zoo::Role::User, "Say hello politely."},
+    };
+    auto scoped =
+        agent->complete(zoo::ConversationView{std::span<const zoo::MessageView>(scoped_messages)},
+                        {}, [&](std::string_view token) { streamed.append(token); });
 
-    auto scoped_response = scoped.future.get();
+    auto scoped_response = scoped.await_result();
     ASSERT_TRUE(scoped_response.has_value()) << scoped_response.error().to_string();
     EXPECT_FALSE(scoped_response->text.empty());
     EXPECT_FALSE(streamed.empty());
@@ -171,9 +187,9 @@ TEST_F(LiveModelIntegrationTest, AgentCompleteDoesNotMutatePersistentHistory) {
 
 TEST_F(LiveModelIntegrationTest, AgentWithToolsHandlesFencedCodePrompt) {
     auto cfg = config();
-    cfg.max_tokens = 96;
+    cfg.generation.max_tokens = 96;
 
-    auto agent_result = zoo::Agent::create(cfg);
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
 
     auto& agent = *agent_result;
@@ -184,9 +200,9 @@ TEST_F(LiveModelIntegrationTest, AgentWithToolsHandlesFencedCodePrompt) {
 
     agent->set_system_prompt("You are a helpful assistant with access to tools.");
 
-    auto handle = agent->chat(zoo::Message::user(
-        "Write a short fenced Python hello-world example and keep the answer brief."));
-    auto response = handle.future.get();
+    auto handle =
+        agent->chat("Write a short fenced Python hello-world example and keep the answer brief.");
+    auto response = handle.await_result();
 
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
     EXPECT_FALSE(response->text.empty());

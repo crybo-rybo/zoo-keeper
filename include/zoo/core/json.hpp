@@ -83,47 +83,25 @@ inline void from_json(const nlohmann::json& j, SamplingParams& params) {
     params = std::move(parsed);
 }
 
-inline void to_json(nlohmann::json& j, const Config& config) {
+inline void to_json(nlohmann::json& j, const ModelConfig& config) {
     j = nlohmann::json{{"model_path", config.model_path},
                        {"context_size", config.context_size},
                        {"n_gpu_layers", config.n_gpu_layers},
                        {"use_mmap", config.use_mmap},
-                       {"use_mlock", config.use_mlock},
-                       {"sampling", config.sampling},
-                       {"max_tokens", config.max_tokens},
-                       {"stop_sequences", config.stop_sequences},
-                       {"max_history_messages", config.max_history_messages},
-                       {"request_queue_capacity", config.request_queue_capacity},
-                       {"max_tool_iterations", config.max_tool_iterations},
-                       {"max_tool_retries", config.max_tool_retries}};
-
-    if (config.system_prompt.has_value()) {
-        j["system_prompt"] = *config.system_prompt;
-    }
+                       {"use_mlock", config.use_mlock}};
 }
 
-inline void from_json(const nlohmann::json& j, Config& config) {
-    static constexpr std::array<const char*, 13> kAllowedKeys = {"model_path",
-                                                                 "context_size",
-                                                                 "n_gpu_layers",
-                                                                 "use_mmap",
-                                                                 "use_mlock",
-                                                                 "sampling",
-                                                                 "max_tokens",
-                                                                 "stop_sequences",
-                                                                 "system_prompt",
-                                                                 "max_history_messages",
-                                                                 "request_queue_capacity",
-                                                                 "max_tool_iterations",
-                                                                 "max_tool_retries"};
+inline void from_json(const nlohmann::json& j, ModelConfig& config) {
+    static constexpr std::array<const char*, 5> kAllowedKeys = {
+        "model_path", "context_size", "n_gpu_layers", "use_mmap", "use_mlock"};
 
-    detail::reject_unknown_keys(j, "config", kAllowedKeys);
+    detail::reject_unknown_keys(j, "model config", kAllowedKeys);
 
     if (!j.contains("model_path")) {
-        throw std::invalid_argument("Config JSON must contain required key: model_path");
+        throw std::invalid_argument("ModelConfig JSON must contain required key: model_path");
     }
 
-    Config parsed;
+    ModelConfig parsed;
     j.at("model_path").get_to(parsed.model_path);
     if (auto it = j.find("context_size"); it != j.end()) {
         it->get_to(parsed.context_size);
@@ -137,22 +115,25 @@ inline void from_json(const nlohmann::json& j, Config& config) {
     if (auto it = j.find("use_mlock"); it != j.end()) {
         it->get_to(parsed.use_mlock);
     }
-    if (auto it = j.find("sampling"); it != j.end()) {
-        it->get_to(parsed.sampling);
-    }
-    if (auto it = j.find("max_tokens"); it != j.end()) {
-        it->get_to(parsed.max_tokens);
-    }
-    if (auto it = j.find("stop_sequences"); it != j.end()) {
-        it->get_to(parsed.stop_sequences);
-    }
-    if (auto it = j.find("system_prompt"); it != j.end()) {
-        if (it->is_null()) {
-            parsed.system_prompt = std::nullopt;
-        } else {
-            parsed.system_prompt = it->get<std::string>();
-        }
-    }
+
+    config = std::move(parsed);
+}
+
+inline void to_json(nlohmann::json& j, const AgentConfig& config) {
+    j = nlohmann::json{{"max_history_messages", config.max_history_messages},
+                       {"request_queue_capacity", config.request_queue_capacity},
+                       {"max_tool_iterations", config.max_tool_iterations},
+                       {"max_tool_retries", config.max_tool_retries}};
+}
+
+inline void from_json(const nlohmann::json& j, AgentConfig& config) {
+    static constexpr std::array<const char*, 4> kAllowedKeys = {
+        "max_history_messages", "request_queue_capacity", "max_tool_iterations",
+        "max_tool_retries"};
+
+    detail::reject_unknown_keys(j, "agent config", kAllowedKeys);
+
+    AgentConfig parsed;
     if (auto it = j.find("max_history_messages"); it != j.end()) {
         it->get_to(parsed.max_history_messages);
     }
@@ -167,6 +148,36 @@ inline void from_json(const nlohmann::json& j, Config& config) {
     }
 
     config = std::move(parsed);
+}
+
+inline void to_json(nlohmann::json& j, const GenerationOptions& options) {
+    j = nlohmann::json{{"sampling", options.sampling},
+                       {"max_tokens", options.max_tokens},
+                       {"stop_sequences", options.stop_sequences},
+                       {"record_tool_trace", options.record_tool_trace}};
+}
+
+inline void from_json(const nlohmann::json& j, GenerationOptions& options) {
+    static constexpr std::array<const char*, 4> kAllowedKeys = {
+        "sampling", "max_tokens", "stop_sequences", "record_tool_trace"};
+
+    detail::reject_unknown_keys(j, "generation options", kAllowedKeys);
+
+    GenerationOptions parsed;
+    if (auto it = j.find("sampling"); it != j.end()) {
+        it->get_to(parsed.sampling);
+    }
+    if (auto it = j.find("max_tokens"); it != j.end()) {
+        it->get_to(parsed.max_tokens);
+    }
+    if (auto it = j.find("stop_sequences"); it != j.end()) {
+        it->get_to(parsed.stop_sequences);
+    }
+    if (auto it = j.find("record_tool_trace"); it != j.end()) {
+        it->get_to(parsed.record_tool_trace);
+    }
+
+    options = std::move(parsed);
 }
 
 } // namespace zoo

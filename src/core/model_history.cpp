@@ -12,8 +12,8 @@
 
 namespace zoo::core {
 
-void Model::set_system_prompt(const std::string& prompt) {
-    Message sys_msg = Message::system(prompt);
+void Model::set_system_prompt(std::string_view prompt) {
+    Message sys_msg = Message::system(std::string(prompt));
 
     if (!messages_.empty() && messages_[0].role == Role::System) {
         estimated_tokens_ -= estimate_message_tokens(messages_[0]);
@@ -26,21 +26,21 @@ void Model::set_system_prompt(const std::string& prompt) {
     note_history_rewrite();
 }
 
-Expected<void> Model::add_message(const Message& message) {
-    auto err = validate_role_sequence(messages_, message.role);
+Expected<void> Model::add_message(MessageView message) {
+    auto err = validate_role_sequence(messages_, message.role());
     if (!err) {
         return std::unexpected(err.error());
     }
 
-    messages_.push_back(message);
-    estimated_tokens_ += estimate_message_tokens(message);
+    messages_.push_back(Message::from_view(message));
+    estimated_tokens_ += estimate_message_tokens(messages_.back());
     note_history_append();
     trim_history_to_fit();
     return {};
 }
 
-std::vector<Message> Model::get_history() const {
-    return messages_;
+HistorySnapshot Model::get_history() const {
+    return HistorySnapshot{messages_};
 }
 
 void Model::clear_history() {
@@ -49,8 +49,8 @@ void Model::clear_history() {
     note_history_reset();
 }
 
-void Model::replace_messages(std::vector<Message> messages) {
-    messages_ = std::move(messages);
+void Model::replace_history(HistorySnapshot snapshot) {
+    messages_ = std::move(snapshot.messages);
     estimated_tokens_ = 0;
     for (const auto& m : messages_) {
         estimated_tokens_ += estimate_message_tokens(m);
@@ -64,8 +64,14 @@ void Model::replace_messages(std::vector<Message> messages) {
     prompt_state_.committed_prompt_len = 0;
 }
 
+HistorySnapshot Model::swap_history(HistorySnapshot snapshot) {
+    HistorySnapshot previous{std::move(messages_)};
+    replace_history(std::move(snapshot));
+    return previous;
+}
+
 int Model::context_size() const noexcept {
-    return config_.context_size;
+    return model_config_.context_size;
 }
 
 int Model::estimated_tokens() const noexcept {
@@ -73,14 +79,14 @@ int Model::estimated_tokens() const noexcept {
 }
 
 bool Model::is_context_exceeded() const noexcept {
-    return estimated_tokens_ > config_.context_size;
+    return estimated_tokens_ > model_config_.context_size;
 }
 
-int Model::estimate_tokens(const std::string& text) const {
+int Model::estimate_tokens(std::string_view text) const {
     if (vocab_) {
         static_assert(sizeof(int) == sizeof(llama_token));
         const int32_t raw =
-            llama_tokenize(vocab_, text.c_str(), text.length(), nullptr, 0, false, true);
+            llama_tokenize(vocab_, text.data(), text.length(), nullptr, 0, false, true);
         const int n = (raw < 0) ? -raw : raw;
         if (n > 0) {
             return n;
@@ -91,8 +97,8 @@ int Model::estimate_tokens(const std::string& text) const {
 
 int Model::estimate_message_tokens(const Message& message) const {
     int total = estimate_tokens(message.content) + kTemplateOverheadPerMessage;
-    if (message.tool_call_id.has_value()) {
-        total += estimate_tokens(*message.tool_call_id);
+    if (!message.tool_call_id.empty()) {
+        total += estimate_tokens(message.tool_call_id);
     }
     for (const auto& tc : message.tool_calls) {
         total += estimate_tokens(tc.name);
@@ -102,20 +108,20 @@ int Model::estimate_message_tokens(const Message& message) const {
     return total;
 }
 
-void Model::trim_history_to_fit() {
+void Model::trim_history(size_t max_non_system_messages) {
     const size_t system_offset =
         (!messages_.empty() && messages_.front().role == Role::System) ? 1u : 0u;
-    const size_t max_messages = config_.max_history_messages;
 
-    if (messages_.size() <= system_offset + max_messages) {
+    if (messages_.size() <= system_offset + max_non_system_messages) {
         return;
     }
 
-    size_t erase_end = messages_.size() - max_messages;
+    size_t erase_end = messages_.size() - max_non_system_messages;
     if (erase_end < system_offset) {
         erase_end = system_offset;
     }
 
+    // Align to a user-message boundary so we don't start mid-exchange.
     while (erase_end < messages_.size() && messages_[erase_end].role != Role::User) {
         ++erase_end;
     }
@@ -134,6 +140,11 @@ void Model::trim_history_to_fit() {
     messages_.erase(messages_.begin() + static_cast<std::ptrdiff_t>(system_offset),
                     messages_.begin() + static_cast<std::ptrdiff_t>(erase_end));
     note_history_rewrite();
+}
+
+void Model::trim_history_to_fit() {
+    // Called from add_message() — no longer applies an implicit budget.
+    // The agent runtime owns retention policy via trim_history().
 }
 
 void Model::rollback_last_message() noexcept {

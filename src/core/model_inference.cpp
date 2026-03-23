@@ -13,6 +13,7 @@
 #include <chrono>
 #include <exception>
 #include <llama.h>
+#include <span>
 #include <string_view>
 
 namespace zoo::core {
@@ -50,8 +51,8 @@ size_t find_stop_sequence(const std::string& generated_text,
 
 Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens, int max_tokens,
                                            const std::vector<std::string>& stop_sequences,
-                                           const std::optional<TokenCallback>& on_token,
-                                           const CancellationCallback& should_cancel) {
+                                           TokenCallback on_token,
+                                           CancellationCallback should_cancel) {
     std::string generated_text;
     const int effective_max = (max_tokens > 0) ? max_tokens : context_size_;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
@@ -60,9 +61,9 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     bool tool_stream_suppressed = false;
     std::optional<ToolCallWordTriggerFilter> word_trigger_filter;
     if (on_token && tool_state_ && grammar_mode_ == GrammarMode::NativeToolCall) {
-        auto word_triggers = extract_word_triggers(tool_state_->grammar_triggers);
+        const auto& word_triggers = tool_state_->trigger_matcher.word_triggers();
         if (!word_triggers.empty()) {
-            word_trigger_filter.emplace(std::move(word_triggers));
+            word_trigger_filter.emplace(std::span<const std::string>(word_triggers));
         }
     }
 
@@ -149,13 +150,13 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
                 // before forwarding anything visible from it.
                 if (!tool_stream_suppressed && tool_state_ &&
                     grammar_mode_ == GrammarMode::NativeToolCall &&
-                    is_tool_trigger_detected(generated_text, tool_state_->grammar_triggers)) {
+                    tool_state_->trigger_matcher.is_detected(generated_text)) {
                     tool_stream_suppressed = true;
                     visible_chunk.clear();
                 }
 
                 if (!visible_chunk.empty()) {
-                    auto action = invoke_token_callback(*on_token, visible_chunk);
+                    auto action = invoke_token_callback(on_token, visible_chunk);
                     if (!action) {
                         return std::unexpected(action.error());
                     }
@@ -191,7 +192,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     if (on_token && word_trigger_filter && !tool_stream_suppressed && !stopped_by_callback) {
         std::string trailing = word_trigger_filter->finalize();
         if (!trailing.empty()) {
-            auto action = invoke_token_callback(*on_token, trailing);
+            auto action = invoke_token_callback(on_token, trailing);
             if (!action) {
                 return std::unexpected(action.error());
             }
@@ -201,12 +202,21 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     return generated_text;
 }
 
-Expected<Response> Model::generate(const std::string& user_message,
-                                   std::optional<TokenCallback> on_token,
-                                   CancellationCallback should_cancel) {
-    auto start_time = std::chrono::steady_clock::now();
+Expected<TextResponse> Model::generate(std::string_view user_message,
+                                       const GenerationOptions& options, TokenCallback on_token,
+                                       CancellationCallback should_cancel) {
+    return generate(MessageView{Role::User, user_message}, options, on_token, should_cancel);
+}
 
-    auto add_result = add_message(Message::user(user_message));
+Expected<TextResponse> Model::generate(MessageView message, const GenerationOptions& options,
+                                       TokenCallback on_token, CancellationCallback should_cancel) {
+    auto start_time = std::chrono::steady_clock::now();
+    auto effective_options = resolve_generation_options(options);
+    if (auto validation = effective_options.validate(); !validation) {
+        return std::unexpected(validation.error());
+    }
+
+    auto add_result = add_message(message);
     if (!add_result) {
         return std::unexpected(add_result.error());
     }
@@ -215,8 +225,7 @@ Expected<Response> Model::generate(const std::string& user_message,
     bool first_token_received = false;
     int completion_tokens = 0;
 
-    const std::optional<TokenCallback> effective_callback =
-        on_token ? std::move(on_token) : config_.on_token;
+    active_sampling_ = effective_options.sampling;
 
     auto wrapped_callback = [&](std::string_view token) -> TokenAction {
         if (!first_token_received) {
@@ -224,8 +233,8 @@ Expected<Response> Model::generate(const std::string& user_message,
             first_token_received = true;
         }
         ++completion_tokens;
-        if (effective_callback) {
-            return (*effective_callback)(token);
+        if (on_token) {
+            return on_token(token);
         }
         return TokenAction::Continue;
     };
@@ -264,16 +273,15 @@ Expected<Response> Model::generate(const std::string& user_message,
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
     // Merge config stop sequences with tool-calling additional stops.
-    auto all_stops = config_.stop_sequences;
+    auto all_stops = effective_options.stop_sequences;
     if (tool_state_) {
         for (const auto& s : tool_state_->additional_stops) {
             all_stops.push_back(s);
         }
     }
 
-    auto generate_result =
-        run_inference(*tokens_result, config_.max_tokens, all_stops,
-                      std::optional<TokenCallback>(wrapped_callback), should_cancel);
+    auto generate_result = run_inference(*tokens_result, effective_options.max_tokens, all_stops,
+                                         TokenCallback(wrapped_callback), should_cancel);
 
     if (!generate_result) {
         rollback_last_message();
@@ -302,7 +310,7 @@ Expected<Response> Model::generate(const std::string& user_message,
 
     auto end_time = std::chrono::steady_clock::now();
 
-    Response response;
+    TextResponse response;
     response.text = messages_.back().content;
     response.usage.prompt_tokens = prompt_tokens;
     response.usage.completion_tokens = completion_tokens;
@@ -325,9 +333,16 @@ Expected<Response> Model::generate(const std::string& user_message,
     return response;
 }
 
-Expected<Model::GenerationResult>
-Model::generate_from_history(std::optional<TokenCallback> on_token,
-                             CancellationCallback should_cancel) {
+Expected<Model::GenerationResult> Model::generate_from_history(const GenerationOptions& options,
+                                                               TokenCallback on_token,
+                                                               CancellationCallback should_cancel) {
+    auto effective_options = resolve_generation_options(options);
+    if (auto validation = effective_options.validate(); !validation) {
+        return std::unexpected(validation.error());
+    }
+
+    active_sampling_ = effective_options.sampling;
+
     auto prompt_result = render_prompt_delta();
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
@@ -357,15 +372,15 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
     // Merge config stop sequences with tool-calling additional stops.
-    auto all_stops = config_.stop_sequences;
+    auto all_stops = effective_options.stop_sequences;
     if (tool_state_) {
         for (const auto& s : tool_state_->additional_stops) {
             all_stops.push_back(s);
         }
     }
 
-    auto text_result =
-        run_inference(*tokens_result, config_.max_tokens, all_stops, on_token, should_cancel);
+    auto text_result = run_inference(*tokens_result, effective_options.max_tokens, all_stops,
+                                     on_token, should_cancel);
 
     if (!text_result) {
         return std::unexpected(text_result.error());
@@ -385,6 +400,13 @@ Model::generate_from_history(std::optional<TokenCallback> on_token,
 
     return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected,
                             std::move(parsed_content), std::move(parsed_tool_calls)};
+}
+
+GenerationOptions Model::resolve_generation_options(const GenerationOptions& overrides) const {
+    if (overrides.is_default()) {
+        return default_generation_options_;
+    }
+    return overrides;
 }
 
 } // namespace zoo::core

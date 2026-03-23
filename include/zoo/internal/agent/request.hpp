@@ -1,69 +1,56 @@
 /**
  * @file request.hpp
- * @brief Internal request payload shared by agent runtime components.
+ * @brief Internal request payload and queued descriptor types.
  */
 
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
-#include <future>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
-#include <string_view>
-#include <utility>
 #include <vector>
 #include <zoo/core/types.hpp>
 
 namespace zoo::internal::agent {
 
 /**
- * @brief Specifies whether a request appends to or replaces the agent's retained history.
+ * @brief Specifies whether a request appends to or replaces retained history.
  */
 enum class HistoryMode {
-    Append,  ///< New messages are appended to the existing conversation history.
-    Replace, ///< The provided message list replaces the existing history for this request.
+    Append,
+    Replace,
 };
 
 /**
- * @brief One queued agent request plus its shared completion state.
+ * @brief Final result family expected for the request.
  */
-struct Request {
+enum class ResultKind {
+    Text,
+    Extraction,
+};
+
+/**
+ * @brief Full per-request payload stored in a request slot.
+ */
+struct RequestPayload {
     std::vector<Message> messages;
     HistoryMode history_mode = HistoryMode::Append;
-    std::optional<std::function<void(std::string_view)>> streaming_callback;
-    std::shared_ptr<std::promise<Expected<Response>>> promise;
-    RequestId id = 0;
-    std::shared_ptr<std::atomic<bool>> cancelled;
+    GenerationOptions options;
+    AsyncTextCallback streaming_callback;
     std::optional<nlohmann::json> extraction_schema;
+    ResultKind result_kind = ResultKind::Text;
+};
 
-    Request(Message msg,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt)
-        : streaming_callback(std::move(callback)) {
-        messages.emplace_back(std::move(msg));
-    }
+/**
+ * @brief Small queued descriptor pointing at one occupied request slot.
+ */
+struct QueuedRequest {
+    uint32_t slot = 0;
+    uint32_t generation = 0;
 
-    Request(std::vector<Message> seed_messages, HistoryMode mode,
-            std::optional<std::function<void(std::string_view)>> callback = std::nullopt)
-        : messages(std::move(seed_messages)), history_mode(mode),
-          streaming_callback(std::move(callback)) {}
-
-    Request(Message msg, std::optional<std::function<void(std::string_view)>> callback,
-            std::shared_ptr<std::promise<Expected<Response>>> request_promise, RequestId request_id,
-            std::shared_ptr<std::atomic<bool>> cancel_flag)
-        : streaming_callback(std::move(callback)), promise(std::move(request_promise)),
-          id(request_id), cancelled(std::move(cancel_flag)) {
-        messages.emplace_back(std::move(msg));
-    }
-
-    Request(std::vector<Message> seed_messages, HistoryMode mode,
-            std::optional<std::function<void(std::string_view)>> callback,
-            std::shared_ptr<std::promise<Expected<Response>>> request_promise, RequestId request_id,
-            std::shared_ptr<std::atomic<bool>> cancel_flag)
-        : messages(std::move(seed_messages)), history_mode(mode),
-          streaming_callback(std::move(callback)), promise(std::move(request_promise)),
-          id(request_id), cancelled(std::move(cancel_flag)) {}
+    bool operator==(const QueuedRequest& other) const = default;
 };
 
 } // namespace zoo::internal::agent

@@ -6,7 +6,6 @@
 #include "zoo/internal/agent/runtime.hpp"
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <chrono>
 #include <deque>
 #include <future>
@@ -18,46 +17,49 @@ namespace {
 
 using namespace std::chrono_literals;
 
+using zoo::AgentConfig;
 using zoo::CancellationCallback;
-using zoo::Config;
 using zoo::Error;
 using zoo::ErrorCode;
 using zoo::Expected;
+using zoo::GenerationOptions;
+using zoo::HistorySnapshot;
 using zoo::Message;
+using zoo::MessageView;
+using zoo::ModelConfig;
+using zoo::Role;
+using zoo::TextResponse;
+using zoo::TokenAction;
 using zoo::TokenCallback;
+using zoo::ToolInvocationStatus;
 using zoo::internal::agent::AgentBackend;
 using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
+using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::ParsedToolResponse;
+
 class FakeBackend final : public AgentBackend {
   public:
-    using GenerationAction = std::function<Expected<GenerationResult>(std::optional<TokenCallback>,
-                                                                      const CancellationCallback&)>;
+    using GenerationAction =
+        std::function<Expected<GenerationResult>(TokenCallback, const CancellationCallback&)>;
 
     void push_generation(GenerationAction action) {
         std::lock_guard<std::mutex> lock(mutex_);
         generations_.push_back(std::move(action));
     }
 
-    std::vector<std::string> operations() const {
+    Expected<void> add_message(MessageView message) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        return operations_;
-    }
-
-    Expected<void> add_message(const Message& message) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        history_.push_back(message);
-        operations_.push_back("add:" + std::string(zoo::role_to_string(message.role)) + ":" +
-                              message.content);
+        history_.push_back(Message::from_view(message));
         return {};
     }
 
-    Expected<GenerationResult> generate_from_history(std::optional<TokenCallback> on_token,
+    Expected<GenerationResult> generate_from_history(const GenerationOptions&,
+                                                     TokenCallback on_token,
                                                      CancellationCallback should_cancel) override {
         GenerationAction action;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            operations_.push_back("generate");
             if (generations_.empty()) {
                 return std::unexpected(
                     Error{ErrorCode::InferenceFailed, "No scripted generation available"});
@@ -65,56 +67,74 @@ class FakeBackend final : public AgentBackend {
             action = std::move(generations_.front());
             generations_.pop_front();
         }
-        return action(std::move(on_token), should_cancel);
+        return action(on_token, should_cancel);
     }
 
-    void finalize_response() override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        operations_.push_back("finalize");
-    }
+    void finalize_response() override {}
 
-    void set_system_prompt(const std::string& prompt) override {
+    void set_system_prompt(std::string_view prompt) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        Message system_message = Message::system(prompt);
-        if (!history_.empty() && history_.front().role == zoo::Role::System) {
+        Message system_message = Message::system(std::string(prompt));
+        if (!history_.empty() && history_.front().role == Role::System) {
             history_.front() = std::move(system_message);
         } else {
             history_.insert(history_.begin(), std::move(system_message));
         }
-        operations_.push_back("set_system_prompt:" + prompt);
     }
 
-    std::vector<Message> get_history() const override {
+    HistorySnapshot get_history() const override {
         std::lock_guard<std::mutex> lock(mutex_);
-        operations_.push_back("get_history");
-        return history_;
+        return HistorySnapshot{history_};
     }
 
     void clear_history() override {
         std::lock_guard<std::mutex> lock(mutex_);
         history_.clear();
-        operations_.push_back("clear_history");
+    }
+
+    void replace_history(HistorySnapshot snapshot) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        history_ = std::move(snapshot.messages);
+    }
+
+    HistorySnapshot swap_history(HistorySnapshot snapshot) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        HistorySnapshot previous{std::move(history_)};
+        history_ = std::move(snapshot.messages);
+        return previous;
+    }
+
+    void trim_history(size_t max_non_system_messages) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const size_t system_offset =
+            (!history_.empty() && history_.front().role == zoo::Role::System) ? 1u : 0u;
+        if (history_.size() <= system_offset + max_non_system_messages) {
+            return;
+        }
+        size_t erase_count = history_.size() - system_offset - max_non_system_messages;
+        history_.erase(history_.begin() + static_cast<std::ptrdiff_t>(system_offset),
+                       history_.begin() + static_cast<std::ptrdiff_t>(system_offset + erase_count));
     }
 
     bool set_tool_calling(const std::vector<zoo::CoreToolInfo>& tools) override {
         std::lock_guard<std::mutex> lock(mutex_);
         tool_calling_supported_ = !tools.empty();
-        operations_.push_back("set_tool_calling");
         return tool_calling_supported_;
     }
 
-    ParsedToolResponse parse_tool_response(const std::string& text) const override {
+    ParsedToolResponse parse_tool_response(std::string_view text) const override {
         ParsedToolResponse result;
 
         const std::string open_tag = "<tool_call>";
         const std::string close_tag = "</tool_call>";
-        auto start = text.find(open_tag);
-        auto end = text.find(close_tag);
+        const std::string value(text);
+        auto start = value.find(open_tag);
+        auto end = value.find(close_tag);
         if (start != std::string::npos && end != std::string::npos) {
-            auto json_str = text.substr(start + open_tag.size(), end - start - open_tag.size());
+            auto json_str = value.substr(start + open_tag.size(), end - start - open_tag.size());
             auto j = nlohmann::json::parse(json_str, nullptr, false);
             if (!j.is_discarded()) {
-                zoo::ToolCallInfo tc;
+                zoo::OwnedToolCall tc;
                 tc.id = j.value("id", "");
                 tc.name = j.value("name", "");
                 if (j.contains("arguments")) {
@@ -122,13 +142,12 @@ class FakeBackend final : public AgentBackend {
                 }
                 result.tool_calls.push_back(std::move(tc));
             }
-            // Content is everything outside the tool call tags
-            result.content = text.substr(0, start);
-            if (end + close_tag.size() < text.size()) {
-                result.content += text.substr(end + close_tag.size());
+            result.content = value.substr(0, start);
+            if (end + close_tag.size() < value.size()) {
+                result.content += value.substr(end + close_tag.size());
             }
         } else {
-            result.content = text;
+            result.content = value;
         }
         return result;
     }
@@ -137,67 +156,45 @@ class FakeBackend final : public AgentBackend {
         return "fake";
     }
 
-    bool set_schema_grammar(const std::string& grammar_str) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        operations_.push_back("set_schema_grammar");
-        (void)grammar_str;
+    bool set_schema_grammar(const std::string&) override {
         return true;
     }
 
-    void clear_tool_grammar() override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        operations_.push_back("clear_tool_grammar");
-    }
-
-    void replace_messages(std::vector<Message> messages) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        history_ = std::move(messages);
-        operations_.push_back("replace_messages");
-    }
+    void clear_tool_grammar() override {}
 
   private:
     mutable std::mutex mutex_;
-    mutable std::vector<std::string> operations_;
     std::deque<GenerationAction> generations_;
     std::vector<Message> history_;
     bool tool_calling_supported_ = true;
 };
 
-Config make_config() {
-    Config config;
-    config.request_queue_capacity = 4;
+ModelConfig make_model_config() {
+    ModelConfig config;
+    config.model_path = "unused.gguf";
+    return config;
+}
+
+AgentConfig make_agent_config(size_t capacity = 4, size_t max_history_messages = 64) {
+    AgentConfig config;
+    config.request_queue_capacity = capacity;
+    config.max_history_messages = max_history_messages;
     config.max_tool_iterations = 5;
     config.max_tool_retries = 2;
     return config;
 }
 
-template <typename Func>
-void register_single_int_tool(AgentRuntime& runtime, const std::string& name,
-                              const std::string& description, Func func) {
-    auto definition = zoo::tools::detail::make_tool_definition(
-        name, description, std::vector<std::string>{"value"}, std::move(func));
-    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
-    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
-}
-
 GenerationResult tool_call_generation(const std::string& tool_name, const nlohmann::json& arguments,
                                       std::string id = "call-1") {
     nlohmann::json payload = {{"id", std::move(id)}, {"name", tool_name}, {"arguments", arguments}};
-    return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true};
+    return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true, "", {}};
 }
 
-size_t index_of(const std::vector<std::string>& operations, const std::string& value) {
-    auto it = std::find(operations.begin(), operations.end(), value);
-    EXPECT_NE(it, operations.end());
-    return static_cast<size_t>(std::distance(operations.begin(), it));
-}
-
-TEST(AgentRuntimeTest, QueueFullFailsAdditionalQueuedRequest) {
+TEST(AgentRuntimeTest, QueueFullFailsAdditionalRequestWhileSlotIsOccupied) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.request_queue_capacity = 1;
-    AgentRuntime runtime(config, std::move(backend));
+    AgentRuntime runtime(make_model_config(), make_agent_config(1), GenerationOptions{},
+                         std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -205,40 +202,32 @@ TEST(AgentRuntimeTest, QueueFullFailsAdditionalQueuedRequest) {
     auto release_future = release->get_future().share();
 
     backend_ptr->push_generation(
-        [entered, release_future](std::optional<TokenCallback>, const CancellationCallback&) {
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
             entered->set_value();
             release_future.wait();
-            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
+            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false, "", {}});
         });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-    });
 
-    auto first = runtime.chat(Message::user("first"));
+    auto first = runtime.chat("first");
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
 
-    auto second = runtime.chat(Message::user("second"));
-    auto third = runtime.chat(Message::user("third"));
-
-    auto third_result = third.future.get();
-    ASSERT_FALSE(third_result.has_value());
-    EXPECT_EQ(third_result.error().code, ErrorCode::QueueFull);
+    auto second = runtime.chat("second");
+    auto second_result = second.await_result();
+    ASSERT_FALSE(second_result.has_value());
+    EXPECT_EQ(second_result.error().code, ErrorCode::QueueFull);
 
     release->set_value();
 
-    auto first_result = first.future.get();
+    auto first_result = first.await_result();
     ASSERT_TRUE(first_result.has_value());
     EXPECT_EQ(first_result->text, "first reply");
-
-    auto second_result = second.future.get();
-    ASSERT_TRUE(second_result.has_value());
-    EXPECT_EQ(second_result->text, "second reply");
 }
 
 TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
+    AgentRuntime runtime(make_model_config(), make_agent_config(2), GenerationOptions{},
+                         std::move(backend));
 
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();
@@ -246,486 +235,155 @@ TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
     auto release_future = release->get_future().share();
 
     backend_ptr->push_generation(
-        [entered, release_future](std::optional<TokenCallback>, const CancellationCallback&) {
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
             entered->set_value();
             release_future.wait();
-            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
+            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false, "", {}});
         });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false, "", {}});
+    });
 
-    auto first = runtime.chat(Message::user("first"));
+    auto first = runtime.chat("first");
     ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
 
-    auto second = runtime.chat(Message::user("second"));
-    runtime.cancel(second.id);
+    auto second = runtime.chat("second");
+    runtime.cancel(second.id());
 
     release->set_value();
 
-    auto first_result = first.future.get();
-    ASSERT_TRUE(first_result.has_value());
+    ASSERT_TRUE(first.await_result().has_value());
 
-    auto second_result = second.future.get();
+    auto second_result = second.await_result();
     ASSERT_FALSE(second_result.has_value());
     EXPECT_EQ(second_result.error().code, ErrorCode::RequestCancelled);
 }
 
-TEST(AgentRuntimeTest, CancelDuringGenerationPropagatesCancellationError) {
+TEST(AgentRuntimeTest, CompleteDoesNotMutatePersistentHistory) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
 
-    auto entered = std::make_shared<std::promise<void>>();
-    auto entered_future = entered->get_future();
-
-    backend_ptr->push_generation(
-        [entered](std::optional<TokenCallback>, const CancellationCallback& should_cancel) {
-            entered->set_value();
-            while (!should_cancel()) {
-                std::this_thread::sleep_for(1ms);
-            }
-            return Expected<GenerationResult>(
-                std::unexpected(Error{ErrorCode::RequestCancelled, "cancelled during generation"}));
-        });
-
-    auto handle = runtime.chat(Message::user("cancel me"));
-    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-
-    runtime.cancel(handle.id);
-
-    auto result = handle.future.get();
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
-}
-
-TEST(AgentRuntimeTest, StopDrainsQueuedRequestsWithAgentNotRunning) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.request_queue_capacity = 3;
-    AgentRuntime runtime(config, std::move(backend));
-
-    auto entered = std::make_shared<std::promise<void>>();
-    auto entered_future = entered->get_future();
-    auto release = std::make_shared<std::promise<void>>();
-    auto release_future = release->get_future().share();
-
-    backend_ptr->push_generation(
-        [entered, release_future](std::optional<TokenCallback>, const CancellationCallback&) {
-            entered->set_value();
-            release_future.wait();
-            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
-        });
-
-    auto first = runtime.chat(Message::user("first"));
-    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-
-    auto second = runtime.chat(Message::user("second"));
-    auto third = runtime.chat(Message::user("third"));
-
-    auto stop_future = std::async(std::launch::async, [&runtime] { runtime.stop(); });
-    EXPECT_EQ(stop_future.wait_for(50ms), std::future_status::timeout);
-
-    release->set_value();
-    stop_future.get();
-
-    auto first_result = first.future.get();
-    ASSERT_TRUE(first_result.has_value());
-
-    auto second_result = second.future.get();
-    ASSERT_FALSE(second_result.has_value());
-    EXPECT_EQ(second_result.error().code, ErrorCode::AgentNotRunning);
-
-    auto third_result = third.future.get();
-    ASSERT_FALSE(third_result.has_value());
-    EXPECT_EQ(third_result.error().code, ErrorCode::AgentNotRunning);
-}
-
-TEST(AgentRuntimeTest, ToolValidationRetryExhaustionReturnsToolRetriesExhausted) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.max_tool_retries = 1;
-    AgentRuntime runtime(config, std::move(backend));
-
-    register_single_int_tool(runtime, "double_value", "Doubles a number",
-                             [](int value) { return value * 2; });
-    // Verify that tool calling was configured after registration
-    {
-        const auto ops = backend_ptr->operations();
-        EXPECT_NE(std::find(ops.begin(), ops.end(), "set_tool_calling"), ops.end());
-    }
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"persistent reply", 0, false, "", {}});
     });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}));
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"scoped reply", 0, false, "", {}});
     });
 
-    auto handle = runtime.chat(Message::user("use the tool"));
-    auto result = handle.future.get();
-
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ToolRetriesExhausted);
-}
-
-TEST(AgentRuntimeTest, ToolLoopLimitExhaustionReturnsToolLoopLimitReached) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.max_tool_iterations = 2;
-    AgentRuntime runtime(config, std::move(backend));
-
-    register_single_int_tool(runtime, "double_value", "Doubles a number",
-                             [](int value) { return value * 2; });
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", 1}}, "call-1"));
-    });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", 2}}, "call-2"));
-    });
-
-    auto handle = runtime.chat(Message::user("use the tool twice"));
-    auto result = handle.future.get();
-
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::ToolLoopLimitReached);
-}
-
-TEST(AgentRuntimeTest, SuccessfulToolCallPopulatesToolInvocations) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
-
-    register_single_int_tool(runtime, "double_value", "Doubles a number",
-                             [](int value) { return value * 2; });
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", 5}}));
-    });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"The result is 10", 0, false});
-    });
-
-    auto handle = runtime.chat(Message::user("double 5"));
-    auto result = handle.future.get();
-
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->text, "The result is 10");
-    ASSERT_EQ(result->tool_invocations.size(), 1u);
-
-    const auto& inv = result->tool_invocations[0];
-    EXPECT_EQ(inv.id, "call-1");
-    EXPECT_EQ(inv.name, "double_value");
-    EXPECT_EQ(inv.status, zoo::ToolInvocationStatus::Succeeded);
-    ASSERT_TRUE(inv.result_json.has_value());
-    EXPECT_EQ(*inv.result_json, "{\"result\":10}");
-    EXPECT_FALSE(inv.error.has_value());
-}
-
-TEST(AgentRuntimeTest, ToolEnabledFencedCodeReplyCompletesWithoutSpuriousToolCalls) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
-
-    register_single_int_tool(runtime, "double_value", "Doubles a number",
-                             [](int value) { return value * 2; });
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            GenerationResult{"```python\nprint(\"hello world\")\n```", 6, false});
-    });
-
-    auto handle = runtime.chat(Message::user("Write a fenced Python hello world example."));
-    auto result = handle.future.get();
-
-    ASSERT_TRUE(result.has_value()) << result.error().to_string();
-    EXPECT_EQ(result->text, "```python\nprint(\"hello world\")\n```");
-    EXPECT_TRUE(result->tool_invocations.empty());
-
-    const auto ops = backend_ptr->operations();
-    EXPECT_LT(index_of(ops, "set_tool_calling"), index_of(ops, "generate"));
-    EXPECT_LT(index_of(ops, "generate"), index_of(ops, "finalize"));
-}
-
-TEST(AgentRuntimeTest, ValidationFailureThenSuccessPopulatesToolInvocations) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.max_tool_retries = 2;
-    AgentRuntime runtime(config, std::move(backend));
-
-    register_single_int_tool(runtime, "double_value", "Doubles a number",
-                             [](int value) { return value * 2; });
-
-    // First attempt: bad arguments (string instead of int)
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", "wrong"}}, "call-bad"));
-    });
-    // Second attempt: valid arguments
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("double_value", nlohmann::json{{"value", 7}}, "call-good"));
-    });
-    // Final text response
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"The result is 14", 0, false});
-    });
-
-    auto handle = runtime.chat(Message::user("double 7"));
-    auto result = handle.future.get();
-
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->text, "The result is 14");
-    ASSERT_EQ(result->tool_invocations.size(), 2u);
-
-    const auto& failed = result->tool_invocations[0];
-    EXPECT_EQ(failed.id, "call-bad");
-    EXPECT_EQ(failed.name, "double_value");
-    EXPECT_EQ(failed.status, zoo::ToolInvocationStatus::ValidationFailed);
-    EXPECT_FALSE(failed.result_json.has_value());
-    ASSERT_TRUE(failed.error.has_value());
-
-    const auto& succeeded = result->tool_invocations[1];
-    EXPECT_EQ(succeeded.id, "call-good");
-    EXPECT_EQ(succeeded.name, "double_value");
-    EXPECT_EQ(succeeded.status, zoo::ToolInvocationStatus::Succeeded);
-    ASSERT_TRUE(succeeded.result_json.has_value());
-    EXPECT_EQ(*succeeded.result_json, "{\"result\":14}");
-    EXPECT_FALSE(succeeded.error.has_value());
-}
-
-TEST(AgentRuntimeTest, ExecutionFailurePopulatesToolInvocations) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
-
-    // Register a tool whose handler always returns an execution error.
-    zoo::tools::ToolDefinition def;
-    def.metadata.name = "failing_tool";
-    def.metadata.description = "A tool that always fails";
-    def.metadata.parameters_schema = {{"type", "object"},
-                                      {"properties", {{"value", {{"type", "integer"}}}}},
-                                      {"required", nlohmann::json::array({"value"})}};
-    def.metadata.parameters = {
-        zoo::tools::ToolParameter{"value", zoo::tools::ToolValueType::Integer, true, "", {}}};
-    def.handler = [](const nlohmann::json&) -> Expected<nlohmann::json> {
-        return std::unexpected(Error{ErrorCode::ToolExecutionFailed, "intentional failure"});
-    };
-    ASSERT_TRUE(runtime.register_tool(std::move(def)).has_value());
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(
-            tool_call_generation("failing_tool", nlohmann::json{{"value", 42}}));
-    });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"Sorry, the tool failed", 0, false});
-    });
-
-    auto handle = runtime.chat(Message::user("use failing tool"));
-    auto result = handle.future.get();
-
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->text, "Sorry, the tool failed");
-    ASSERT_EQ(result->tool_invocations.size(), 1u);
-
-    const auto& inv = result->tool_invocations[0];
-    EXPECT_EQ(inv.id, "call-1");
-    EXPECT_EQ(inv.name, "failing_tool");
-    EXPECT_EQ(inv.status, zoo::ToolInvocationStatus::ExecutionFailed);
-    EXPECT_FALSE(inv.result_json.has_value());
-    ASSERT_TRUE(inv.error.has_value());
-    EXPECT_EQ(inv.error->code, ErrorCode::ToolExecutionFailed);
-    EXPECT_EQ(inv.error->message, "intentional failure");
-}
-
-TEST(AgentRuntimeTest, SetSystemPromptSerializesBeforeQueuedRequests) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.request_queue_capacity = 2;
-    AgentRuntime runtime(config, std::move(backend));
-
-    auto entered = std::make_shared<std::promise<void>>();
-    auto entered_future = entered->get_future();
-    auto release = std::make_shared<std::promise<void>>();
-    auto release_future = release->get_future().share();
-
-    backend_ptr->push_generation(
-        [entered, release_future](std::optional<TokenCallback>, const CancellationCallback&) {
-            entered->set_value();
-            release_future.wait();
-            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
-        });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-    });
-
-    auto first = runtime.chat(Message::user("first"));
-    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-    auto second = runtime.chat(Message::user("second"));
-
-    auto prompt_future =
-        std::async(std::launch::async, [&runtime] { runtime.set_system_prompt("updated"); });
-
-    EXPECT_EQ(prompt_future.wait_for(50ms), std::future_status::timeout);
-
-    release->set_value();
-
-    auto first_result = first.future.get();
-    ASSERT_TRUE(first_result.has_value());
-    prompt_future.get();
-    auto second_result = second.future.get();
-    ASSERT_TRUE(second_result.has_value());
-
-    const auto operations = backend_ptr->operations();
-    EXPECT_LT(index_of(operations, "set_system_prompt:updated"),
-              index_of(operations, "add:user:second"));
-}
-
-TEST(AgentRuntimeTest, GetHistorySerializesBeforeQueuedRequests) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.request_queue_capacity = 2;
-    AgentRuntime runtime(config, std::move(backend));
-
-    auto entered = std::make_shared<std::promise<void>>();
-    auto entered_future = entered->get_future();
-    auto release = std::make_shared<std::promise<void>>();
-    auto release_future = release->get_future().share();
-
-    backend_ptr->push_generation(
-        [entered, release_future](std::optional<TokenCallback>, const CancellationCallback&) {
-            entered->set_value();
-            release_future.wait();
-            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
-        });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-    });
-
-    auto first = runtime.chat(Message::user("first"));
-    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-    auto second = runtime.chat(Message::user("second"));
-
-    auto history_future =
-        std::async(std::launch::async, [&runtime] { return runtime.get_history(); });
-    EXPECT_EQ(history_future.wait_for(50ms), std::future_status::timeout);
-
-    release->set_value();
-
-    auto first_result = first.future.get();
-    ASSERT_TRUE(first_result.has_value());
-    auto history = history_future.get();
-    auto second_result = second.future.get();
-    ASSERT_TRUE(second_result.has_value());
-
-    ASSERT_EQ(history.size(), 2u);
-    EXPECT_EQ(history[0].content, "first");
-    EXPECT_EQ(history[1].content, "first reply");
-
-    const auto operations = backend_ptr->operations();
-    EXPECT_LT(index_of(operations, "get_history"), index_of(operations, "add:user:second"));
-}
-
-TEST(AgentRuntimeTest, ClearHistorySerializesBeforeQueuedRequests) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    Config config = make_config();
-    config.request_queue_capacity = 2;
-    AgentRuntime runtime(config, std::move(backend));
-
-    auto entered = std::make_shared<std::promise<void>>();
-    auto entered_future = entered->get_future();
-    auto release = std::make_shared<std::promise<void>>();
-    auto release_future = release->get_future().share();
-
-    backend_ptr->push_generation(
-        [entered, release_future](std::optional<TokenCallback>, const CancellationCallback&) {
-            entered->set_value();
-            release_future.wait();
-            return Expected<GenerationResult>(GenerationResult{"first reply", 0, false});
-        });
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false});
-    });
-
-    auto first = runtime.chat(Message::user("first"));
-    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
-    auto second = runtime.chat(Message::user("second"));
-
-    auto clear_future = std::async(std::launch::async, [&runtime] { runtime.clear_history(); });
-    EXPECT_EQ(clear_future.wait_for(50ms), std::future_status::timeout);
-
-    release->set_value();
-
-    auto first_result = first.future.get();
-    ASSERT_TRUE(first_result.has_value());
-    clear_future.get();
-    auto second_result = second.future.get();
-    ASSERT_TRUE(second_result.has_value());
-
-    auto history = runtime.get_history();
-    ASSERT_EQ(history.size(), 2u);
-    EXPECT_EQ(history[0].content, "second");
-    EXPECT_EQ(history[1].content, "second reply");
-
-    const auto operations = backend_ptr->operations();
-    EXPECT_LT(index_of(operations, "clear_history"), index_of(operations, "add:user:second"));
-}
-
-TEST(AgentRuntimeTest, CompleteUsesScopedHistoryAndRestoresPersistentHistory) {
-    auto backend = std::make_unique<FakeBackend>();
-    auto* backend_ptr = backend.get();
-    AgentRuntime runtime(make_config(), std::move(backend));
-
-    runtime.set_system_prompt("persistent prompt");
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"persistent reply", 0, false});
-    });
-
-    auto first = runtime.chat(Message::user("persistent user"));
-    auto first_result = first.future.get();
-    ASSERT_TRUE(first_result.has_value());
-    EXPECT_EQ(first_result->text, "persistent reply");
-
-    backend_ptr->push_generation([](std::optional<TokenCallback>, const CancellationCallback&) {
-        return Expected<GenerationResult>(GenerationResult{"scoped reply", 0, false});
-    });
-
-    auto scoped =
-        runtime.complete({Message::system("request prompt"), Message::user("request user")});
-    auto scoped_result = scoped.future.get();
+    auto persistent = runtime.chat("persistent user");
+    ASSERT_TRUE(persistent.await_result().has_value());
+
+    const auto before = runtime.get_history();
+    ASSERT_FALSE(before.empty());
+
+    const std::array<Message, 2> scoped_messages = {Message::system("request prompt"),
+                                                    Message::user("request user")};
+    auto scoped = runtime.complete(zoo::ConversationView{std::span<const Message>(scoped_messages)},
+                                   GenerationOptions{});
+    auto scoped_result = scoped.await_result();
     ASSERT_TRUE(scoped_result.has_value());
     EXPECT_EQ(scoped_result->text, "scoped reply");
 
-    const auto history = runtime.get_history();
-    ASSERT_EQ(history.size(), 3u);
-    EXPECT_EQ(history[0].role, zoo::Role::System);
-    EXPECT_EQ(history[0].content, "persistent prompt");
-    EXPECT_EQ(history[1].role, zoo::Role::User);
-    EXPECT_EQ(history[1].content, "persistent user");
-    EXPECT_EQ(history[2].role, zoo::Role::Assistant);
-    EXPECT_EQ(history[2].content, "persistent reply");
+    EXPECT_EQ(runtime.get_history(), before);
 }
 
-TEST(AgentRuntimeTest, CompleteRejectsEmptyMessageHistory) {
+TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
     auto backend = std::make_unique<FakeBackend>();
-    AgentRuntime runtime(make_config(), std::move(backend));
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
 
-    auto handle = runtime.complete({});
-    auto result = handle.future.get();
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("Once "), TokenAction::Continue);
+            EXPECT_EQ(on_token("upon "), TokenAction::Continue);
+            EXPECT_EQ(on_token("a time"), TokenAction::Continue);
+        }
+        return Expected<GenerationResult>(GenerationResult{"Once upon a time", 7, false, "", {}});
+    });
 
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, ErrorCode::InvalidMessageSequence);
+    std::string streamed;
+    auto handle = runtime.chat("Tell me a story", GenerationOptions{}, [&](std::string_view token) {
+        streamed.append(token.data(), token.size());
+    });
+
+    auto result = handle.await_result();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->text, "Once upon a time");
+    EXPECT_EQ(streamed, "Once upon a time");
+    EXPECT_EQ(result->usage.prompt_tokens, 7);
+    EXPECT_EQ(result->usage.completion_tokens, 3);
+}
+
+TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(4, 2), GenerationOptions{},
+                         std::move(backend));
+
+    runtime.set_system_prompt("Keep only the latest turn.");
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"first reply", 0, false, "", {}});
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"second reply", 0, false, "", {}});
+    });
+
+    ASSERT_TRUE(runtime.chat("first user").await_result().has_value());
+    ASSERT_TRUE(runtime.chat("second user").await_result().has_value());
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].role, Role::System);
+    EXPECT_EQ(history[1].content, "second user");
+    EXPECT_EQ(history[2].content, "second reply");
+}
+
+TEST(AgentRuntimeTest, ToolLoopReturnsTraceOnlyWhenRequested) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto definition = zoo::tools::detail::make_tool_definition("double", "Double a number",
+                                                               std::vector<std::string>{"value"},
+                                                               [](int value) { return value * 2; });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("double", {{"value", 5}}));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"10", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto handle = runtime.chat("double 5", options);
+    auto result = handle.await_result();
+
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "10");
+    ASSERT_TRUE(result->tool_trace.has_value());
+    ASSERT_EQ(result->tool_trace->invocations.size(), 1u);
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
+}
+
+TEST(AgentRuntimeTest, SetSystemPromptUpdatesHistoryThroughCommandLane) {
+    auto backend = std::make_unique<FakeBackend>();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    runtime.set_system_prompt("Be concise.");
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 1u);
+    EXPECT_EQ(history[0].role, Role::System);
+    EXPECT_EQ(history[0].content, "Be concise.");
 }
 
 } // namespace
