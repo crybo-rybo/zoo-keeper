@@ -164,7 +164,7 @@ jobs:
           sudo apt-get install -y lcov
 
       - name: Build with coverage
-        run: scripts/rebuild.sh -DZOO_ENABLE_COVERAGE=ON
+        run: scripts/rebuild.sh -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
 
       - name: Run tests
         run: scripts/test.sh
