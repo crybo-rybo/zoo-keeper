@@ -91,10 +91,11 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
         return TokenAction::Continue;
     };
 
-    auto generated =
-        backend_->generate_from_history(*request.options, TokenCallback(callback), [&request]() {
-            return request.cancelled && request.cancelled->load(std::memory_order_acquire);
-        });
+    auto cancellation_check = [&request]() {
+        return request.cancelled && request.cancelled->load(std::memory_order_acquire);
+    };
+    auto generated = backend_->generate_from_history(*request.options, TokenCallback(callback),
+                                                     cancellation_check);
     if (!generated) {
         return std::unexpected(generated.error());
     }

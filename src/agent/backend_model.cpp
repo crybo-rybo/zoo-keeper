@@ -51,6 +51,10 @@ class ModelBackend final : public AgentBackend {
         return model_->swap_history(std::move(snapshot));
     }
 
+    void trim_history(size_t max_non_system_messages) override {
+        model_->trim_history(max_non_system_messages);
+    }
+
     bool set_tool_calling(const std::vector<CoreToolInfo>& tools) override {
         return model_->set_tool_calling(tools);
     }

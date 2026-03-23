@@ -63,14 +63,19 @@ template <typename Result, typename... Args> class FunctionRef<Result(Args...)> 
     constexpr FunctionRef() noexcept = default;
     constexpr FunctionRef(std::nullptr_t) noexcept {}
 
+    /// Prevent binding to temporaries that would dangle.
+    template <typename Callable>
+        requires(!std::same_as<std::remove_cvref_t<Callable>, FunctionRef> &&
+                 !std::is_lvalue_reference_v<Callable>)
+    FunctionRef(Callable&&) = delete;
+
     template <typename Callable>
         requires(!std::same_as<std::remove_cvref_t<Callable>, FunctionRef> &&
                  std::is_invocable_r_v<Result, Callable&, Args...>)
-    FunctionRef(Callable&& callable) noexcept
+    FunctionRef(Callable& callable) noexcept
         : object_(static_cast<void*>(std::addressof(callable))),
           callback_([](void* object, Args... args) -> Result {
-              return std::invoke(*static_cast<std::remove_reference_t<Callable>*>(object),
-                                 std::forward<Args>(args)...);
+              return std::invoke(*static_cast<Callable*>(object), std::forward<Args>(args)...);
           }) {}
 
     [[nodiscard]] explicit operator bool() const noexcept {
@@ -555,6 +560,11 @@ struct GenerationOptions {
                 Error{ErrorCode::InvalidConfig, "max_tokens must be positive or -1 (unlimited)"});
         }
         return sampling.validate();
+    }
+
+    [[nodiscard]] bool is_default() const noexcept {
+        return max_tokens == -1 && stop_sequences.empty() && !record_tool_trace &&
+               sampling == SamplingParams{};
     }
 
     bool operator==(const GenerationOptions& other) const = default;

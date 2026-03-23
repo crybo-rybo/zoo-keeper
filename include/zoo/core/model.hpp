@@ -107,6 +107,8 @@ class Model {
     /// Clears conversation history, token estimates, and cached KV state.
     void clear_history();
 
+    void trim_history(size_t max_non_system_messages);
+
     /**
      * @brief Replaces the retained message history without flushing the KV cache.
      */

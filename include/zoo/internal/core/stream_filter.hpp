@@ -6,6 +6,7 @@
 #pragma once
 
 #include <regex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,8 +54,11 @@ std::vector<std::string> extract_word_triggers(const std::vector<common_grammar_
 /// Streams visible text while buffering possible literal trigger prefixes.
 class ToolCallWordTriggerFilter {
   public:
+    explicit ToolCallWordTriggerFilter(std::span<const std::string> word_triggers)
+        : borrowed_triggers_(word_triggers) {}
+
     explicit ToolCallWordTriggerFilter(std::vector<std::string> word_triggers)
-        : word_triggers_(std::move(word_triggers)) {}
+        : owned_triggers_(std::move(word_triggers)), borrowed_triggers_(owned_triggers_) {}
 
     std::string consume(std::string_view token);
     std::string finalize();
@@ -67,7 +71,8 @@ class ToolCallWordTriggerFilter {
     size_t buffered_suffix_len(std::string_view text) const;
     size_t first_trigger_match(std::string_view text) const;
 
-    std::vector<std::string> word_triggers_;
+    std::vector<std::string> owned_triggers_;
+    std::span<const std::string> borrowed_triggers_;
     std::string pending_;
     bool suppressing_ = false;
 };
