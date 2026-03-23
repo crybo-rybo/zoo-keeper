@@ -264,13 +264,14 @@ void run_live_model_benchmarks(const std::string& model_path) {
         std::optional<Clock::time_point> first_token_time;
         int completion_tokens = 0;
         const auto start_time = Clock::now();
-        auto response = model->generate_from_history({}, [&](std::string_view) {
+        auto on_token = [&](std::string_view) {
             if (!first_token_time.has_value()) {
                 first_token_time = Clock::now();
             }
             ++completion_tokens;
             return zoo::TokenAction::Continue;
-        });
+        };
+        auto response = model->generate_from_history({}, on_token);
         const auto end_time = Clock::now();
         require_success(response, "live_model.generate_history");
         g_benchmark_sink += response->text.size();
