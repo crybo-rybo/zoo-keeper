@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through setting up Zoo-Keeper and building your first AI agent.
+This guide walks through the split public API and a minimal first agent.
 
 ## Prerequisites
 
@@ -23,11 +23,10 @@ git submodule update --init --recursive
 ## Building
 
 ```bash
-cmake -B build -DZOO_BUILD_EXAMPLES=ON
-cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 ```
 
-See [building.md](building.md) for platform-specific setup (Metal, CUDA), integration tests, and package-install usage.
+See [building.md](building.md) for platform-specific setup, integration tests, and package-install usage.
 
 ## Your First Agent
 
@@ -36,34 +35,34 @@ See [building.md](building.md) for platform-specific setup (Metal, CUDA), integr
 #include <iostream>
 
 int main() {
-    // 1. Configure
-    zoo::Config config;
-    config.model_path = "models/llama-3-8b.gguf";
-    config.context_size = 8192;
-    config.max_tokens = 512;
-    config.n_gpu_layers = 0; // opt in to GPU offload explicitly
+    zoo::ModelConfig model;
+    model.model_path = "models/llama-3-8b.gguf";
+    model.context_size = 8192;
+    model.n_gpu_layers = 0;
 
-    // 2. Create the agent
-    auto result = zoo::Agent::create(config);
+    zoo::AgentConfig agent;
+    agent.max_history_messages = 32;
+
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 256;
+
+    auto result = zoo::Agent::create(model, agent, generation);
     if (!result) {
-        std::cerr << result.error().to_string() << std::endl;
+        std::cerr << result.error().to_string() << '\n';
         return 1;
     }
-    auto agent = std::move(*result);
+    auto agent_runtime = std::move(*result);
 
-    // 3. Set a system prompt
-    agent->set_system_prompt("You are a helpful AI assistant.");
+    agent_runtime->set_system_prompt("You are a helpful AI assistant.");
 
-    // 4. Submit a stateful chat turn -- RequestHandle::future blocks for completion
-    auto handle = agent->chat(zoo::Message::user("Hello!"));
-    auto response = handle.future.get();
-
-    if (response) {
-        std::cout << response->text << std::endl;
-    } else {
-        std::cerr << response.error().to_string() << std::endl;
+    auto handle = agent_runtime->chat(zoo::MessageView{zoo::Role::User, "Hello!"});
+    auto response = handle.await_result();
+    if (!response) {
+        std::cerr << response.error().to_string() << '\n';
+        return 1;
     }
 
+    std::cout << response->text << '\n';
     return 0;
 }
 ```
@@ -72,16 +71,16 @@ int main() {
 
 ### `zoo::Agent`
 
-The primary entry point for agentic behavior. Created via the `Agent::create()` factory method, which returns `Expected<std::unique_ptr<Agent>>`.
+Create the async orchestration layer with `Agent::create(model_config, agent_config, generation)`.
 
 | Method | Description |
 |--------|-------------|
-| `create(config)` | Factory: validate config, load model, start inference thread |
-| `chat(message)` | Submit a message, returns `RequestHandle` (holds `.id` and `.future`) |
-| `chat(message, callback)` | Chat with per-token streaming callback |
+| `create(model, agent, generation)` | Validate the split config blocks, load the model, and start the inference thread |
+| `chat(message)` | Submit a user message, returns `RequestHandle<TextResponse>` |
+| `chat(message, callback)` | Chat with a per-token streaming callback |
 | `complete(messages)` | Submit a stateless request-scoped history without mutating retained history |
-| `complete(messages, callback)` | Stateless completion with per-token streaming callback |
-| `extract(schema, message)` | Submit a grammar-constrained extraction; result in `response->extracted_data` |
+| `complete(messages, callback)` | Stateless completion with a per-token streaming callback |
+| `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
 | `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |
 | `set_system_prompt(text)` | Set or update the system prompt |
@@ -90,57 +89,60 @@ The primary entry point for agentic behavior. Created via the `Agent::create()` 
 | `stop()` | Gracefully shut down the agent |
 | `is_running()` | Check if the agent is accepting requests |
 | `clear_history()` | Clear conversation history |
-| `get_history()` | Get a copy of current conversation messages |
+| `get_history()` | Get an owning `HistorySnapshot` of the current conversation |
+| `model_config()` | Access the loaded `ModelConfig` |
+| `agent_config()` | Access the loaded `AgentConfig` |
+| `default_generation_options()` | Access the default `GenerationOptions` |
 | `tool_count()` | Number of registered tools |
-| `get_config()` | Returns a const reference to the active configuration |
+
+### `RequestHandle<Result>`
+
+Returned by async agent methods. Use `id()` to correlate or cancel a request, `ready()` to poll, and `await_result()` to block until the `Expected<Result>` is ready.
 
 ### `zoo::core::Model`
 
-The synchronous llama.cpp wrapper (Layer 1). Can be used standalone without Agent for direct, single-threaded inference.
+The synchronous llama.cpp wrapper for direct, single-threaded inference.
 
 | Method | Description |
 |--------|-------------|
-| `load(config)` | Factory: validate config, load model via backend |
-| `generate(user_message)` | Generate a response (adds to history automatically) |
-| `generate_from_history()` | Generate from current history state |
+| `load(model, generation)` | Factory: validate and load the model via the backend |
+| `generate(user_message)` | Generate a response and append it to retained history |
+| `generate_from_history()` | Generate from the current history state |
 | `set_system_prompt(text)` | Set or update the system prompt |
-| `add_message(message)` | Add a message to history |
-| `get_history()` | Get conversation history |
+| `add_message(message)` | Add a `MessageView` to history |
+| `get_history()` | Get a `HistorySnapshot` copy of the retained conversation |
 | `clear_history()` | Clear history and KV cache |
 | `context_size()` | Get context window size |
 | `estimated_tokens()` | Get estimated token count of history |
-| `is_context_exceeded()` | Check if history exceeds context window |
+| `is_context_exceeded()` | Check if history exceeds the context window |
 
-### `zoo::Message`
+### `zoo::MessageView`, `ConversationView`, and `HistorySnapshot`
 
-Value type representing a conversation turn. Use the factory methods:
+`MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::get_history()` return.
 
-```cpp
-Message::system("You are helpful.")
-Message::user("What is 2+2?")
-Message::assistant("4")
-Message::tool("result", "call_id")
-```
+Use `HistorySnapshot::view()` when you want to pass retained history back into a request-scoped API without copying the messages again.
 
-### `zoo::Response`
+### Response Types
 
-Returned from `chat()` via `std::future`. Contains:
+`chat()` and `complete()` return `TextResponse`. `extract()` returns `ExtractionResponse`.
 
-- `text` -- generated response text
-- `usage` -- token counts (prompt, completion, total)
-- `metrics` -- latency, time-to-first-token, tokens/sec
-- `tool_invocations` -- explicit tool attempts including name, arguments, result, and error outcome
-- `extracted_data` -- structured JSON result from `extract()` calls; `std::nullopt` for `chat()` and `complete()`
+- `TextResponse::text` - generated response text
+- `TextResponse::usage` - prompt, completion, and total token counts
+- `TextResponse::metrics` - latency, time-to-first-token, and throughput
+- `TextResponse::tool_trace` - optional tool diagnostics when `GenerationOptions::record_tool_trace` is enabled
+- `ExtractionResponse::text` - raw JSON text returned by the model
+- `ExtractionResponse::data` - parsed structured output
+- `ExtractionResponse::tool_trace` - optional tool diagnostics for extraction calls
 
-### Error Handling
+## Error Handling
 
 All fallible operations return `Expected<T>` (an alias for `std::expected<T, Error>`). Errors carry a categorized `ErrorCode` and human-readable message:
 
 ```cpp
-auto handle = agent->chat(zoo::Message::user("Hello"));
-auto response = handle.future.get();
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Hello"});
+auto response = handle.await_result();
 if (!response) {
-    std::cerr << response.error().to_string() << std::endl;
+    std::cerr << response.error().to_string() << '\n';
 }
 ```
 

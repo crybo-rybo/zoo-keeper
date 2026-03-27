@@ -1,10 +1,17 @@
 # Tool System
 
-Zoo-Keeper exposes one primary tool story: register tools on `zoo::Agent`, let the agent validate and execute them, and inspect the resulting `tool_invocations` after each request.
+Zoo-Keeper's tool story is native-only: register tools on `zoo::Agent`, let
+the agent route native tool calls through the runtime, and inspect an optional
+`tool_trace` when you want to see what happened.
+
+Zoo-Keeper only executes native tool calls emitted by the active model or
+template. If native tool calling is unavailable, the request stays on the text
+path and no synthetic alternate protocol is introduced.
 
 ## Typed Registration
 
-Register any supported callable and Zoo-Keeper will derive the argument schema automatically:
+Register any supported callable and Zoo-Keeper will derive the argument schema
+automatically:
 
 ```cpp
 int add(int a, int b) { return a + b; }
@@ -31,11 +38,14 @@ Supported typed parameter types:
 | `bool` | `boolean` |
 | `std::string` | `string` |
 
-The parameter-name list must match the callable arity exactly or registration fails with `ErrorCode::InvalidToolSignature`.
+The parameter-name list must match the callable arity exactly or registration
+fails with `ErrorCode::InvalidToolSignature`.
 
 ## Manual Schema Registration
 
-Use the manual path when you need a JSON-backed handler or schema features that typed registration does not express directly, such as optional parameters or enums.
+Use the manual path when you need a JSON-backed handler or schema features
+that typed registration does not express directly, such as optional parameters
+or enums.
 
 ```cpp
 nlohmann::json schema = {
@@ -62,11 +72,14 @@ auto result = agent->register_tool(
     });
 ```
 
-Manual handlers must accept a single JSON argument object and return `zoo::Expected<nlohmann::json>`.
+Manual handlers must accept a single JSON argument object and return
+`zoo::Expected<nlohmann::json>`.
 
 ## Supported Manual Schema Subset
 
-Manual registration accepts a deliberately small subset of JSON Schema. Unsupported constructs fail fast during registration with `ErrorCode::InvalidToolSchema`.
+Manual registration accepts a deliberately small subset of JSON Schema.
+Unsupported constructs fail fast during registration with
+`ErrorCode::InvalidToolSchema`.
 
 Supported:
 
@@ -84,20 +97,21 @@ Not supported:
 - arrays and `items`
 - `oneOf`, `anyOf`, `allOf`, `not`
 - `$ref`
-- numeric or string bounds such as `minimum`, `maximum`, `pattern`, `minLength`, `maxLength`
+- numeric or string bounds such as `minimum`, `maximum`, `pattern`, `minLength`,
+  `maxLength`
 - unknown keywords that would change validation semantics
 
-The runtime normalizes supported schemas into one internal representation and uses that same representation for:
+The runtime normalizes supported schemas into one internal representation and
+uses that same representation for validation, deterministic schema export, and
+grammar-constrained tool calling.
 
-- validation,
-- deterministic schema export,
-- grammar-constrained tool calling.
-
-The same schema subset is accepted by `Agent::extract()` for grammar-constrained structured output. See [Structured Output](extract.md) for details.
+The same schema subset is accepted by `Agent::extract()` for structured output.
+See [Structured Output](extract.md) for details.
 
 ## Validation and Retries
 
-Every detected tool call is validated against the normalized registered schema, including grammar-constrained calls.
+Every detected native tool call is validated against the normalized registered
+schema, including grammar-constrained calls.
 
 Validation enforces:
 
@@ -106,11 +120,15 @@ Validation enforces:
 - enum values match exactly when configured,
 - unknown arguments are rejected.
 
-If validation fails, the agent injects a corrective tool message and gives the model another chance to repair the call up to `Config::max_tool_retries`. Exhaustion fails the request with `ErrorCode::ToolRetriesExhausted`.
+If validation fails, the agent injects a corrective tool message and gives the
+model another chance to repair the call up to
+`AgentConfig::max_tool_retries`. Exhaustion fails the request with
+`ErrorCode::ToolRetriesExhausted`.
 
 ## Deterministic Ordering
 
-Tool ordering is deterministic and follows registration order. That order is used for:
+Tool ordering is deterministic and follows registration order. That order is
+used for:
 
 - `ToolRegistry::get_tool_names()`
 - `ToolRegistry::get_all_schemas()`
@@ -119,45 +137,52 @@ Tool ordering is deterministic and follows registration order. That order is use
 
 Re-registering an existing tool updates it in place without moving its slot.
 
-## Tool Invocation Records
+## Tool Trace Records
 
-After a chat request completes, inspect `Response::tool_invocations` to see what happened during the tool loop:
+When `GenerationOptions::record_tool_trace` is `true`, completed responses can
+include a `tool_trace` with the tool attempts made during the request.
 
 ```cpp
-auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
-auto response = handle.future.get();
+auto handle = agent->chat(
+    zoo::Message::user("What is 42 + 58?"),
+    zoo::GenerationOptions{.record_tool_trace = true});
 
-if (response) {
-    for (const auto& invocation : response->tool_invocations) {
-        std::cout << invocation.name << " " << invocation.arguments_json << std::endl;
+auto response = handle.await_result();
+if (!response) {
+    std::cerr << response.error().to_string() << '\n';
+    return;
+}
 
+if (response->tool_trace) {
+    for (const auto& invocation : response->tool_trace->invocations) {
+        std::cout << invocation.name << " [" << zoo::to_string(invocation.status) << "]\n";
+        std::cout << "args: " << invocation.arguments_json << '\n';
         if (invocation.result_json) {
-            std::cout << *invocation.result_json << std::endl;
+            std::cout << "result: " << *invocation.result_json << '\n';
         }
-
         if (invocation.error) {
-            std::cerr << invocation.error->to_string() << std::endl;
+            std::cout << "error: " << invocation.error->to_string() << '\n';
         }
     }
 }
 ```
 
-`ToolInvocationStatus` distinguishes:
-
-- `Succeeded`
-- `ValidationFailed`
-- `ExecutionFailed`
+`tool_trace` is optional and remains empty unless you opt in. The same
+`GenerationOptions` flag works for both text responses and structured
+extractions.
 
 ## Low-Level Registry Access
 
-`zoo::tools::ToolRegistry` remains public for lower-level usage, testing, or embedding inside custom runtimes. It is no longer the primary user path documented for normal application code.
+`zoo::tools::ToolRegistry` remains public for lower-level usage, testing, or
+embedding inside custom runtimes. It is not the primary user path for normal
+application code.
 
 ## Error Codes
 
 | Code | Name | Description |
 |------|------|-------------|
 | 500 | `ToolNotFound` | Requested tool name is not registered |
-| 501 | `ToolExecutionFailed` | Handler threw or returned an execution failure |
+| 501 | `ToolExecutionFailed` | Handler returned an execution failure |
 | 502 | `InvalidToolSignature` | Typed registration metadata does not match the callable |
 | 503 | `ToolRetriesExhausted` | Validation retry budget was exhausted |
 | 504 | `ToolLoopLimitReached` | Agent exceeded the configured tool-iteration budget |

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure and build the project with all optional flags set.
-# Usage: scripts/build [extra cmake flags...]
-#   e.g. scripts/build -DZOO_WARNINGS_AS_ERRORS=ON
+# Usage: scripts/build-all.sh [extra cmake flags...]
+#   e.g. scripts/build-all.sh -DZOO_WARNINGS_AS_ERRORS=ON
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

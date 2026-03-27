@@ -24,19 +24,19 @@ changes can break compilation across multiple files in `src/core/`.
    surface as build failures in `src/core/model*.cpp` — these are the
    only files that should need changes:
    ```bash
-   scripts/build
+   scripts/build.sh
    ```
 
 4. **Run the full test suite:**
    ```bash
-   scripts/test
+   scripts/test.sh
    ```
 
 5. **Run integration tests** if you have a GGUF model available, to
    verify inference behavior hasn't regressed:
    ```bash
-   scripts/build -DZOO_BUILD_INTEGRATION_TESTS=ON
-   ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test
+   scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
+   ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
    ```
 
 6. **Stage the submodule pointer and any adaptation changes:**

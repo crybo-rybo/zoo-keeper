@@ -1,31 +1,29 @@
 # Examples Cookbook
 
-Complete, copy-paste code snippets for common Zoo-Keeper patterns, plus matching executable examples under `examples/`.
+Copy-paste snippets for common Zoo-Keeper patterns, plus the matching executables under `examples/`.
 
 ## Example Executables
 
-Build all example binaries with:
+Build the example binaries with:
 
 ```bash
-cmake -B build -DZOO_BUILD_EXAMPLES=ON
-cmake --build build
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 ```
 
 Available programs:
 
-- `demo_chat` -- interactive CLI chat loop driven by a JSON config file
-- `model_generate` -- synchronous `zoo::core::Model` usage
-- `error_handling` -- structured runtime error reporting
-- `stream_cancel` -- streaming output with cooperative cancellation
-- `manual_tool_schema` -- `Agent::register_tool(..., schema, handler)` with the supported schema subset
+- `demo_chat` - interactive CLI chat loop driven by a nested JSON config file
+- `demo_extract` - structured extraction examples for stateful, stateless, and streaming flows
+- `model_generate` - synchronous `zoo::core::Model` usage
+- `error_handling` - structured runtime error reporting
+- `stream_cancel` - streaming output with cooperative cancellation
+- `manual_tool_schema` - `Agent::register_tool(..., schema, handler)` with the supported schema subset
 
 ## JSON Config Files
 
-The `demo_chat` executable loads `zoo::Config` from JSON through `zoo/core/json.hpp` and adds one example-only field:
+`demo_chat` loads a top-level JSON wrapper with nested `model`, `agent`, and `generation` blocks, then applies `system_prompt` and the example-only `tools` toggle. See [`examples/config.example.json`](../examples/config.example.json) for the exact shape.
 
-- `tools` -- enables or disables the bundled demo tools
-
-Use [`examples/config.example.json`](../examples/config.example.json) as the starting point. The library itself does not expand `~` or perform file-path normalization; `model_path` is read literally.
+The library itself serializes `zoo::ModelConfig`, `zoo::AgentConfig`, and `zoo::GenerationOptions` directly through `zoo/core/json.hpp`.
 
 ## Streaming Output
 
@@ -33,24 +31,24 @@ Print tokens as they arrive:
 
 ```cpp
 auto handle = agent->chat(
-    zoo::Message::user("Write a haiku about AI"),
+    zoo::MessageView{zoo::Role::User, "Write a haiku about AI"},
     [](std::string_view token) {
         std::cout << token << std::flush;
     }
 );
 
-auto response = handle.future.get();
-std::cout << std::endl;
+auto response = handle.await_result();
+std::cout << '\n';
 ```
 
 ## Multi-Turn Conversation
 
-History is managed automatically:
+Retained history is managed automatically:
 
 ```cpp
-agent->chat(zoo::Message::user("My name is Alice")).future.get();
-auto handle = agent->chat(zoo::Message::user("What's my name?"));
-auto response = handle.future.get();
+agent->chat(zoo::MessageView{zoo::Role::User, "My name is Alice"}).await_result();
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "What's my name?"});
+auto response = handle.await_result();
 // response->text will reference "Alice"
 ```
 
@@ -70,23 +68,28 @@ std::string get_time() {
 agent->register_tool("add", "Add two integers", {"a", "b"}, add);
 agent->register_tool("get_time", "Get current date and time", {}, get_time);
 
-// The model can now call these tools
-auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
-auto response = handle.future.get();
+// The model can now call these tools. Enable record_tool_trace when you want
+// the runtime to retain the tool-attempt diagnostics.
+zoo::GenerationOptions options;
+options.record_tool_trace = true;
+
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "What is 42 + 58?"}, options);
+auto response = handle.await_result();
 if (response) {
     std::cout << response->text << std::endl;
 
-    // Inspect explicit tool invocation records captured during the agentic loop
-    for (const auto& invocation : response->tool_invocations) {
-        std::cout << "Tool: " << invocation.name << std::endl;
-        std::cout << "Args: " << invocation.arguments_json << std::endl;
+    if (response->tool_trace) {
+        for (const auto& invocation : response->tool_trace->invocations) {
+            std::cout << "Tool: " << invocation.name << std::endl;
+            std::cout << "Args: " << invocation.arguments_json << std::endl;
 
-        if (invocation.result_json) {
-            std::cout << "Result: " << *invocation.result_json << std::endl;
-        }
+            if (invocation.result_json) {
+                std::cout << "Result: " << *invocation.result_json << std::endl;
+            }
 
-        if (invocation.error) {
-            std::cout << "Error: " << invocation.error->to_string() << std::endl;
+            if (invocation.error) {
+                std::cout << "Error: " << invocation.error->to_string() << std::endl;
+            }
         }
     }
 }
@@ -105,8 +108,8 @@ agent->register_tool("uppercase", "Convert text to uppercase", {"text"},
 ## Error Handling
 
 ```cpp
-auto handle = agent->chat(zoo::Message::user("Hello"));
-auto result = handle.future.get();
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Hello"});
+auto result = handle.await_result();
 
 if (!result) {
     zoo::Error error = result.error();
@@ -132,12 +135,12 @@ if (!result) {
 ## Cancellation
 
 ```cpp
-auto handle = agent->chat(zoo::Message::user("Write a long essay"));
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Write a long essay"});
 
 // Cancel by request ID
-agent->cancel(handle.id);
+agent->cancel(handle.id());
 
-auto result = handle.future.get();
+auto result = handle.await_result();
 if (!result && result.error().code == zoo::ErrorCode::RequestCancelled) {
     std::cout << "Generation cancelled" << std::endl;
 }
@@ -145,11 +148,31 @@ if (!result && result.error().code == zoo::ErrorCode::RequestCancelled) {
 
 The `stream_cancel` executable demonstrates the same pattern end to end with a real `Agent`.
 
+## Structured Extraction
+
+`demo_extract` demonstrates the same extraction flow in a runnable program. The
+minimal pattern is:
+
+```cpp
+nlohmann::json schema = {
+    {"type", "object"},
+    {"properties", {{"count", {{"type", "integer"}}}}},
+    {"required", {"count"}},
+    {"additionalProperties", false}
+};
+
+auto handle = agent->extract(schema, "There are 7 apples on the shelf.");
+auto response = handle.await_result();
+if (response) {
+    std::cout << response->data["count"] << std::endl;
+}
+```
+
 ## Metrics
 
 ```cpp
-auto handle = agent->chat(zoo::Message::user("Hello"));
-auto response = handle.future.get();
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Hello"});
+auto response = handle.await_result();
 if (response) {
     std::cout << "Latency: " << response->metrics.latency_ms.count() << " ms" << std::endl;
     std::cout << "TTFT: " << response->metrics.time_to_first_token_ms.count() << " ms" << std::endl;
@@ -159,30 +182,32 @@ if (response) {
 }
 ```
 
-## Using Model Directly (Layer 1)
+## Using Model Directly
 
-For synchronous, single-threaded usage without the Agent layer:
+For synchronous, single-threaded usage without the agent layer:
 
 ```cpp
 #include <zoo/core/model.hpp>
 #include <iostream>
 
 int main() {
-    zoo::Config config;
-    config.model_path = "models/llama-3-8b.gguf";
-    config.context_size = 8192;
-    config.max_tokens = 256;
+    zoo::ModelConfig model;
+    model.model_path = "models/llama-3-8b.gguf";
+    model.context_size = 8192;
 
-    auto result = zoo::core::Model::load(config);
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 256;
+
+    auto result = zoo::core::Model::load(model, generation);
     if (!result) {
         std::cerr << result.error().to_string() << std::endl;
         return 1;
     }
-    auto& model = *result;
+    auto& model_runtime = *result;
 
-    model->set_system_prompt("You are a helpful assistant.");
+    model_runtime->set_system_prompt("You are a helpful assistant.");
 
-    auto response = model->generate("What is the capital of France?");
+    auto response = model_runtime->generate("What is the capital of France?");
     if (response) {
         std::cout << response->text << std::endl;
         std::cout << "Tokens: " << response->usage.total_tokens << std::endl;
@@ -190,7 +215,7 @@ int main() {
 }
 ```
 
-The `model_generate` executable is the standalone version of this pattern.
+The `model_generate` executable uses the same shape.
 
 ## See Also
 

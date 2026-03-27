@@ -1,83 +1,80 @@
-# spec.md — Zoo-Keeper
+# Zoo-Keeper Architecture Snapshot
+
+This file is a current-state reference, not release guidance. If it drifts from HEAD,
+trust the public headers, examples, and changelog first.
 
 ## Objective
 
-A local-first C++23 library that wraps llama.cpp to provide model loading,
-inference, conversation management, type-safe tool registration, and an async
-agentic loop for locally hosted LLMs.
+Zoo-Keeper is a local-first C++23 library on top of llama.cpp. It provides model
+loading, inference, conversation management, native tool calling, structured
+extraction, and an async agent loop for locally hosted LLMs.
 
-Zoo-Keeper gives C++ developers a small number of explicit, composable
-primitives: `zoo::core::Model` for direct synchronous control, `zoo::Agent`
-for async orchestration, and a tool system that turns native callables into
-model-usable capabilities.
+The public API is intentionally small and explicit: `zoo::core::Model` for low-level
+control, `zoo::Agent` for async orchestration, and split config types for model,
+agent, and per-call generation policy.
 
 ## Tech Stack
 
-- **Language:** C++23 (GCC 13+, Clang 18+, Apple Clang 16+)
-- **Build system:** CMake 3.18+
-- **Runtime dependency:** llama.cpp (git submodule at `extern/llama.cpp`)
-- **JSON:** nlohmann/json (CMake FetchContent)
-- **Test framework:** GoogleTest 1.14+ (CMake FetchContent, test-only)
+- C++23
+- CMake
+- llama.cpp as a vendored submodule
+- nlohmann/json for config and schema handling
+- GoogleTest for unit and integration tests
 
 ## Supported Platforms
 
-- Linux (GCC 13+ or Clang 18+)
-- macOS (Apple Clang 16+, Metal acceleration)
+- Linux
+- macOS
 
 ## Public API Boundary
 
-The supported public surface is:
+The supported surface is:
 
-- Installed headers under `include/zoo/` (excluding `include/zoo/internal/`)
-- CMake target `ZooKeeper::zoo` (primary) and `ZooKeeper::zoo_core` (compat)
-- Types: `zoo::Agent`, `zoo::core::Model`, `zoo::Config`, `zoo::Message`,
-  `zoo::Response`, `zoo::tools::ToolRegistry`, `zoo::tools::ToolCallParser`,
-  `zoo::tools::ErrorRecovery`
+- Installed headers under `include/zoo/`, excluding `include/zoo/internal/`
+- CMake target `ZooKeeper::zoo`
+- Core types and APIs such as `ModelConfig`, `AgentConfig`, `GenerationOptions`,
+  `zoo::Agent`, `zoo::core::Model`, `Message`, `MessageView`, `ConversationView`,
+  `HistorySnapshot`, `TextResponse`, `ExtractionResponse`, `RequestHandle<T>`,
+  `ToolRegistry`, `ToolCallParser`, and `ErrorRecovery`
 
-Everything under `include/zoo/internal/`, `src/`, and private CMake plumbing
-is **not** part of the compatibility contract.
+Everything under `include/zoo/internal/` and `src/` is intentionally private.
 
 ## Architecture
 
-Three strict layers — each depends only on layers below it:
+Three strict layers, each depending only on the layers below it:
 
 | Layer | Namespace | Responsibility |
 |-------|-----------|----------------|
-| 3 | `zoo::Agent` | Async orchestration, inference thread, request queue, tool loop |
-| 2 | `zoo::tools` | Tool registry, call parsing, schema validation, grammar. Header-only, zero llama.cpp dep |
-| 1 | `zoo::core` | Direct synchronous llama.cpp wrapper. Owns all llama resources |
+| 3 | `zoo::Agent` | Async orchestration, request handles, history management, tool execution |
+| 2 | `zoo::tools` | Tool registry, call parsing, schema validation, grammar generation. Header-only and llama.cpp-free |
+| 1 | `zoo::core` | Direct llama.cpp wrapper, prompt rendering, native tool calling, structured extraction |
+
+The current core layer owns the model, context, sampler, chat templates, and the
+template-driven tool/extraction grammar state. The agent layer chooses request shape
+and preserves or restores history as needed.
 
 ## Error Handling
 
-`std::expected<T, zoo::Error>` everywhere. No exceptions. Error codes by category:
-
-- 100–199: Configuration
-- 200–299: Backend/model
-- 300–399: Engine logic
-- 400–499: Runtime/request
-- 500–599: Tool system
+`std::expected<T, zoo::Error>` is used throughout the public surface. Exceptions are
+not part of the public API contract.
 
 ## Non-Goals
 
 - Windows support
-- Multi-backend abstraction (Zoo-Keeper targets llama.cpp only)
-- HTTP/REST API server (this is a library, not a service)
+- Multi-backend abstraction
+- HTTP/REST service wrapper
 - Python bindings
 - Distributed inference
 
-## Verification Rules
+## Maintenance Rules
 
-- All unit tests pass: `scripts/test`
-- Formatting produces no diff: `scripts/format`
-- Builds are warning-free: `scripts/lint`
-- Public API changes require review
+- Keep this document aligned with the current public headers and examples
+- Prefer the changelog for release-specific summaries
+- Treat `include/zoo/internal/` and `src/` as implementation details
 
-## Done When
+## Verification Expectations
 
-A change is complete when:
-
-1. Behavior is observable (not just "compiles")
-2. `scripts/test` passes (all 219+ unit tests)
-3. `scripts/format` produces no diff
-4. Build is warning-free
-5. Integration tests pass if model-touching code changed
+- `scripts/test.sh` passes
+- `scripts/format.sh` produces no diff
+- `scripts/lint.sh` is warning-free
+- Public API changes should be reviewed deliberately
