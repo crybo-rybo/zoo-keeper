@@ -2,6 +2,131 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## v1.0.3 → v1.1.0
+
+Version `1.1.0` is a major API step rather than a small patch. The biggest
+changes are the config split, typed request handles, dedicated extraction
+results, and the clearer message/history APIs that separate retained state from
+request-scoped conversations.
+
+### Config Split
+
+Before, consumers configured the library through one aggregate `zoo::Config`
+object. After this release, the configuration concerns are split into
+`ModelConfig`, `AgentConfig`, and `GenerationOptions`.
+
+```cpp
+// Before: one aggregate config object.
+zoo::Config config;
+config.model_path = "/models/llama.gguf";
+config.context_size = 8192;
+config.max_history_messages = 64;
+config.max_tokens = 128;
+
+auto agent = zoo::Agent::create(config);
+```
+
+```cpp
+// After: pass the three configuration concerns explicitly.
+zoo::ModelConfig model_config;
+model_config.model_path = "/models/llama.gguf";
+model_config.context_size = 8192;
+
+zoo::AgentConfig agent_config;
+agent_config.max_history_messages = 64;
+
+zoo::GenerationOptions generation;
+generation.max_tokens = 128;
+
+auto agent = zoo::Agent::create(model_config, agent_config, generation);
+```
+
+### Request Handles
+
+Async calls still return request handles, but the handle surface changed.
+Before, the handle exposed `.id` and a `std::future`; now it exposes `id()`,
+`ready()`, and `await_result()`.
+
+```cpp
+// Before: request completion came from the embedded future.
+auto handle = agent->chat(zoo::Message::user("Hello"));
+auto response = handle.future.get();
+if (response) {
+    std::cout << response->text << "\n";
+}
+```
+
+```cpp
+// After: the call returns a request handle.
+auto handle = agent->chat("Hello");
+auto response = handle.await_result();
+if (response) {
+    std::cout << response->text << "\n";
+}
+```
+
+### Extraction Results
+
+Structured extraction now returns `ExtractionResponse`, which separates the raw model
+text from the parsed JSON payload.
+
+```cpp
+// Before: extracted data lived on the generic response type.
+auto handle = agent->extract(schema, zoo::Message::user("Alice is 30."));
+auto response = handle.future.get();
+if (response) {
+    std::cout << response->extracted_data->dump() << "\n";
+}
+```
+
+```cpp
+// After: extraction data is part of the dedicated extraction response type.
+auto handle = agent->extract(schema, "Alice is 30.");
+auto response = handle.await_result();
+if (response) {
+    std::cout << response->data.dump() << "\n";
+    std::cout << response->text << "\n";
+}
+```
+
+### Message And History APIs
+
+Request-scoped inputs now use `MessageView` and `ConversationView`, while
+retained agent state stays behind `get_history()` and `clear_history()`. Use
+`chat()` for appending a new turn and `complete()` for running against a
+supplied history without mutating the retained conversation.
+
+```cpp
+// Before: scoped history passed owning Message values directly.
+std::vector<zoo::Message> history = {
+    zoo::Message::user("Hello"),
+    zoo::Message::assistant("Hi there"),
+    zoo::Message::user("What did I just say?")
+};
+
+auto scoped = agent->complete(history);
+```
+
+```cpp
+// After: choose the request shape explicitly.
+agent->chat(zoo::MessageView{zoo::Role::User, "Hello"});
+
+const std::array<zoo::MessageView, 3> history = {
+    zoo::MessageView{zoo::Role::User, "Hello"},
+    zoo::MessageView{zoo::Role::Assistant, "Hi there"},
+    zoo::MessageView{zoo::Role::User, "What did I just say?"},
+};
+
+auto scoped = agent->complete(
+    zoo::ConversationView{std::span<const zoo::MessageView>(history)});
+```
+
+### Tool Calling
+
+Tool calling is now template-driven through llama.cpp's native chat templates. Models
+that do not expose a native tool format no longer rely on the old sentinel-based
+fallback path.
+
 ## 0.2.x → 1.0.0
 
 ### Summary

@@ -1,33 +1,56 @@
 # Architecture
 
-Zoo-Keeper exposes three public layers with a simple dependency direction: higher layers build on lower layers, and consumers can stop at the lowest layer that fits their needs.
+Zoo-Keeper exposes three public layers with a simple dependency direction:
+higher layers build on lower layers, and consumers can stop at the lowest layer
+that fits their needs.
 
 ## Public Layers
 
 | Layer | Primary Types | Responsibility |
 |-------|---------------|----------------|
-| Agent | `zoo::Agent`, `zoo::RequestHandle` | Async request submission, background inference, tool loop orchestration |
-| Tools | `zoo::tools::ToolRegistry`, `zoo::tools::ToolCallParser`, `zoo::tools::ToolArgumentsValidator` | Tool registration, tool-call parsing, schema validation |
+| Agent | `zoo::Agent`, `zoo::RequestHandle<Result>` | Async request submission, background inference, native tool orchestration |
+| Tools | `zoo::tools::ToolRegistry`, `zoo::tools::ToolCallParser`, `zoo::tools::ToolArgumentsValidator` | Tool registration, native tool-call parsing, schema validation |
 | Core | `zoo::core::Model` | Direct synchronous llama.cpp wrapper |
 
 ## Usage Model
 
 ### `zoo::core::Model`
 
-Use `Model` when you want direct, single-threaded inference without the agent runtime. It owns model loading, prompt rendering, history, KV-cache interaction, sampling, and generation.
+Use `Model` when you want direct, single-threaded inference without the agent
+runtime. It owns model loading, prompt rendering, history, KV-cache
+interaction, sampling, and generation.
 
 ### `zoo::Agent`
 
-Use `Agent` when you want queued asynchronous requests, streaming callbacks, cancellation, model-driven tool execution, and a choice between stateful `chat(...)` requests and stateless request-scoped `complete(...)` requests. `Agent` is the primary high-level runtime surface for most consumers.
+Use `Agent` when you want queued asynchronous requests, streaming callbacks,
+cancellation, native tool execution, and a choice between stateful `chat(...)`
+requests and stateless request-scoped `complete(...)` requests. `Agent` is the
+primary high-level runtime surface for most consumers.
+
+`RequestHandle<Result>` is the public async return type. It carries the request
+ID and exposes `await_result()` for retrieving the completed response or
+error.
 
 ## Public Threading Guarantees
 
 - `zoo::Agent` owns a background inference thread.
-- Requests are submitted from the calling thread through `chat(...)` or `complete(...)` and resolved through `RequestHandle::future`.
+- Requests are submitted from the calling thread through `chat(...)`,
+  `complete(...)`, or `extract(...)`.
+- Request completion is observed through `RequestHandle<Result>::await_result()`.
 - Model state is owned by the inference thread while the agent is running.
 - Streaming callbacks and tool handlers execute on the inference thread.
 
-These guarantees are part of the public behavioral contract. Private runtime mechanisms that implement them are documented separately for maintainers.
+These guarantees are part of the public behavioral contract. Private runtime
+mechanisms that implement them are documented separately for maintainers.
+
+## Tool Calling Model
+
+Tool calling is native-only. Zoo-Keeper only executes model-emitted native tool
+calls when the active model/template supports them. If the selected model does
+not expose native tool calling, the runtime remains on the text path.
+
+When `GenerationOptions::record_tool_trace` is enabled, the request can retain
+a `tool_trace` describing the attempts made during the tool loop.
 
 ## CMake Targets
 
@@ -40,9 +63,11 @@ These guarantees are part of the public behavioral contract. Private runtime mec
 
 - One obvious public runtime story centered on `ZooKeeper::zoo`
 - Small installed API surface under `include/zoo/`
-- Explicit tool execution data and deterministic tool metadata behavior
-- Docs that describe supported behavior without exposing private implementation details as API
+- Explicit native tool execution data and deterministic tool metadata behavior
+- Docs that describe supported behavior without exposing private implementation
+  details as API
 
 ## For Maintainers
 
-Internal runtime ownership, private module boundaries, and contributor-facing invariants live in [maintainer-architecture.md](maintainer-architecture.md).
+Internal runtime ownership, private module boundaries, and contributor-facing
+invariants live in [maintainer-architecture.md](maintainer-architecture.md).

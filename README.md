@@ -17,24 +17,26 @@
 
 ## About
 
-Zoo-Keeper is a local-first C++23 library for building serious LLM-backed applications without hand-rolling the hard parts every time. It wraps [llama.cpp](https://github.com/ggerganov/llama.cpp) with a direct synchronous model API, then layers an async agent runtime on top for queued requests, streaming, tool execution, and conversation management.
+Zoo-Keeper is a local-first C++23 library for building LLM-backed applications on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). It keeps the public surface small and explicit: `zoo::core::Model` for direct inference, `zoo::Agent` for async orchestration, and `zoo::tools` for turning native callables into model-usable tools.
 
-The goal is not to be a giant framework. The goal is to give you a small number of explicit, composable primitives that feel natural in C++: a `zoo::core::Model` when you want direct control, a `zoo::Agent` when you want orchestration, and a tool system that turns native callables into model-usable capabilities with schema generation, validation, and execution tracking.
+The release API is split into `zoo::ModelConfig`, `zoo::AgentConfig`, and `zoo::GenerationOptions`. Async calls return `RequestHandle<Result>` objects with `id()`, `ready()`, and `await_result()`, while completed text and extraction calls come back as `TextResponse` and `ExtractionResponse`.
 
 ## Why Zoo-Keeper
 
 - **Local-first by default**: run on your own hardware through `llama.cpp`, with Metal on macOS and CUDA support when enabled.
-- **Two clear abstraction levels**: use the low-level `Model` directly or move up to `Agent` when you need async orchestration.
-- **Native C++ tools**: register regular functions or manual JSON-backed handlers and let the library handle schema generation, validation, and execution bookkeeping.
-- **Predictable concurrency**: model access stays on the inference thread, while callers interact through request handles and futures.
-- **Modern contracts**: `std::expected`-based error handling, explicit response metadata, and a smaller public target story centered on `ZooKeeper::zoo`.
+- **Two clear abstraction levels**: use the low-level `Model` directly or move up to `Agent` when you need queued requests and tool loops.
+- **Native C++ tools**: register regular functions or JSON-backed handlers and let the library handle schema generation, validation, and execution tracking.
+- **Predictable concurrency**: callers interact through request handles, not raw futures, and the inference thread owns model state.
+- **Modern contracts**: `std::expected`-based error handling, borrowed message views, owned history snapshots, and explicit response metadata.
 
 ## Choose Your Surface
 
 | Surface | Use it when you need | What it gives you |
 |--------|-----------------------|-------------------|
-| `zoo::core::Model` | Direct, single-threaded control | Model loading, tokenization, generation, history, KV-cache management |
-| `zoo::Agent` | Async chat, stateless completion, streaming, and tool orchestration | Request queue, inference thread, cancellation, tool loop, `RequestHandle`, structured tool invocation tracking |
+| `zoo::core::Model` | Direct, single-threaded control | Model loading, generation, retained history, and KV-cache management |
+| `zoo::Agent` | Async chat, stateless completion, streaming, and tool orchestration | Request queue, inference thread, cancellation, tool loop, and `RequestHandle<Result>` |
+| `zoo::ModelConfig` / `zoo::AgentConfig` / `zoo::GenerationOptions` | Configure runtime startup and per-call generation | Split config blocks with strict validation and JSON helpers |
+| `zoo::MessageView` / `zoo::ConversationView` / `zoo::HistorySnapshot` | Pass or inspect conversation state | Borrowed request-scoped views and owning history snapshots |
 
 ## Quick Start
 
@@ -42,18 +44,19 @@ The goal is not to be a giant framework. The goal is to give you a small number 
 #include <iostream>
 #include <zoo/zoo.hpp>
 
-int add(int a, int b) {
-    return a + b;
-}
-
 int main() {
-    zoo::Config config;
-    config.model_path = "models/llama-3-8b.gguf";
-    config.context_size = 8192;
-    config.max_tokens = 512;
-    config.n_gpu_layers = 0;
+    zoo::ModelConfig model;
+    model.model_path = "models/llama-3-8b.gguf";
+    model.context_size = 8192;
+    model.n_gpu_layers = 0;
 
-    auto agent_result = zoo::Agent::create(config);
+    zoo::AgentConfig agent;
+    agent.max_history_messages = 32;
+
+    zoo::GenerationOptions generation;
+    generation.max_tokens = 256;
+
+    auto agent_result = zoo::Agent::create(model, agent, generation);
     if (!agent_result) {
         std::cerr << agent_result.error().to_string() << '\n';
         return 1;
@@ -62,14 +65,8 @@ int main() {
     auto agent = std::move(*agent_result);
     agent->set_system_prompt("You are a concise assistant. Use tools when helpful.");
 
-    auto tool_result = agent->register_tool("add", "Add two integers", {"a", "b"}, add);
-    if (!tool_result) {
-        std::cerr << tool_result.error().to_string() << '\n';
-        return 1;
-    }
-
-    auto handle = agent->chat(zoo::Message::user("What is 42 + 58?"));
-    auto response = handle.future.get();
+    auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "What is 42 + 58?"});
+    auto response = handle.await_result();
 
     if (!response) {
         std::cerr << response.error().to_string() << '\n';
@@ -83,19 +80,18 @@ int main() {
 
 ## What You Get
 
-- **Async inference** with per-token streaming callbacks and cancellable requests
-- **Structured tool calling** with typed registration, manual schema registration, validation, and explicit `tool_invocations`
-- **Grammar-constrained structured output** via `extract()` — enforce a JSON Schema at the sampler level with no retry loops
-- **Conversation management** with system prompts, history tracking, and incremental prompt/KV-cache handling
-- **Deterministic tool metadata** for schema and grammar generation
-- **Concrete response metadata** including token usage and latency metrics
+- **Async inference** with per-token streaming callbacks, cancellable requests, and `RequestHandle<Result>`
+- **Structured tool calling** with typed registration, manual JSON schema registration, validation, and optional `tool_trace`
+- **Grammar-constrained structured output** via `extract()` and `ExtractionResponse::data`
+- **Conversation management** with system prompts, `MessageView`/`ConversationView`, and `HistorySnapshot`
+- **Concrete response metadata** including token usage, latency, and throughput metrics
 
 ## Build and Link
 
 ```bash
 git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
-scripts/build -DZOO_BUILD_EXAMPLES=ON
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 ```
 
 For consumers, `ZooKeeper::zoo` is the primary CMake target. See [docs/building.md](docs/building.md) for:
@@ -132,7 +128,7 @@ See [docs/architecture.md](docs/architecture.md) for the full threading model an
 | [Examples](docs/examples.md) | Focused example programs for streaming, cancellation, tools, and error handling |
 | [Architecture](docs/architecture.md) | Layering, runtime ownership, threading model, and target structure |
 | [Compatibility](docs/compatibility.md) | Public API boundary, intended 1.x stability policy, and deprecation rules |
-| [Migration](MIGRATION.md) | Consumer-facing changes to move from `0.2.x` to `1.0` |
+| [Migration](MIGRATION.md) | Upgrade notes for major API changes, including `v1.0.3` to `v1.1.0` |
 | [API Reference](docs/building.md#api-reference) | Generate Doxygen locally or browse the published reference |
 
 Generate the API reference locally with:
@@ -143,17 +139,17 @@ cmake --preset docs && cmake --build --preset docs
 
 ## Testing
 
-The default build runs the full unit suite, and CI also smoke-tests build-tree and installed-package CMake consumers.
+The default build runs the test suite, and CI also smoke-tests build-tree and installed-package CMake consumers.
 
 ```bash
-scripts/test
+scripts/test.sh
 ```
 
 For live smoke coverage against a real model:
 
 ```bash
-scripts/build -DZOO_BUILD_INTEGRATION_TESTS=ON
-ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf scripts/test
+scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
+ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf scripts/test.sh
 ```
 
 ## Acknowledgments

@@ -5,10 +5,50 @@
 ```bash
 git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
-cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
-cmake --build build
-ctest --test-dir build
+scripts/bootstrap.sh
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
+scripts/test.sh
 ```
+
+## Helper Scripts
+
+Zoo-Keeper ships small wrapper scripts for the common local workflows:
+
+- `scripts/bootstrap.sh` - fetches and configures the repository dependencies
+- `scripts/build.sh` - configures and builds the project with the flags you pass
+- `scripts/build-all.sh` - enables tests, integration tests, examples, and benchmarks
+- `scripts/test.sh` - runs `ctest` against the existing `build/` tree
+- `scripts/format.sh` - runs `clang-format` over the repo's C++ files
+- `scripts/lint.sh` - performs a warning-free build
+
+`scripts/build-all.sh` is the easiest way to exercise the broad release surface
+before packaging, while `scripts/build.sh` stays useful for smaller builds or
+custom flag combinations.
+
+## CMake Presets
+
+Current presets in `CMakePresets.json` are:
+
+- configure: `default`, `dev`, `integration`, `sanitizers`, `coverage`, `docs`
+- build: `default`, `dev`, `docs`
+- test: `default`, `unit`, `integration`
+
+Examples:
+
+```bash
+cmake --preset default
+cmake --build --preset default
+ctest --preset default
+```
+
+```bash
+cmake --preset docs
+cmake --build --preset docs
+```
+
+The docs preset is intended for Doxygen generation only. The coverage preset
+turns on coverage instrumentation and integration tests, while the integration
+preset enables the live-model test label set.
 
 ## CMake Options
 
@@ -19,6 +59,7 @@ ctest --test-dir build
 | `ZOO_BUILD_TESTS` | Build test suite | OFF |
 | `ZOO_BUILD_INTEGRATION_TESTS` | Build Model/Agent integration tests | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
+| `ZOO_BUILD_BENCHMARKS` | Build the repo-local benchmark harness | OFF |
 | `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan + UBSan | OFF |
@@ -26,35 +67,32 @@ ctest --test-dir build
 
 ## Platform-Specific Setup
 
-### macOS (Metal)
+### macOS
 
 Metal acceleration is enabled by default on macOS:
 
 ```bash
-cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
-cmake --build build
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_EXAMPLES=ON
 ```
 
 To disable Metal and use CPU only:
 
 ```bash
-cmake -B build -DZOO_ENABLE_METAL=OFF
+scripts/build.sh -DZOO_ENABLE_METAL=OFF
 ```
 
-### Linux (CUDA)
+### Linux
 
 ```bash
-cmake -B build -DZOO_ENABLE_CUDA=ON -DZOO_BUILD_TESTS=ON
-cmake --build build
+scripts/build.sh -DZOO_ENABLE_CUDA=ON -DZOO_BUILD_TESTS=ON
 ```
 
-Requires CUDA toolkit installed and `nvcc` on PATH.
+Requires the CUDA toolkit and `nvcc` on PATH.
 
 ### CPU Only
 
 ```bash
-cmake -B build -DZOO_ENABLE_METAL=OFF -DZOO_ENABLE_CUDA=OFF
-cmake --build build
+scripts/build.sh -DZOO_ENABLE_METAL=OFF -DZOO_ENABLE_CUDA=OFF
 ```
 
 ## Compiler Requirements
@@ -77,41 +115,56 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 | [Doxygen](https://www.doxygen.nl/) | host tool | System package | Required only when `ZOO_BUILD_DOCS=ON` |
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
-All FetchContent dependencies are downloaded automatically during CMake configuration.
-Installed-package consumers are different: Zoo-Keeper installs llama's CMake package into the same prefix, but still expects a discoverable `nlohmann_json` package because the public headers include `<nlohmann/json.hpp>`.
+All FetchContent dependencies are downloaded automatically during CMake
+configuration. Installed-package consumers still need a discoverable
+`nlohmann_json` package because the public headers include
+`<nlohmann/json.hpp>`.
 
 ## Running Tests
 
 ```bash
 # All tests
-ctest --test-dir build
+scripts/test.sh
 
 # Specific test suite
-ctest --test-dir build -R ToolRegistryTest
+scripts/test.sh -R ToolRegistryTest
 
 # Verbose output
-ctest --test-dir build --output-on-failure --verbose
+scripts/test.sh --verbose
 ```
 
 ## Integration Tests
 
-The integration target exercises the concrete `Model` and `Agent` layers. Two failure-path tests run using vendored fixtures. Optional live smoke tests run when a real GGUF path is provided.
+The integration target exercises the concrete `Model` and `Agent` layers. Two
+failure-path tests run using vendored fixtures. Optional live smoke tests run
+when a real GGUF path is provided.
 
-`ZOO_BUILD_INTEGRATION_TESTS` is only effective when `ZOO_BUILD_TESTS=ON`, because the integration suite is added from `tests/CMakeLists.txt`.
+`ZOO_BUILD_INTEGRATION_TESTS` is only effective when `ZOO_BUILD_TESTS=ON`,
+because the integration suite is added from `tests/CMakeLists.txt`.
 
 ```bash
-cmake -B build -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON \
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON \
     -DZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf
-cmake --build build
-ctest --test-dir build --output-on-failure -L integration
+scripts/test.sh -L integration
 ```
+
+## Benchmarks
+
+Benchmarks are built with the repo-local benchmark target and the
+`ZOO_BUILD_BENCHMARKS=ON` flag:
+
+```bash
+scripts/build-all.sh
+build/benchmarks/zoo_benchmarks /absolute/path/to/model.gguf
+```
+
+The benchmark harness is meant for live GGUF-backed runs, not mocked unit tests.
 
 ## Sanitizers
 
 ```bash
-cmake -B build -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build
+scripts/build.sh -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON
+scripts/test.sh
 ```
 
 Enables AddressSanitizer (ASan) and UndefinedBehaviorSanitizer (UBSan).
@@ -119,25 +172,29 @@ Enables AddressSanitizer (ASan) and UndefinedBehaviorSanitizer (UBSan).
 ## Coverage
 
 ```bash
-cmake -B build -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build
+scripts/build.sh -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
+scripts/test.sh
 ```
 
-GitHub Actions also captures an `lcov` report and uploads it as a workflow artifact. Upload to Codecov runs only when `CODECOV_TOKEN` is available in CI.
+GitHub Actions also captures an `lcov` report and uploads it as a workflow
+artifact. Upload to Codecov runs only when `CODECOV_TOKEN` is available in CI.
 
 ## API Reference
 
-Install `doxygen` locally before enabling docs. `graphviz` is optional, but if `dot` is available Doxygen will emit diagrams in the generated HTML.
+Install `doxygen` locally before enabling docs. `graphviz` is optional, but if
+`dot` is available Doxygen will emit diagrams in the generated HTML.
 
 ```bash
-cmake -B build -DZOO_BUILD_DOCS=ON
-cmake --build build --target zoo_docs
+cmake --preset docs
+cmake --build --preset docs
 ```
 
-The generated site is written to `build/docs/doxygen/html/index.html`, with XML output in `build/docs/doxygen/xml`.
+The generated site is written to `build/docs/doxygen/html/index.html`, with XML
+output in `build/docs/doxygen/xml`.
 
-GitHub Actions also builds the Doxygen site on every push and pull request, uploads the generated output as a workflow artifact, and deploys the latest `main` build to GitHub Pages.
+GitHub Actions also builds the Doxygen site on every push and pull request,
+uploads the generated output as a workflow artifact, and deploys the latest
+`main` build to GitHub Pages.
 
 ## Using Zoo-Keeper in Your Project
 
@@ -174,7 +231,10 @@ find_package(ZooKeeper CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 ```
 
-Make sure `nlohmann_json` is also installed and discoverable via `CMAKE_PREFIX_PATH` or `nlohmann_json_DIR`. `ZooKeeperConfig.cmake` resolves it transitively with `find_dependency(nlohmann_json CONFIG)`, so consumers do not need a separate `target_link_libraries(... nlohmann_json::nlohmann_json)` line.
+Make sure `nlohmann_json` is also installed and discoverable via
+`CMAKE_PREFIX_PATH` or `nlohmann_json_DIR`. `ZooKeeperConfig.cmake` resolves it
+transitively with `find_dependency(nlohmann_json CONFIG)`, so consumers do not
+need a separate `target_link_libraries(... nlohmann_json::nlohmann_json)` line.
 
 Example:
 
@@ -189,18 +249,21 @@ cmake -S . -B build \
 pkg-config --cflags --libs zoo-keeper
 ```
 
-The `zoo-keeper.pc` file declares a dependency on `nlohmann_json`. If `pkg-config` cannot resolve it, install the `nlohmann_json` pkg-config package and make sure its `.pc` directory is on `PKG_CONFIG_PATH` alongside Zoo-Keeper's.
+The `zoo-keeper.pc` file declares a dependency on `nlohmann_json`. If
+`pkg-config` cannot resolve it, install the `nlohmann_json` pkg-config package
+and make sure its `.pc` directory is on `PKG_CONFIG_PATH` alongside
+Zoo-Keeper's.
 
 ## Running the Demo
 
 ```bash
-cmake -B build -DZOO_BUILD_EXAMPLES=ON
-cmake --build build
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 ./build/examples/demo_chat examples/config.example.json
 ```
 
 Additional example executables are built alongside `demo_chat`:
 
+- `demo_extract` - structured extraction examples for stateful, stateless, and streaming flows
 - `model_generate` -- standalone `zoo::core::Model` usage
 - `error_handling` -- practical error reporting patterns
 - `stream_cancel` -- streaming output with cooperative cancellation
@@ -209,5 +272,5 @@ Additional example executables are built alongside `demo_chat`:
 ## See Also
 
 - [Getting Started](getting-started.md) -- first agent walkthrough
-- [Configuration](configuration.md) -- all Config struct fields
+- [Configuration](configuration.md) -- config struct fields
 - [Maintainer CMake Packaging Notes](maintainer-cmake-packaging.md) -- build-tree vs install-tree package config internals

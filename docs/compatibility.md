@@ -1,48 +1,47 @@
 # Compatibility Policy
 
-This document describes the intended compatibility contract for Zoo-Keeper 1.0 and later. Before 1.0, changes may still land, but new work should already preserve this boundary unless there is a strong reason not to.
+This document describes the current compatibility boundary for Zoo-Keeper's
+published release surface.
 
-## Public Boundary
+## Supported Public Boundary
 
 The supported public API is:
 
 - installed headers under `include/zoo/`
 - the primary CMake target `ZooKeeper::zoo`
-- the public runtime/model/tool types documented in the README and docs
+- the public runtime, model, tool, and value types documented in the user docs
 
-The following are not part of the compatibility contract:
+The following are not part of the compatibility boundary:
 
 - headers under `include/zoo/internal/`
 - implementation files under `src/`
 - private CMake/package plumbing
-- internal audit notes and temporary planning documents under `docs/` that are not part of the published user-facing reference set
+- internal planning notes and draft documents under `docs/` that are not part of
+  the published user-facing reference set
 
-## Intended 1.x Guarantees
+## Current Compatibility Expectations
 
-For 1.x releases, Zoo-Keeper should preserve source compatibility for normal consumers that stay within the public boundary.
+- Public names and include paths documented here should remain stable within the
+  normal release line.
+- Behavior described in the user-facing docs is the supported contract.
+- Undocumented implementation details may change without notice.
+- `ZooKeeper::zoo` is the primary supported consumer target.
+- `ZooKeeper::zoo_core` may remain as a compatibility shim, but it is not the
+  primary user story.
 
-That means:
+## Release Guidance
 
-- existing public headers keep compatible names and include paths
-- existing public types and functions are not removed or behaviorally repurposed in a minor or patch release
-- `ZooKeeper::zoo` remains the primary supported consumer target throughout 1.x
-- `ZooKeeper::zoo_core` may remain as a compatibility shim, but it is not part of the primary user story
+When changing the supported public API:
 
-Breaking changes to the supported public API require a new major version.
+- update the affected docs first
+- call out the change in the release notes
+- keep examples, guides, and architecture pages aligned with the shipped API
 
-## Deprecation Rules
+## Verification Before Release
 
-When a public API needs to change after 1.0:
+Before cutting a release, verify:
 
-- mark the old API as deprecated in docs and release notes first
-- keep the deprecated path available for at least one minor release unless there is a security or correctness reason not to
-- document the replacement path clearly in the changelog and migration notes
-
-## Release Validation
-
-Before cutting 1.0 or later releases, verify:
-
-- `ctest --test-dir build --output-on-failure`
+- `scripts/test.sh`
 - build-tree CMake consumer smoke
 - installed-package CMake consumer smoke
 - any optional live-model smoke selected for the release candidate

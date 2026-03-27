@@ -6,6 +6,7 @@
 .idea/**
 .agents/**
 !.agents/AGENTS.md
+.worktrees/**
 build/**
 build-san/**
 cmake-build-*/

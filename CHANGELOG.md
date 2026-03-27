@@ -5,6 +5,52 @@ All notable changes to Zoo-Keeper will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-26
+
+This is the first major post-1.0.3 API cut. The public surface is now
+split into explicit model, agent, and per-call configuration types, and async requests
+return typed handles instead of immediate results.
+
+### Added
+
+- **Split configuration model** — `ModelConfig`, `AgentConfig`, and `GenerationOptions`
+  now separate backend, agent-policy, and per-request generation concerns.
+- **Typed async request handles** — `Agent::chat()`, `Agent::complete()`, and
+  `Agent::extract()` now return `RequestHandle<T>` values with explicit request IDs,
+  cancellation, and `await_result()` semantics.
+- **Dedicated extraction result type** — `ExtractionResponse` carries both the raw
+  generated text and parsed schema-conforming `data`, plus usage, metrics, and optional
+  tool trace data.
+- **Native tool-calling core APIs** — `Model::set_tool_calling()`,
+  `Model::set_schema_grammar()`, and `Model::parse_tool_response()` expose the
+  template-driven llama.cpp tool-calling path directly.
+
+### Changed
+
+- The agent runtime now treats stateful chat, stateless completion, and structured
+  extraction as distinct request shapes instead of one monolithic request payload.
+- Message handling is now explicit about ownership and scope: `MessageView` and
+  `ConversationView` are used for request-scoped inputs, while `HistorySnapshot` and
+  `get_history()` expose retained conversation state.
+- Tool calling is no longer hardcoded around `<tool_call>` sentinels; it is driven by
+  llama.cpp chat templates and the model's native tool format.
+- Extraction no longer piggybacks on the tool-call loop. Schema-constrained generation
+  now follows the dedicated schema grammar path and returns parsed JSON in the
+  structured extraction response.
+
+### Removed
+
+- Legacy sentinel-based tool calling as the primary runtime path.
+- The generic fallback tool-calling story that treated all models as if they shared one
+  envelope format.
+
+### Fixed
+
+- Tool-calling and extraction grammar setup now stay isolated from one another, so a
+  schema-constrained request does not leak tool grammar state into later requests.
+- Stateful and stateless request flows now restore retained history predictably after a
+  scoped completion or extraction pass.
+
 ## [1.0.3] - 2026-03-14
 
 ### Added
@@ -92,6 +138,7 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - C++23 required
 - Windows is not supported
 
+[1.1.0]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.0...v1.0.1
