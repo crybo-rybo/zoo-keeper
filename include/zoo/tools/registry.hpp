@@ -593,12 +593,16 @@ class ToolRegistry {
      * @brief Invokes a registered tool with JSON arguments.
      */
     Expected<nlohmann::json> invoke(const std::string& name, const nlohmann::json& args) const {
-        std::shared_lock lock(mutex_);
-        auto it = index_by_name_.find(name);
-        if (it == index_by_name_.end()) {
-            return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
+        ToolHandler handler;
+        {
+            std::shared_lock lock(mutex_);
+            auto it = index_by_name_.find(name);
+            if (it == index_by_name_.end()) {
+                return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
+            }
+            handler = tools_[it->second].handler;
         }
-        return tools_[it->second].handler(args);
+        return handler(args);
     }
 
     /**
