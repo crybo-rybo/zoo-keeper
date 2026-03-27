@@ -427,4 +427,34 @@ TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {
     EXPECT_EQ(chat_result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
 }
 
+TEST(AgentRuntimeTest, StreamingCallbackRunsOffInferenceThread) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    std::thread::id inference_thread_id;
+    std::thread::id callback_thread_id;
+
+    backend_ptr->push_generation(
+        [&inference_thread_id](TokenCallback on_token, const CancellationCallback&) {
+            inference_thread_id = std::this_thread::get_id();
+            if (on_token) {
+                on_token("hello");
+            }
+            return Expected<GenerationResult>(GenerationResult{"hello", 5, false, "", {}});
+        });
+
+    auto handle = runtime.chat("test", GenerationOptions{}, [&](std::string_view) {
+        callback_thread_id = std::this_thread::get_id();
+    });
+
+    auto result = handle.await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    EXPECT_NE(inference_thread_id, std::thread::id{});
+    EXPECT_NE(callback_thread_id, std::thread::id{});
+    EXPECT_NE(callback_thread_id, inference_thread_id);
+}
+
 } // namespace

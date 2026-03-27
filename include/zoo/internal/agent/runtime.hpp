@@ -6,6 +6,7 @@
 #pragma once
 
 #include "backend.hpp"
+#include "callback_dispatcher.hpp"
 #include "mailbox.hpp"
 #include "request_slots.hpp"
 #include "zoo/agent.hpp"
@@ -92,6 +93,7 @@ class AgentRuntime {
     std::thread inference_thread_;
     std::atomic<bool> running_{true};
     std::atomic<bool> tool_grammar_active_{false};
+    CallbackDispatcher callback_dispatcher_;
 };
 
 } // namespace zoo::internal::agent
