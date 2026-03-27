@@ -386,4 +386,45 @@ TEST(AgentRuntimeTest, SetSystemPromptUpdatesHistoryThroughCommandLane) {
     EXPECT_EQ(history[0].content, "Be concise.");
 }
 
+TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto def1 = zoo::tools::detail::make_tool_definition(
+        "add", "Add two numbers", std::vector<std::string>{"a", "b"},
+        [](int a, int b) { return a + b; });
+    auto def2 = zoo::tools::detail::make_tool_definition(
+        "greet", "Greet someone", std::vector<std::string>{"name"},
+        [](std::string name) { return "Hello, " + name + "!"; });
+    ASSERT_TRUE(def1.has_value());
+    ASSERT_TRUE(def2.has_value());
+
+    std::vector<zoo::tools::ToolDefinition> definitions;
+    definitions.push_back(std::move(*def1));
+    definitions.push_back(std::move(*def2));
+
+    auto result = runtime.register_tools(std::move(definitions));
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(runtime.tool_count(), 2u);
+
+    // Verify tools are usable via a tool-calling flow
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("add", {{"a", 3}, {"b", 4}}));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"7", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto handle = runtime.chat("add 3 and 4", options);
+    auto chat_result = handle.await_result();
+    ASSERT_TRUE(chat_result.has_value()) << chat_result.error().to_string();
+    EXPECT_EQ(chat_result->text, "7");
+    ASSERT_TRUE(chat_result->tool_trace.has_value());
+    EXPECT_EQ(chat_result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
+}
+
 } // namespace

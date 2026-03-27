@@ -64,6 +64,7 @@ class AgentRuntime {
     void clear_history();
 
     Expected<void> register_tool(tools::ToolDefinition definition);
+    Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
     size_t tool_count() const noexcept;
 
   private:

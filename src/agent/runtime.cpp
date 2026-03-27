@@ -229,6 +229,22 @@ Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
     return {};
 }
 
+Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions) {
+    assert(!inference_thread_.joinable() ||
+           std::this_thread::get_id() != inference_thread_.get_id());
+
+    if (definitions.empty()) {
+        return {};
+    }
+
+    if (auto result = tool_registry_.register_tools(std::move(definitions)); !result) {
+        return std::unexpected(result.error());
+    }
+
+    update_tool_calling();
+    return {};
+}
+
 size_t AgentRuntime::tool_count() const noexcept {
     return tool_registry_.size();
 }
