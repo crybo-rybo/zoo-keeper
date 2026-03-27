@@ -392,9 +392,9 @@ TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {
     AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
                          std::move(backend));
 
-    auto def1 = zoo::tools::detail::make_tool_definition(
-        "add", "Add two numbers", std::vector<std::string>{"a", "b"},
-        [](int a, int b) { return a + b; });
+    auto def1 = zoo::tools::detail::make_tool_definition("add", "Add two numbers",
+                                                         std::vector<std::string>{"a", "b"},
+                                                         [](int a, int b) { return a + b; });
     auto def2 = zoo::tools::detail::make_tool_definition(
         "greet", "Greet someone", std::vector<std::string>{"name"},
         [](std::string name) { return "Hello, " + name + "!"; });
