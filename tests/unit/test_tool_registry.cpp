@@ -208,6 +208,35 @@ TEST_F(ToolRegistryTest, OverwriteExistingPreservesOrder) {
     EXPECT_EQ(schema["function"]["description"], "Add v2");
 }
 
+TEST_F(ToolRegistryTest, RegisterToolsBatchAddsAllTools) {
+    auto def1 = zoo::tools::detail::make_tool_definition("add", "Add",
+                                                         std::vector<std::string>{"a", "b"}, add);
+    auto def2 = zoo::tools::detail::make_tool_definition("greet", "Greet",
+                                                         std::vector<std::string>{"name"}, greet);
+    ASSERT_TRUE(def1.has_value());
+    ASSERT_TRUE(def2.has_value());
+
+    std::vector<zoo::tools::ToolDefinition> definitions;
+    definitions.push_back(std::move(*def1));
+    definitions.push_back(std::move(*def2));
+
+    auto result = registry.register_tools(std::move(definitions));
+    ASSERT_TRUE(result.has_value());
+
+    EXPECT_EQ(registry.size(), 2u);
+    EXPECT_TRUE(registry.has_tool("add"));
+    EXPECT_TRUE(registry.has_tool("greet"));
+
+    auto names = registry.get_tool_names();
+    EXPECT_EQ(names, std::vector<std::string>({"add", "greet"}));
+}
+
+TEST_F(ToolRegistryTest, RegisterToolsBatchEmptyIsNoOp) {
+    auto result = registry.register_tools({});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(registry.size(), 0u);
+}
+
 TEST_F(ToolRegistryTest, InvokeDoesNotBlockConcurrentReads) {
     auto entered = std::make_shared<std::promise<void>>();
     auto entered_future = entered->get_future();

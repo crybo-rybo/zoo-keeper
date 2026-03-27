@@ -582,6 +582,27 @@ class ToolRegistry {
     }
 
     /**
+     * @brief Registers multiple tool definitions under a single lock acquisition.
+     *
+     * Existing entries with the same name are replaced in place while
+     * preserving registration order.
+     */
+    Expected<void> register_tools(std::vector<ToolDefinition> definitions) {
+        std::unique_lock lock(mutex_);
+        for (auto& definition : definitions) {
+            auto it = index_by_name_.find(definition.metadata.name);
+            if (it != index_by_name_.end()) {
+                tools_[it->second] = std::move(definition);
+            } else {
+                const size_t index = tools_.size();
+                index_by_name_.emplace(definition.metadata.name, index);
+                tools_.push_back(std::move(definition));
+            }
+        }
+        return {};
+    }
+
+    /**
      * @brief Reports whether a tool name is currently registered.
      */
     bool has_tool(const std::string& name) const {
