@@ -2,11 +2,12 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
-## v1.0.3 → next release
+## v1.0.3 → v1.1.0
 
-The next release is a major API step rather than a small patch. The biggest changes are
-the config split, typed request handles, dedicated extraction results, and the clearer
-message/history APIs that separate retained state from request-scoped conversations.
+Version `1.1.0` is a major API step rather than a small patch. The biggest
+changes are the config split, typed request handles, dedicated extraction
+results, and the clearer message/history APIs that separate retained state from
+request-scoped conversations.
 
 ### Config Split
 

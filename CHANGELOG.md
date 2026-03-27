@@ -5,9 +5,9 @@ All notable changes to Zoo-Keeper will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-03-26
 
-This unreleased line is the first major post-1.0.3 API cut. The public surface is now
+This is the first major post-1.0.3 API cut. The public surface is now
 split into explicit model, agent, and per-call configuration types, and async requests
 return typed handles instead of immediate results.
 
@@ -138,6 +138,7 @@ return typed handles instead of immediate results.
 - C++23 required
 - Windows is not supported
 
+[1.1.0]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.0...v1.0.1
