@@ -1,12 +1,12 @@
 # Tool System
 
-Zoo-Keeper's tool story is native-only: register tools on `zoo::Agent`, let
-the agent route native tool calls through the runtime, and inspect an optional
+Zoo-Keeper's tool story is native-only: register tools on `zoo::Agent`, let the
+agent route native tool calls through the runtime, and inspect an optional
 `tool_trace` when you want to see what happened.
 
-Zoo-Keeper only executes native tool calls emitted by the active model or
-template. If native tool calling is unavailable, the request stays on the text
-path and no synthetic alternate protocol is introduced.
+There is no generic fallback wrapper and no sentinel-based tool protocol in the
+current release surface. If a model/template does not support native tool
+calling, Zoo-Keeper does not silently switch to a different tool format.
 
 ## Typed Registration
 
@@ -43,9 +43,9 @@ fails with `ErrorCode::InvalidToolSignature`.
 
 ## Manual Schema Registration
 
-Use the manual path when you need a JSON-backed handler or schema features
-that typed registration does not express directly, such as optional parameters
-or enums.
+Use the manual path when you need a JSON-backed handler or schema features that
+typed registration does not express directly, such as optional parameters or
+enums.
 
 ```cpp
 nlohmann::json schema = {

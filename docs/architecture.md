@@ -28,8 +28,7 @@ requests and stateless request-scoped `complete(...)` requests. `Agent` is the
 primary high-level runtime surface for most consumers.
 
 `RequestHandle<Result>` is the public async return type. It carries the request
-ID and exposes `await_result()` for retrieving the completed response or
-error.
+ID and exposes `await_result()` for retrieving the completed response or error.
 
 ## Public Threading Guarantees
 
@@ -46,11 +45,11 @@ mechanisms that implement them are documented separately for maintainers.
 ## Tool Calling Model
 
 Tool calling is native-only. Zoo-Keeper only executes model-emitted native tool
-calls when the active model/template supports them. If the selected model does
-not expose native tool calling, the runtime remains on the text path.
+calls when the active model/template supports them. The runtime does not rely on
+generic wrapper formats or sentinel-era fallback channels.
 
-When `GenerationOptions::record_tool_trace` is enabled, the request can retain
-a `tool_trace` describing the attempts made during the tool loop.
+When `GenerationOptions::record_tool_trace` is enabled, the request can retain a
+`tool_trace` describing the attempts made during the tool loop.
 
 ## CMake Targets
 
