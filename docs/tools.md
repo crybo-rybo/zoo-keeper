@@ -144,7 +144,7 @@ include a `tool_trace` with the tool attempts made during the request.
 
 ```cpp
 auto handle = agent->chat(
-    zoo::Message::user("What is 42 + 58?"),
+    zoo::MessageView{zoo::Role::User, "What is 42 + 58?"},
     zoo::GenerationOptions{.record_tool_trace = true});
 
 auto response = handle.await_result();

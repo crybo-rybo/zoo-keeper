@@ -39,10 +39,12 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 | Module | Responsibility |
 |--------|----------------|
 | `src/agent/runtime.*` | Worker thread, request processing, tool loop |
-| `src/agent/backend.*` | Runtime-to-model seam |
+| `src/agent/backend.hpp` | Runtime-to-model seam (interface only) |
 | `src/agent/backend_model.*` | Production adapter around `zoo::core::Model` |
 | `src/agent/mailbox.hpp` | Request and command queueing |
+| `src/agent/request.hpp` | Request type definitions |
 | `src/agent/request_slots.hpp` | Slot-backed request state, cancellation, await/release |
+| `src/agent/callback_dispatcher.hpp` | Streaming callback dispatch |
 | `src/agent/command.hpp` | Typed control operations applied on the inference thread |
 
 Keep responsibilities narrow. If a change affects queueing, cancellation, command routing, and request execution at once, it usually belongs in a smaller extracted unit instead.
@@ -59,7 +61,11 @@ Keep responsibilities narrow. If a change affects queueing, cancellation, comman
 | `src/core/model_prompt.cpp` | prompt delta rendering and KV-cache bookkeeping |
 | `src/core/model_history.cpp` | history mutation and trimming |
 | `src/core/model_sampling.cpp` | sampler construction and grammar updates |
+| `src/core/model_tool_calling.cpp` | tool-calling setup and response parsing |
+| `src/core/stream_filter.*` | streaming token filtering (e.g., tool-call trigger detection) |
 | `src/core/model_impl.hpp` | private implementation state behind the public header |
+| `src/core/prompt_bookkeeping.hpp` | prompt rendering bookkeeping helpers |
+| `src/core/batch.hpp` | prefill batch chunking |
 
 Contributor rules:
 
@@ -90,7 +96,7 @@ The `AgentRuntime` implementation is split across three files by responsibility:
 | `src/agent/runtime_tool_loop.cpp` | Agentic tool loop (generate → detect → execute → re-generate) |
 | `src/agent/runtime_extraction.cpp` | Schema-constrained structured output extraction |
 
-Shared helpers (`ScopeExit`, `load_history`, `restore_history`) live in `src/agent/runtime_helpers.hpp`.
+Shared helpers (`ScopeExit`, `snapshot_from_messages`, `swap_history`) live in `src/agent/runtime_helpers.hpp`.
 
 ## Documentation Split
 

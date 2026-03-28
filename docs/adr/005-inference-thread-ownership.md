@@ -15,11 +15,11 @@ Two threading models were considered:
 ## Decision
 
 `zoo::Agent` owns a background inference thread. Callers submit requests via
-`chat()` / `complete()` and receive `std::future<Response>`. All callbacks and
-tool handlers execute on the inference thread.
+`chat()` / `complete()` and receive `RequestHandle<TextResponse>`. All callbacks
+and tool handlers execute on the inference thread.
 
 `zoo::core::Model` remains single-threaded and not thread-safe. Agent protects
-it with `model_mutex_`.
+it by confining all access to the single inference thread.
 
 ## Rationale
 

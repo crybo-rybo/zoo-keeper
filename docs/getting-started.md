@@ -77,9 +77,9 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 |--------|-------------|
 | `create(model, agent, generation)` | Validate the split config blocks, load the model, and start the inference thread |
 | `chat(message)` | Submit a user message, returns `RequestHandle<TextResponse>` |
-| `chat(message, callback)` | Chat with a per-token streaming callback |
+| `chat(message, options, callback)` | Chat with a per-token streaming callback |
 | `complete(messages)` | Submit a stateless request-scoped history without mutating retained history |
-| `complete(messages, callback)` | Stateless completion with a per-token streaming callback |
+| `complete(messages, options, callback)` | Stateless completion with a per-token streaming callback |
 | `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
 | `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |

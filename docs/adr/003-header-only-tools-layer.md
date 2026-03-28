@@ -24,8 +24,9 @@ llama.cpp or `zoo::core`. It operates entirely on strings and `nlohmann::json`.
   theoretically be used with a different backend.
 - **Build isolation:** Changes to llama.cpp or the core layer do not trigger
   recompilation of tools code.
-- **Layer discipline:** Strict dependency direction (Agent → Tools → Core →
+- **Layer discipline:** Strict dependency direction (Agent → {Tools, Core} →
   llama.cpp) prevents circular dependencies and keeps the architecture legible.
+  Tools and Core are independent siblings — Tools has no dependency on Core.
 
 ## Consequences
 

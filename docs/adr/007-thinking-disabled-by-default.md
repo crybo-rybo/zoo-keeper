@@ -20,10 +20,10 @@ llama.cpp's `common_chat_templates_inputs` exposes two fields for this:
 `common_chat_msg` also carries a `reasoning_content` field alongside `content` for the
 parsed-out thinking trace.
 
-Zoo-Keeper currently has no public API surface for thinking: `Response` has no
+Zoo-Keeper currently has no public API surface for thinking: `TextResponse` has no
 `reasoning_content` field, there is no streaming path for thinking tokens (they would
-appear inline in the token stream before content), and the `Config` struct exposes no
-thinking-related options.
+appear inline in the token stream before content), and the configuration types
+(`ModelConfig`, `AgentConfig`, `GenerationOptions`) expose no thinking-related options.
 
 ## Decision
 
@@ -43,12 +43,12 @@ This is applied in both `render_prompt_delta()` (generation) and `finalize_respo
 
 ## What Must Be Done Before Removing This
 
-1. Add `reasoning_content` to `zoo::Response` (Layer 3) and wire it through from
+1. Add `reasoning_content` to `zoo::TextResponse` (Layer 3) and wire it through from
    `common_chat_msg::reasoning_content` in the parse path.
 2. Decide on a streaming strategy — either a second `on_thinking_token` callback, or a
-   filter similar to `ToolCallWordTriggerFilter` that separates thinking from content tokens.
-3. Expose `enable_thinking` and `reasoning_format` in `zoo::Config` (or a nested
-   `ThinkingConfig` struct).
+   filter similar to `ToolCallTriggerFilter` that separates thinking from content tokens.
+3. Expose `enable_thinking` and `reasoning_format` in `zoo::ModelConfig` or
+   `zoo::GenerationOptions` (or a nested `ThinkingConfig` struct).
 4. Call `common_chat_templates_support_enable_thinking()` after model load and surface the
    result so callers know whether the loaded model supports the flag at all.
 5. Remove the hard-coded `inputs.enable_thinking = false` lines from `model_prompt.cpp`.
