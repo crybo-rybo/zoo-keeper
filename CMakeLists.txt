@@ -23,6 +23,7 @@ else()
     option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" OFF)
 endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
+option(ZOO_BUILD_HUB "Build the hub layer (GGUF inspection, HuggingFace, model store)" OFF)
 option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")
 
@@ -111,6 +112,15 @@ target_link_libraries(zoo PRIVATE
 set_property(TARGET zoo APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:ZooKeeper::nlohmann_json>"
 )
+
+if(ZOO_BUILD_HUB)
+    target_sources(zoo PRIVATE
+        src/hub/inspector.cpp
+        src/hub/huggingface.cpp
+        src/hub/store.cpp
+    )
+    target_compile_definitions(zoo PUBLIC ZOO_HUB_ENABLED)
+endif()
 
 if(ZOO_ENABLE_LOGGING)
     target_compile_definitions(zoo PRIVATE ZOO_LOGGING_ENABLED)

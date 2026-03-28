@@ -4,20 +4,15 @@
  */
 
 #include "zoo/core/model.hpp"
+#include "core/backend_init.hpp"
 #include "core/model_impl.hpp"
 
 #include <llama.h>
-#include <mutex>
 
 namespace zoo::core {
 
-static std::once_flag g_init_flag;
-
 void Model::initialize_global() {
-    std::call_once(g_init_flag, []() {
-        llama_backend_init();
-        ggml_backend_load_all();
-    });
+    ensure_backend_initialized();
 }
 
 Model::Model(ModelConfig model_config, GenerationOptions default_generation)

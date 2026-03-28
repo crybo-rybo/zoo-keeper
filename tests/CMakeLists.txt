@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 
 include(GoogleTest)
 
-add_executable(zoo_tests
+set(ZOO_TEST_SOURCES
     unit/test_types.cpp
     unit/test_tool_registry.cpp
     unit/test_tool_parser.cpp
@@ -19,6 +19,12 @@ add_executable(zoo_tests
     unit/test_streaming_filter.cpp
     unit/test_callback_dispatcher.cpp
 )
+
+if(ZOO_BUILD_HUB)
+    list(APPEND ZOO_TEST_SOURCES unit/test_hub.cpp)
+endif()
+
+add_executable(zoo_tests ${ZOO_TEST_SOURCES})
 
 target_link_libraries(zoo_tests
     PRIVATE

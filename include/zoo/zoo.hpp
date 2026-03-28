@@ -23,3 +23,11 @@
 
 // Agent (async orchestration)
 #include "agent.hpp"
+
+// Hub layer (model lifecycle management) — optional
+#ifdef ZOO_HUB_ENABLED
+#include "hub/huggingface.hpp"
+#include "hub/inspector.hpp"
+#include "hub/store.hpp"
+#include "hub/types.hpp"
+#endif

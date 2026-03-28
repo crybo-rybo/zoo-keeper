@@ -18,6 +18,9 @@ scripts/format.sh
 scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
 ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 
+# Hub layer (GGUF inspection, HuggingFace downloading, model store)
+scripts/build.sh -DZOO_BUILD_HUB=ON
+
 # Sanitizers / coverage
 scripts/build.sh -DZOO_ENABLE_SANITIZERS=ON
 scripts/build.sh -DZOO_ENABLE_COVERAGE=ON
@@ -25,10 +28,11 @@ scripts/build.sh -DZOO_ENABLE_COVERAGE=ON
 
 ## Architecture
 
-C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Three strict layers — each depends only on layers below it:
+C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Four layers — each depends only on layers below it:
 
 | Layer | Namespace | Role |
 |-------|-----------|------|
+| 4 | `zoo::hub` | **Optional.** GGUF inspection, HuggingFace downloading, local model store, auto-configuration. Requires `ZOO_BUILD_HUB=ON` |
 | 3 | `zoo::Agent` | Async orchestration: inference thread, request queue, streaming, agentic tool loop |
 | 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Header-only, zero llama.cpp dependency |
 | 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
