@@ -64,6 +64,7 @@ preset enables the live-model test label set.
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan + UBSan | OFF |
 | `ZOO_ENABLE_LOGGING` | Emit runtime diagnostic logs to stderr | OFF |
+| `ZOO_WARNINGS_AS_ERRORS` | Treat warnings in zoo-owned targets as errors | OFF |
 
 ## Platform-Specific Setup
 

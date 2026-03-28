@@ -13,8 +13,8 @@ would have placed a virtual dispatch layer between `Model` and llama.cpp.
 ## Decision
 
 `zoo::core::Model` directly owns and calls llama.cpp resources (`llama_model*`,
-`llama_context*`, `llama_sampler*`, `llama_vocab*`) without an intervening
-abstraction layer.
+`llama_context*`, `llama_sampler*`) and accesses `llama_vocab*` through the
+model, without an intervening abstraction layer.
 
 A private `AgentBackend` seam exists **only** in the internal agent layer to
 decouple the runtime orchestrator from the model for testing purposes. This seam

@@ -32,6 +32,7 @@ Print tokens as they arrive:
 ```cpp
 auto handle = agent->chat(
     zoo::MessageView{zoo::Role::User, "Write a haiku about AI"},
+    {},
     [](std::string_view token) {
         std::cout << token << std::flush;
     }

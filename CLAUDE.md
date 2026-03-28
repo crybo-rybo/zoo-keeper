@@ -6,21 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Quick start (build + tests)
-scripts/build && scripts/test
+scripts/build.sh && scripts/test.sh
 
 # Run a single test by name
-scripts/test -R "TestSuiteName.TestName"
+scripts/test.sh -R "TestSuiteName.TestName"
 
 # Format all source files
-scripts/format
+scripts/format.sh
 
 # Integration tests (requires a real GGUF model)
-scripts/build -DZOO_BUILD_INTEGRATION_TESTS=ON
-ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test
+scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
+ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 
 # Sanitizers / coverage
-scripts/build -DZOO_ENABLE_SANITIZERS=ON
-scripts/build -DZOO_ENABLE_COVERAGE=ON
+scripts/build.sh -DZOO_ENABLE_SANITIZERS=ON
+scripts/build.sh -DZOO_ENABLE_COVERAGE=ON
 ```
 
 ## Architecture
@@ -33,9 +33,9 @@ C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Three strict layer
 | 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Header-only, zero llama.cpp dependency |
 | 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
 
-**Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `std::future<Response>`. All callbacks run on the inference thread. Model is protected by `model_mutex_`.
+**Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `RequestHandle<TextResponse>`. All callbacks run on the inference thread. Model is protected by thread confinement to the inference thread.
 
-**Tool calling:** Model initializes chat templates via `common_chat_templates_init()` (from the llama.cpp `common` library). Prompt rendering uses `common_chat_templates_apply()`. Tool calling is template-driven: `Model::set_tool_calling()` detects the model's native format (29+ formats recognized) and activates a lazy grammar with format-specific triggers. Models without a recognized native tool calling format have tool calling disabled (`set_tool_calling()` returns an error). Parsed tool calls are returned as `ToolCallInfo` structs via `Model::parse_tool_response()`. The old hardcoded `<tool_call>` sentinel approach and generic fallback format have been removed.
+**Tool calling:** Model initializes chat templates via `common_chat_templates_init()` (from the llama.cpp `common` library). Prompt rendering uses `common_chat_templates_apply()`. Tool calling is template-driven: `Model::set_tool_calling()` detects the model's native format (29+ formats recognized) and activates a lazy grammar with format-specific triggers. Models without a recognized native tool calling format have tool calling disabled (`set_tool_calling()` returns `false`). Parsed tool calls are returned inside a `ParsedResponse` struct (containing `std::vector<OwnedToolCall>`) via `Model::parse_tool_response()`. The old hardcoded `<tool_call>` sentinel approach and generic fallback format have been removed.
 
 **CMake targets:** `zoo` (static lib), `zoo_core` (interface compat alias). Consumers use `ZooKeeper::zoo`. The build requires `LLAMA_BUILD_COMMON=ON` to link the `common` library from llama.cpp.
 
@@ -62,16 +62,16 @@ C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Three strict layer
 Before opening a Pull Request, always run:
 
 ```bash
-scripts/format    # CI enforces formatting
-scripts/build     # Must compile cleanly
-scripts/test      # All tests must pass
+scripts/format.sh    # CI enforces formatting
+scripts/build.sh     # Must compile cleanly
+scripts/test.sh      # All tests must pass
 ```
 
 <AgentBoundaries>
 ## Boundaries
 
 ### Always (no permission needed)
-- Read any file, run `scripts/build`, `scripts/test`, `scripts/format`
+- Read any file, run `scripts/build.sh`, `scripts/test.sh`, `scripts/format.sh`
 
 ### Ask first
 - Adding new dependencies or modifying CMakeLists.txt build structure

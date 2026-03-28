@@ -36,4 +36,4 @@ operations. No exceptions anywhere in the codebase.
 - Windows support is not a target (MSVC C++23 support was lagging at decision time).
 - All public APIs return `std::expected<T, zoo::Error>` rather than throwing.
 - Error codes are organized by category (100s=config, 200s=backend, 300s=engine,
-  400s=runtime, 500s=tools).
+  400s=runtime, 500s=tools, 600s=extraction).
