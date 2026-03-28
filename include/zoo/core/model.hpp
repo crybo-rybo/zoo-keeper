@@ -21,6 +21,8 @@ struct common_chat_templates;
 
 namespace zoo::core {
 
+struct ModelTestAccess;
+
 /**
  * @brief Direct llama.cpp wrapper for model lifecycle, history, and generation.
  *
@@ -132,12 +134,8 @@ class Model {
     /// Disables any active grammar/tool calling and restores the default sampler chain.
     void clear_tool_grammar() noexcept;
 
-    [[nodiscard]] bool has_tool_calling() const noexcept {
-        return grammar_mode_ == GrammarMode::NativeToolCall;
-    }
-    [[nodiscard]] bool has_schema_grammar() const noexcept {
-        return grammar_mode_ == GrammarMode::Schema;
-    }
+    [[nodiscard]] bool has_tool_calling() const noexcept;
+    [[nodiscard]] bool has_schema_grammar() const noexcept;
 
     /**
      * @brief Parses a generated text into structured content and tool calls.
@@ -152,14 +150,14 @@ class Model {
     [[nodiscard]] int context_size() const noexcept;
     [[nodiscard]] int estimated_tokens() const noexcept;
     [[nodiscard]] bool is_context_exceeded() const noexcept;
-    [[nodiscard]] const ModelConfig& model_config() const noexcept {
-        return model_config_;
-    }
-    [[nodiscard]] const GenerationOptions& default_generation_options() const noexcept {
-        return default_generation_options_;
-    }
+    [[nodiscard]] const ModelConfig& model_config() const noexcept;
+    [[nodiscard]] const GenerationOptions& default_generation_options() const noexcept;
 
   private:
+    friend struct ModelTestAccess;
+
+    struct Impl;
+
     struct LlamaModelDeleter {
         void operator()(llama_model* model) const noexcept;
     };
@@ -204,37 +202,7 @@ class Model {
     [[nodiscard]] GenerationOptions
     resolve_generation_options(const GenerationOptions& overrides) const;
 
-    struct PromptState {
-        int committed_prompt_len = 0;
-        std::string rendered_prompt;
-        bool dirty = true;
-    };
-
-    ModelConfig model_config_;
-    GenerationOptions default_generation_options_;
-
-    LlamaModelHandle llama_model_;
-    LlamaContextHandle ctx_;
-    LlamaSamplerHandle sampler_;
-    const llama_vocab* vocab_ = nullptr;
-
-    int context_size_ = 0;
-    ChatTemplatesHandle chat_templates_;
-
-    enum class GrammarMode { None, NativeToolCall, Schema };
-    std::string tool_grammar_str_;
-    GrammarMode grammar_mode_ = GrammarMode::None;
-
-    struct ToolCallingState;
-    std::unique_ptr<ToolCallingState> tool_state_;
-
-    PromptState prompt_state_;
-
-    std::vector<Message> messages_;
-    int estimated_tokens_ = 0;
-    std::vector<int> token_buffer_;
-    SamplingParams active_sampling_;
-    static constexpr int kTemplateOverheadPerMessage = 8;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace zoo::core

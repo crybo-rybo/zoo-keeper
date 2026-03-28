@@ -3,10 +3,10 @@
  * @brief Agentic tool loop: generate → detect tool calls → execute → re-generate.
  */
 
-#include "zoo/internal/agent/runtime.hpp"
+#include "agent/runtime.hpp"
 
-#include "zoo/internal/agent/runtime_helpers.hpp"
-#include "zoo/internal/log.hpp"
+#include "agent/runtime_helpers.hpp"
+#include "log.hpp"
 #include "zoo/tools/validation.hpp"
 #include <chrono>
 

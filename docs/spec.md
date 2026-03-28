@@ -30,14 +30,15 @@ agent, and per-call generation policy.
 
 The supported surface is:
 
-- Installed headers under `include/zoo/`, excluding `include/zoo/internal/`
+- Installed headers under `include/zoo/`
 - CMake target `ZooKeeper::zoo`
 - Core types and APIs such as `ModelConfig`, `AgentConfig`, `GenerationOptions`,
   `zoo::Agent`, `zoo::core::Model`, `Message`, `MessageView`, `ConversationView`,
   `HistorySnapshot`, `TextResponse`, `ExtractionResponse`, `RequestHandle<T>`,
-  `ToolRegistry`, `ToolCallParser`, and `ErrorRecovery`
+  `ToolRegistry`, `ToolCallParser`, and `ToolArgumentsValidator`
 
-Everything under `include/zoo/internal/` and `src/` is intentionally private.
+Everything under `src/` is intentionally private, including source-local private
+headers used by the agent and core runtime.
 
 ## Architecture
 
@@ -46,7 +47,7 @@ Three strict layers, each depending only on the layers below it:
 | Layer | Namespace | Responsibility |
 |-------|-----------|----------------|
 | 3 | `zoo::Agent` | Async orchestration, request handles, history management, tool execution |
-| 2 | `zoo::tools` | Tool registry, call parsing, schema validation, grammar generation. Header-only and llama.cpp-free |
+| 2 | `zoo::tools` | Tool registry, call parsing, and argument validation. Public headers are llama.cpp-free; private schema grammar helpers stay under `src/` |
 | 1 | `zoo::core` | Direct llama.cpp wrapper, prompt rendering, native tool calling, structured extraction |
 
 The current core layer owns the model, context, sampler, chat templates, and the
@@ -70,7 +71,7 @@ not part of the public API contract.
 
 - Keep this document aligned with the current public headers and examples
 - Prefer the changelog for release-specific summaries
-- Treat `include/zoo/internal/` and `src/` as implementation details
+- Treat `src/` as an implementation detail
 
 ## Verification Expectations
 

@@ -5,7 +5,7 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 ## Boundary Rules
 
 - Only headers under `include/zoo/` are part of the supported installed API.
-- Headers under `include/zoo/internal/` are private implementation detail and must not be installed or documented as consumer dependencies.
+- Private headers live under `src/` and must not be installed or documented as consumer dependencies.
 - Public headers should describe API shape, not carry large runtime implementations.
 - Prefer domain-specific types and seams over generic utility layers.
 
@@ -14,7 +14,7 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 ### Public facade
 
 - `zoo::Agent` is a thin public facade.
-- Construction, destruction, and public forwarding live in `src/agent.cpp`.
+- Construction, destruction, and public forwarding live in `src/agent/facade.cpp`.
 - The facade owns configuration and a private implementation handle only.
 
 ### Private runtime
@@ -38,12 +38,12 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 
 | Module | Responsibility |
 |--------|----------------|
-| `internal/agent/runtime.*` | Worker thread, request processing, tool loop |
-| `internal/agent/backend.*` | Runtime-to-model seam |
-| `internal/agent/backend_model.*` | Production adapter around `zoo::core::Model` |
-| `internal/agent/mailbox.hpp` | Request and command queueing |
-| `internal/agent/request_slots.hpp` | Slot-backed request state, cancellation, await/release |
-| `internal/agent/command.hpp` | Typed control operations applied on the inference thread |
+| `src/agent/runtime.*` | Worker thread, request processing, tool loop |
+| `src/agent/backend.*` | Runtime-to-model seam |
+| `src/agent/backend_model.*` | Production adapter around `zoo::core::Model` |
+| `src/agent/mailbox.hpp` | Request and command queueing |
+| `src/agent/request_slots.hpp` | Slot-backed request state, cancellation, await/release |
+| `src/agent/command.hpp` | Typed control operations applied on the inference thread |
 
 Keep responsibilities narrow. If a change affects queueing, cancellation, command routing, and request execution at once, it usually belongs in a smaller extracted unit instead.
 
@@ -59,6 +59,7 @@ Keep responsibilities narrow. If a change affects queueing, cancellation, comman
 | `src/core/model_prompt.cpp` | prompt delta rendering and KV-cache bookkeeping |
 | `src/core/model_history.cpp` | history mutation and trimming |
 | `src/core/model_sampling.cpp` | sampler construction and grammar updates |
+| `src/core/model_impl.hpp` | private implementation state behind the public header |
 
 Contributor rules:
 
@@ -71,7 +72,7 @@ Contributor rules:
 - `include/zoo/tools/*` contains the supported public tool API.
 - `ToolRegistry` owns normalized metadata and invocation wiring.
 - Parser and validator operate on strings and JSON, not on model internals.
-- `include/zoo/internal/tools/*` contains private grammar/interceptor helpers. The interceptor is a standalone utility not used by the agent runtime; grammar generation for tool calling is handled by llama.cpp's `common` layer.
+- `src/tools/*` contains private grammar helpers for schema extraction. Tool-call interception is no longer part of the product code; native tool calling is handled by llama.cpp's `common` layer.
 
 Maintain these invariants:
 
@@ -89,7 +90,7 @@ The `AgentRuntime` implementation is split across three files by responsibility:
 | `src/agent/runtime_tool_loop.cpp` | Agentic tool loop (generate → detect → execute → re-generate) |
 | `src/agent/runtime_extraction.cpp` | Schema-constrained structured output extraction |
 
-Shared helpers (`ScopeExit`, `load_history`, `restore_history`) live in `include/zoo/internal/agent/runtime_helpers.hpp`.
+Shared helpers (`ScopeExit`, `load_history`, `restore_history`) live in `src/agent/runtime_helpers.hpp`.
 
 ## Documentation Split
 

@@ -6,10 +6,10 @@
  * Structured output extraction lives in runtime_extraction.cpp.
  */
 
-#include "zoo/internal/agent/runtime.hpp"
+#include "agent/runtime.hpp"
 
+#include "log.hpp"
 #include "zoo/core/model.hpp"
-#include "zoo/internal/log.hpp"
 #include "zoo/tools/registry.hpp"
 #include <cassert>
 #include <thread>

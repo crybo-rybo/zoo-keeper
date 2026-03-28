@@ -120,7 +120,7 @@ return typed handles instead of immediate results.
 ### Added
 
 - **`zoo::core::Model`** — direct synchronous llama.cpp wrapper with model loading, tokenization, generation, history tracking, and incremental KV-cache management
-- **`zoo::tools`** — ToolRegistry (typed + manual JSON tool registration), ToolCallParser (streaming tool-call extraction), ErrorRecovery (validation and retry logic), GrammarBuilder (GBNF grammar generation), ToolCallInterceptor (streaming interception)
+- **`zoo::tools`** — ToolRegistry (typed + manual JSON tool registration), ToolCallParser (tool-call extraction), and ToolArgumentsValidator (validation helpers)
 - **`zoo::Agent`** — async orchestrator with per-request queue, dedicated inference thread, cancellable `RequestHandle` futures, streaming callbacks, and autonomous tool execution loop
 - **`std::expected`-based error handling** throughout the public API — no exceptions required
 - **CMake package** with `ZooKeeper::zoo` as the primary consumer target; supports `find_package`, `FetchContent`, and `add_subdirectory`; includes both build-tree and install-tree configurations

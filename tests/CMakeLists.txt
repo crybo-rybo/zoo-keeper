@@ -8,7 +8,6 @@ add_executable(zoo_tests
     unit/test_tool_parser.cpp
     unit/test_schema_grammar.cpp
     unit/test_error_recovery.cpp
-    unit/test_tool_interceptor.cpp
     unit/test_batch.cpp
     unit/test_prompt_bookkeeping.cpp
     unit/test_agent_mailbox.cpp
@@ -33,6 +32,7 @@ target_include_directories(zoo_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+        ${CMAKE_SOURCE_DIR}/src
 )
 
 zoo_mark_llama_includes_as_system(zoo_tests)

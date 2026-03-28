@@ -3,6 +3,7 @@
  * @brief Backend initialization and tokenization for `zoo::core::Model`.
  */
 
+#include "core/model_impl.hpp"
 #include "zoo/core/model.hpp"
 
 #include <chat.h>
@@ -27,21 +28,21 @@ Expected<void> Model::initialize() {
     common_log_pause(common_log_main());
 
     auto model_params = llama_model_default_params();
-    model_params.n_gpu_layers = model_config_.n_gpu_layers;
-    model_params.use_mmap = model_config_.use_mmap;
-    model_params.use_mlock = model_config_.use_mlock;
+    model_params.n_gpu_layers = impl_->model_config_.n_gpu_layers;
+    model_params.use_mmap = impl_->model_config_.use_mmap;
+    model_params.use_mlock = impl_->model_config_.use_mlock;
 
     auto llama_model = LlamaModelHandle(
-        llama_model_load_from_file(model_config_.model_path.c_str(), model_params));
+        llama_model_load_from_file(impl_->model_config_.model_path.c_str(), model_params));
     if (!llama_model) {
         return std::unexpected(
             Error{ErrorCode::ModelLoadFailed,
-                  "Failed to load model from path: " + model_config_.model_path});
+                  "Failed to load model from path: " + impl_->model_config_.model_path});
     }
 
     auto ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = static_cast<uint32_t>(model_config_.context_size);
-    ctx_params.n_batch = static_cast<uint32_t>(model_config_.context_size);
+    ctx_params.n_ctx = static_cast<uint32_t>(impl_->model_config_.context_size);
+    ctx_params.n_batch = static_cast<uint32_t>(impl_->model_config_.context_size);
     ctx_params.n_ubatch = 512;
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;
@@ -78,14 +79,14 @@ Expected<void> Model::initialize() {
             Error{ErrorCode::TemplateRenderFailed, "Model has no chat template"});
     }
 
-    prompt_state_ = {};
+    impl_->prompt_state_ = {};
 
-    llama_model_ = std::move(llama_model);
-    ctx_ = std::move(ctx);
-    sampler_ = std::move(sampler);
-    context_size_ = context_size;
-    vocab_ = vocab;
-    chat_templates_ = std::move(chat_tmpls);
+    impl_->llama_model_ = std::move(llama_model);
+    impl_->ctx_ = std::move(ctx);
+    impl_->sampler_ = std::move(sampler);
+    impl_->context_size_ = context_size;
+    impl_->vocab_ = vocab;
+    impl_->chat_templates_ = std::move(chat_tmpls);
 
     return {};
 }
@@ -94,9 +95,9 @@ Expected<std::vector<int>> Model::tokenize(std::string_view text) {
     static_assert(sizeof(int) == sizeof(llama_token));
     static_assert(alignof(int) == alignof(llama_token));
 
-    const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_.get()), 0) == -1;
+    const bool is_first = llama_memory_seq_pos_max(llama_get_memory(impl_->ctx_.get()), 0) == -1;
     const int32_t raw =
-        llama_tokenize(vocab_, text.data(), text.length(), nullptr, 0, is_first, true);
+        llama_tokenize(impl_->vocab_, text.data(), text.length(), nullptr, 0, is_first, true);
     if (raw == INT32_MIN) {
         return std::unexpected(Error{ErrorCode::TokenizationFailed, "Tokenization overflow"});
     }
@@ -105,13 +106,13 @@ Expected<std::vector<int>> Model::tokenize(std::string_view text) {
         return std::vector<int>{};
     }
 
-    token_buffer_.resize(static_cast<size_t>(n));
-    if (llama_tokenize(vocab_, text.data(), text.length(),
-                       reinterpret_cast<llama_token*>(token_buffer_.data()), token_buffer_.size(),
-                       is_first, true) < 0) {
+    impl_->token_buffer_.resize(static_cast<size_t>(n));
+    if (llama_tokenize(impl_->vocab_, text.data(), text.length(),
+                       reinterpret_cast<llama_token*>(impl_->token_buffer_.data()),
+                       impl_->token_buffer_.size(), is_first, true) < 0) {
         return std::unexpected(Error{ErrorCode::TokenizationFailed, "Tokenization failed"});
     }
-    return token_buffer_;
+    return impl_->token_buffer_;
 }
 
 } // namespace zoo::core

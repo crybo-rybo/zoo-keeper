@@ -75,7 +75,7 @@ endif()
 
 # Primary public library target
 add_library(zoo STATIC
-    src/agent.cpp
+    src/agent/facade.cpp
     src/agent/backend_model.cpp
     src/agent/runtime.cpp
     src/agent/runtime_tool_loop.cpp
@@ -94,6 +94,9 @@ target_include_directories(zoo PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
     $<BUILD_INTERFACE:${json_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_include_directories(zoo PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_compile_features(zoo PUBLIC cxx_std_23)
 # nlohmann/json is part of the installed public header surface via

@@ -3,7 +3,7 @@
  * @brief Unit tests for runtime extraction using a fake backend.
  */
 
-#include "zoo/internal/agent/runtime.hpp"
+#include "agent/runtime.hpp"
 #include <gtest/gtest.h>
 
 #include <deque>

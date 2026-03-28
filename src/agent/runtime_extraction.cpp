@@ -3,12 +3,12 @@
  * @brief Structured output extraction: schema-constrained single-pass generation.
  */
 
-#include "zoo/internal/agent/runtime.hpp"
+#include "agent/runtime.hpp"
 
+#include "agent/runtime_helpers.hpp"
+#include "log.hpp"
+#include "tools/grammar.hpp"
 #include "zoo/core/model.hpp"
-#include "zoo/internal/agent/runtime_helpers.hpp"
-#include "zoo/internal/log.hpp"
-#include "zoo/internal/tools/grammar.hpp"
 #include "zoo/tools/registry.hpp"
 #include "zoo/tools/validation.hpp"
 #include <chrono>

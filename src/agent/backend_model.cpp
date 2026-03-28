@@ -3,7 +3,7 @@
  * @brief Concrete internal adapter from `core::Model` to `AgentBackend`.
  */
 
-#include "zoo/internal/agent/backend_model.hpp"
+#include "agent/backend_model.hpp"
 
 #include "zoo/core/model.hpp"
 

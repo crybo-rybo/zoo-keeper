@@ -3,8 +3,7 @@
  * @brief Unit tests for internal Model tool-calling state refresh.
  */
 
-#include "zoo/core/types.hpp"
-#include "zoo/internal/core/stream_filter.hpp"
+#include "core/model_test_access.hpp"
 
 #include <gtest/gtest.h>
 
@@ -12,44 +11,9 @@
 #include <string>
 #include <vector>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wkeyword-macro"
-#endif
-#define private public
-#include "zoo/core/model.hpp"
-#undef private
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-#endif
-#include "../../extern/llama.cpp/common/chat.h"
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
-namespace zoo::core {
-
-struct Model::ToolCallingState {
-    std::vector<common_chat_tool> tools;
-    common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
-    std::string grammar;
-    bool grammar_lazy = false;
-    std::vector<common_grammar_trigger> grammar_triggers;
-    ToolCallTriggerMatcher trigger_matcher;
-    std::vector<std::string> preserved_tokens;
-    std::vector<std::string> additional_stops;
-    bool thinking_forced_open = false;
-    common_peg_arena parser;
-};
-
-} // namespace zoo::core
-
 namespace {
+
+using zoo::core::ModelTestAccess;
 
 std::string peg_native_tool_template() {
     return R"JINJA(
@@ -68,13 +32,13 @@ zoo::ModelConfig make_config() {
 }
 
 TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
     auto templates = common_chat_templates_init(nullptr, peg_native_tool_template());
     ASSERT_TRUE(templates);
-    model.chat_templates_.reset(templates.release());
+    ModelTestAccess::chat_templates(*model).reset(templates.release());
 
-    auto state = std::make_unique<zoo::core::Model::ToolCallingState>();
+    auto state = std::make_unique<ModelTestAccess::ToolCallingState>();
     state->tools.push_back(
         {"echo", "Echo text",
          R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"]})"});
@@ -86,54 +50,54 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     state->additional_stops = {"stale-stop"};
     state->thinking_forced_open = true;
 
-    model.tool_grammar_str_ = state->grammar;
-    model.tool_state_ = std::move(state);
-    model.grammar_mode_ = zoo::core::Model::GrammarMode::NativeToolCall;
-    model.messages_.push_back(zoo::Message::user("hello"));
+    ModelTestAccess::tool_grammar_str(*model) = state->grammar;
+    ModelTestAccess::tool_state(*model) = std::move(state);
+    ModelTestAccess::grammar_mode(*model) = ModelTestAccess::GrammarMode::NativeToolCall;
+    ModelTestAccess::messages(*model).push_back(zoo::Message::user("hello"));
 
-    auto prompt = model.render_prompt_delta();
+    auto prompt = ModelTestAccess::render_prompt_delta(*model);
     ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();
     EXPECT_FALSE(prompt->empty());
 
-    ASSERT_NE(model.tool_state_, nullptr);
-    EXPECT_EQ(model.tool_state_->format, COMMON_CHAT_FORMAT_PEG_NATIVE);
-    EXPECT_FALSE(model.tool_state_->grammar.empty());
-    EXPECT_EQ(model.tool_grammar_str_, model.tool_state_->grammar);
-    EXPECT_TRUE(model.tool_state_->grammar_lazy);
-    ASSERT_EQ(model.tool_state_->grammar_triggers.size(), 1u);
-    EXPECT_EQ(model.tool_state_->grammar_triggers.front().type, COMMON_GRAMMAR_TRIGGER_TYPE_WORD);
-    EXPECT_EQ(model.tool_state_->grammar_triggers.front().value, "[TOOL_CALLS]");
-    EXPECT_FALSE(model.tool_state_->preserved_tokens.empty());
-    EXPECT_TRUE(model.tool_state_->additional_stops.empty());
-    EXPECT_FALSE(model.tool_state_->thinking_forced_open);
-    EXPECT_FALSE(model.tool_state_->parser.empty());
+    ASSERT_NE(ModelTestAccess::tool_state(*model), nullptr);
+    EXPECT_EQ(ModelTestAccess::tool_state(*model)->format, COMMON_CHAT_FORMAT_PEG_NATIVE);
+    EXPECT_FALSE(ModelTestAccess::tool_state(*model)->grammar.empty());
+    EXPECT_EQ(ModelTestAccess::tool_grammar_str(*model),
+              ModelTestAccess::tool_state(*model)->grammar);
+    EXPECT_TRUE(ModelTestAccess::tool_state(*model)->grammar_lazy);
+    ASSERT_EQ(ModelTestAccess::tool_state(*model)->grammar_triggers.size(), 1u);
+    EXPECT_EQ(ModelTestAccess::tool_state(*model)->grammar_triggers.front().type,
+              COMMON_GRAMMAR_TRIGGER_TYPE_WORD);
+    EXPECT_EQ(ModelTestAccess::tool_state(*model)->grammar_triggers.front().value, "[TOOL_CALLS]");
+    EXPECT_FALSE(ModelTestAccess::tool_state(*model)->preserved_tokens.empty());
+    EXPECT_TRUE(ModelTestAccess::tool_state(*model)->additional_stops.empty());
+    EXPECT_FALSE(ModelTestAccess::tool_state(*model)->thinking_forced_open);
+    EXPECT_FALSE(ModelTestAccess::tool_state(*model)->parser.empty());
 }
 
 TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
     auto templates = common_chat_templates_init(nullptr, peg_native_tool_template());
     ASSERT_TRUE(templates);
-    model.chat_templates_.reset(templates.release());
+    ModelTestAccess::chat_templates(*model).reset(templates.release());
 
-    auto state = std::make_unique<zoo::core::Model::ToolCallingState>();
+    auto state = std::make_unique<ModelTestAccess::ToolCallingState>();
     state->format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     state->tools.push_back(
         {"echo", "Echo text",
          R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"]})"});
 
-    model.tool_state_ = std::move(state);
-    model.grammar_mode_ = zoo::core::Model::GrammarMode::NativeToolCall;
-    model.messages_.push_back(zoo::Message::user("hello"));
+    ModelTestAccess::tool_state(*model) = std::move(state);
+    ModelTestAccess::grammar_mode(*model) = ModelTestAccess::GrammarMode::NativeToolCall;
+    ModelTestAccess::messages(*model).push_back(zoo::Message::user("hello"));
 
-    // Render to populate the parser state (updates tool_state_->format and parser).
-    auto prompt = model.render_prompt_delta();
+    auto prompt = ModelTestAccess::render_prompt_delta(*model);
     ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();
-    ASSERT_EQ(model.tool_state_->format, COMMON_CHAT_FORMAT_PEG_NATIVE);
+    ASSERT_EQ(ModelTestAccess::tool_state(*model)->format, COMMON_CHAT_FORMAT_PEG_NATIVE);
 
-    // PEG_NATIVE format: [TOOL_CALLS]<name>[ARGS]<json-args>
     std::string tool_text = R"([TOOL_CALLS]echo[ARGS]{"text":"hi"})";
-    auto parsed = model.parse_tool_response(tool_text);
+    auto parsed = model->parse_tool_response(tool_text);
 
     ASSERT_FALSE(parsed.tool_calls.empty());
     EXPECT_EQ(parsed.tool_calls[0].name, "echo");
@@ -152,16 +116,15 @@ TEST(ModelToolCallingTest, AssistantWithToolCallsPreservesStructure) {
 }
 
 TEST(ModelToolCallingTest, PlainAssistantMessageWhenNoToolState) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
-    // No tool_state_ set, grammar_mode_ defaults to None.
-    EXPECT_EQ(model.grammar_mode_, zoo::core::Model::GrammarMode::None);
-    EXPECT_EQ(model.tool_state_, nullptr);
+    EXPECT_EQ(ModelTestAccess::grammar_mode(*model), ModelTestAccess::GrammarMode::None);
+    EXPECT_EQ(ModelTestAccess::tool_state(*model), nullptr);
 
-    // Simulate the generate() branching: no NativeToolCall mode → plain assistant message.
     std::string generated_text = "Hello, world!";
     zoo::Message msg =
-        (model.grammar_mode_ == zoo::core::Model::GrammarMode::NativeToolCall && model.tool_state_)
+        (ModelTestAccess::grammar_mode(*model) == ModelTestAccess::GrammarMode::NativeToolCall &&
+         ModelTestAccess::tool_state(*model))
             ? zoo::Message::assistant_with_tool_calls("", {})
             : zoo::Message::assistant(generated_text);
 

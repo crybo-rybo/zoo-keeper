@@ -3,9 +3,9 @@
  * @brief Template-driven tool calling: prepare, parse, and grammar management.
  */
 
+#include "core/model_impl.hpp"
+#include "log.hpp"
 #include "zoo/core/model.hpp"
-#include "zoo/core/model_tool_calling_state.hpp"
-#include "zoo/internal/log.hpp"
 
 #include <chat.h>
 #include <common.h>
@@ -44,7 +44,7 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
 
     common_chat_params params;
     try {
-        params = common_chat_templates_apply(chat_templates_.get(), inputs);
+        params = common_chat_templates_apply(impl_->chat_templates_.get(), inputs);
     } catch (const std::exception&) {
         ZOO_LOG("info", "native tool calling not available for this model");
         return false;
@@ -68,7 +68,7 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
         return false;
     }
 
-    auto state = std::make_unique<ToolCallingState>();
+    auto state = std::make_unique<Impl::ToolCallingState>();
     state->tools = std::move(chat_tools);
     state->format = params.format;
     state->grammar = std::move(params.grammar);
@@ -80,20 +80,20 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
     state->thinking_forced_open = params.thinking_forced_open;
     state->parser = std::move(parser);
 
-    tool_grammar_str_ = state->grammar;
-    tool_state_ = std::move(state);
+    impl_->tool_grammar_str_ = state->grammar;
+    impl_->tool_state_ = std::move(state);
 
-    if (!tool_grammar_str_.empty()) {
+    if (!impl_->tool_grammar_str_.empty()) {
         if (!rebuild_sampler_with_tool_grammar()) {
-            tool_state_.reset();
-            tool_grammar_str_.clear();
+            impl_->tool_state_.reset();
+            impl_->tool_grammar_str_.clear();
             return false;
         }
     }
 
-    grammar_mode_ = GrammarMode::NativeToolCall;
+    impl_->grammar_mode_ = Impl::GrammarMode::NativeToolCall;
     ZOO_LOG("info", "native tool calling enabled: format '%s' (%zu tools registered)",
-            common_chat_format_name(tool_state_->format), tool_state_->tools.size());
+            common_chat_format_name(impl_->tool_state_->format), impl_->tool_state_->tools.size());
     return true;
 }
 
@@ -104,16 +104,16 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
 Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
     ParsedResponse result;
 
-    if (!tool_state_) {
+    if (!impl_->tool_state_) {
         result.content = std::string(text);
         return result;
     }
 
     common_chat_syntax syntax;
-    syntax.format = tool_state_->format;
-    syntax.thinking_forced_open = tool_state_->thinking_forced_open;
+    syntax.format = impl_->tool_state_->format;
+    syntax.thinking_forced_open = impl_->tool_state_->thinking_forced_open;
     syntax.parse_tool_calls = true;
-    syntax.parser = tool_state_->parser;
+    syntax.parser = impl_->tool_state_->parser;
 
     common_chat_msg parsed;
     try {
@@ -141,14 +141,14 @@ Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
 // ---------------------------------------------------------------------------
 
 void Model::clear_tool_grammar() noexcept {
-    if (grammar_mode_ == GrammarMode::None) {
+    if (impl_->grammar_mode_ == Impl::GrammarMode::None) {
         return;
     }
 
-    tool_grammar_str_.clear();
-    tool_state_.reset();
-    grammar_mode_ = GrammarMode::None;
-    sampler_ = create_sampler_chain();
+    impl_->tool_grammar_str_.clear();
+    impl_->tool_state_.reset();
+    impl_->grammar_mode_ = Impl::GrammarMode::None;
+    impl_->sampler_ = create_sampler_chain();
 }
 
 // ---------------------------------------------------------------------------
@@ -156,10 +156,10 @@ void Model::clear_tool_grammar() noexcept {
 // ---------------------------------------------------------------------------
 
 const char* Model::tool_calling_format_name() const noexcept {
-    if (!tool_state_) {
+    if (!impl_->tool_state_) {
         return "none";
     }
-    return common_chat_format_name(tool_state_->format);
+    return common_chat_format_name(impl_->tool_state_->format);
 }
 
 } // namespace zoo::core
