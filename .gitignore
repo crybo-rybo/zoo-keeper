@@ -10,6 +10,7 @@ build-san/**
 cmake-build-*/
 tests/cmake_test_discovery_*
 cmake_test_discovery_*
+plans/**
 .DS_Store
 *.swp
 *.swo
