@@ -5,7 +5,10 @@
 
 #include "fixtures/tool_definitions.hpp"
 #include "zoo/tools/registry.hpp"
+#include <chrono>
+#include <future>
 #include <gtest/gtest.h>
+#include <thread>
 
 using json = nlohmann::json;
 using namespace zoo::testing::tools;
@@ -203,4 +206,65 @@ TEST_F(ToolRegistryTest, OverwriteExistingPreservesOrder) {
 
     auto schema = registry.get_tool_schema("add");
     EXPECT_EQ(schema["function"]["description"], "Add v2");
+}
+
+TEST_F(ToolRegistryTest, RegisterToolsBatchAddsAllTools) {
+    auto def1 = zoo::tools::detail::make_tool_definition("add", "Add",
+                                                         std::vector<std::string>{"a", "b"}, add);
+    auto def2 = zoo::tools::detail::make_tool_definition("greet", "Greet",
+                                                         std::vector<std::string>{"name"}, greet);
+    ASSERT_TRUE(def1.has_value());
+    ASSERT_TRUE(def2.has_value());
+
+    std::vector<zoo::tools::ToolDefinition> definitions;
+    definitions.push_back(std::move(*def1));
+    definitions.push_back(std::move(*def2));
+
+    auto result = registry.register_tools(std::move(definitions));
+    ASSERT_TRUE(result.has_value());
+
+    EXPECT_EQ(registry.size(), 2u);
+    EXPECT_TRUE(registry.has_tool("add"));
+    EXPECT_TRUE(registry.has_tool("greet"));
+
+    auto names = registry.get_tool_names();
+    EXPECT_EQ(names, std::vector<std::string>({"add", "greet"}));
+}
+
+TEST_F(ToolRegistryTest, RegisterToolsBatchEmptyIsNoOp) {
+    auto result = registry.register_tools({});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(registry.size(), 0u);
+}
+
+TEST_F(ToolRegistryTest, InvokeDoesNotBlockConcurrentReads) {
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    zoo::tools::ToolHandler slow_handler = [entered,
+                                            release_future](const json&) -> zoo::Expected<json> {
+        entered->set_value();
+        release_future.wait();
+        return json{{"result", "done"}};
+    };
+
+    ASSERT_TRUE(registry
+                    .register_tool("slow", "A slow tool",
+                                   json{{"type", "object"}, {"properties", json::object()}},
+                                   std::move(slow_handler))
+                    .has_value());
+
+    std::thread invoker([this] { registry.invoke("slow", json::object()); });
+
+    ASSERT_EQ(entered_future.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+
+    auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(registry.has_tool("slow"));
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(elapsed, std::chrono::milliseconds(100));
+
+    release->set_value();
+    invoker.join();
 }

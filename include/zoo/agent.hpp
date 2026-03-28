@@ -255,6 +255,8 @@ class Agent {
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  nlohmann::json schema, tools::ToolHandler handler);
 
+    Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
+
     [[nodiscard]] size_t tool_count() const noexcept;
 
   private:

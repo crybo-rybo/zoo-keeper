@@ -68,7 +68,7 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
 
         auto callback = [&](std::string_view token) -> TokenAction {
             if (request.streaming_callback && *request.streaming_callback) {
-                (*request.streaming_callback)(token);
+                callback_dispatcher_.dispatch(*request.streaming_callback, token);
             }
             if (!first_token_received) {
                 first_token_time = std::chrono::steady_clock::now();
@@ -83,6 +83,7 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
         };
         auto generated = backend_->generate_from_history(*request.options, TokenCallback(callback),
                                                          cancellation_check);
+        callback_dispatcher_.drain();
         if (!generated) {
             return std::unexpected(generated.error());
         }
@@ -178,6 +179,7 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
                         tool_call.id, tool_call.name, std::move(args_json),
                         ToolInvocationStatus::ValidationFailed, std::nullopt, validation_error});
                 }
+                callback_dispatcher_.drain();
                 continue;
             }
 
@@ -204,12 +206,14 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
                     ToolInvocation{tool_call.id, tool_call.name, std::move(args_json), status,
                                    std::move(result_json), std::move(tool_error)});
             }
+            callback_dispatcher_.drain();
             continue;
         }
 
         if (response_text.empty() && tool_invoked && iteration < max_tool_iterations) {
             backend_->add_message(
                 Message::user("Please respond to the user with the tool result.").view());
+            callback_dispatcher_.drain();
             continue;
         }
 
@@ -217,6 +221,7 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
 
         backend_->add_message(Message::assistant(response_text).view());
         backend_->finalize_response();
+        callback_dispatcher_.drain();
 
         TextResponse response;
         response.text = std::move(response_text);

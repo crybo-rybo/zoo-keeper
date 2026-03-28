@@ -86,7 +86,7 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
         }
         ++completion_tokens;
         if (request.streaming_callback && *request.streaming_callback) {
-            (*request.streaming_callback)(token);
+            callback_dispatcher_.dispatch(*request.streaming_callback, token);
         }
         return TokenAction::Continue;
     };
@@ -96,6 +96,7 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
     };
     auto generated = backend_->generate_from_history(*request.options, TokenCallback(callback),
                                                      cancellation_check);
+    callback_dispatcher_.drain();
     if (!generated) {
         return std::unexpected(generated.error());
     }

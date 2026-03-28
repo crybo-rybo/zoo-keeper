@@ -129,6 +129,10 @@ Expected<void> Agent::register_tool(const std::string& name, const std::string& 
     return register_tool(std::move(*definition));
 }
 
+Expected<void> Agent::register_tools(std::vector<tools::ToolDefinition> definitions) {
+    return impl_->runtime.register_tools(std::move(definitions));
+}
+
 size_t Agent::tool_count() const noexcept {
     return impl_->runtime.tool_count();
 }
