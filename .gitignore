@@ -1,8 +1,6 @@
 .vscode/**
 .cache/**
 .claude/**
-!.claude/rules/
-!.claude/rules/**
 .idea/**
 .agents/**
 !.agents/AGENTS.md
