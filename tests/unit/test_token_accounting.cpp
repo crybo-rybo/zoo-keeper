@@ -3,50 +3,15 @@
  * @brief Unit tests for token accounting in Model history management.
  */
 
-#include "zoo/core/types.hpp"
+#include "core/model_test_access.hpp"
 
 #include <gtest/gtest.h>
 
-#include <string>
 #include <vector>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wkeyword-macro"
-#endif
-#define private public
-#include "zoo/core/model.hpp"
-#undef private
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-#endif
-#include "../../extern/llama.cpp/common/chat.h"
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
-namespace zoo::core {
-
-struct Model::ToolCallingState {
-    std::vector<common_chat_tool> tools;
-    common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
-    std::string grammar;
-    bool grammar_lazy = false;
-    std::vector<common_grammar_trigger> grammar_triggers;
-    std::vector<std::string> preserved_tokens;
-    std::vector<std::string> additional_stops;
-    bool thinking_forced_open = false;
-    common_peg_arena parser;
-};
-
-} // namespace zoo::core
-
 namespace {
+
+using zoo::core::ModelTestAccess;
 
 zoo::ModelConfig make_config() {
     zoo::ModelConfig config;
@@ -55,86 +20,86 @@ zoo::ModelConfig make_config() {
 }
 
 TEST(TokenAccountingTest, PlainMessageAccounting) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
     zoo::Message msg = zoo::Message::assistant("hello");
-    int via_estimate_message = model.estimate_message_tokens(msg);
-    int via_estimate_tokens =
-        model.estimate_tokens(msg.content) + zoo::core::Model::kTemplateOverheadPerMessage;
+    int via_estimate_message = ModelTestAccess::estimate_message_tokens(*model, msg);
+    int via_estimate_tokens = 1 + 8;
 
     EXPECT_EQ(via_estimate_message, via_estimate_tokens);
 }
 
 TEST(TokenAccountingTest, ToolCallMessageLargerThanPlain) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
     std::vector<zoo::ToolCallInfo> calls = {{"id1", "add", R"({"a":1})"}};
     zoo::Message with_tool_calls = zoo::Message::assistant_with_tool_calls("", std::move(calls));
     zoo::Message plain = zoo::Message::assistant("");
 
-    int tool_call_estimate = model.estimate_message_tokens(with_tool_calls);
-    int plain_estimate = model.estimate_message_tokens(plain);
+    int tool_call_estimate = ModelTestAccess::estimate_message_tokens(*model, with_tool_calls);
+    int plain_estimate = ModelTestAccess::estimate_message_tokens(*model, plain);
 
     EXPECT_GT(tool_call_estimate, plain_estimate);
 }
 
 TEST(TokenAccountingTest, ToolCallIdIncluded) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
     zoo::Message long_id = zoo::Message::tool("result", "call_123");
     zoo::Message short_id = zoo::Message::tool("result", "x");
 
-    int long_id_estimate = model.estimate_message_tokens(long_id);
-    int short_id_estimate = model.estimate_message_tokens(short_id);
+    int long_id_estimate = ModelTestAccess::estimate_message_tokens(*model, long_id);
+    int short_id_estimate = ModelTestAccess::estimate_message_tokens(*model, short_id);
 
     EXPECT_GT(long_id_estimate, short_id_estimate);
 }
 
 TEST(TokenAccountingTest, AddMessageUpdatesEstimate) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
-    int before_user = model.estimated_tokens_;
-    auto result = model.add_message(zoo::Message::user("hi").view());
+    int before_user = model->estimated_tokens();
+    auto result = model->add_message(zoo::Message::user("hi").view());
     ASSERT_TRUE(result.has_value());
 
-    int after_user = model.estimated_tokens_;
+    int after_user = model->estimated_tokens();
     zoo::Message user_msg = zoo::Message::user("hi");
-    EXPECT_EQ(after_user - before_user, model.estimate_message_tokens(user_msg));
+    EXPECT_EQ(after_user - before_user, ModelTestAccess::estimate_message_tokens(*model, user_msg));
 
     std::vector<zoo::ToolCallInfo> calls = {{"tc1", "lookup", R"({"query":"test"})"}};
     zoo::Message tool_call_msg = zoo::Message::assistant_with_tool_calls("", std::move(calls));
 
-    int before_tool = model.estimated_tokens_;
-    auto result2 = model.add_message(tool_call_msg.view());
+    int before_tool = model->estimated_tokens();
+    auto result2 = model->add_message(tool_call_msg.view());
     ASSERT_TRUE(result2.has_value());
 
-    int after_tool = model.estimated_tokens_;
-    EXPECT_EQ(after_tool - before_tool, model.estimate_message_tokens(tool_call_msg));
+    int after_tool = model->estimated_tokens();
+    EXPECT_EQ(after_tool - before_tool,
+              ModelTestAccess::estimate_message_tokens(*model, tool_call_msg));
 }
 
 TEST(TokenAccountingTest, RollbackRemovesToolCallCost) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
-    auto add_user = model.add_message(zoo::Message::user("hello").view());
+    auto add_user = model->add_message(zoo::Message::user("hello").view());
     ASSERT_TRUE(add_user.has_value());
 
     std::vector<zoo::ToolCallInfo> calls = {{"id42", "search", R"({"q":"foo"})"}};
     zoo::Message tool_call_msg =
         zoo::Message::assistant_with_tool_calls("thinking", std::move(calls));
 
-    auto add_assistant = model.add_message(tool_call_msg.view());
+    auto add_assistant = model->add_message(tool_call_msg.view());
     ASSERT_TRUE(add_assistant.has_value());
 
-    int tokens_after_add = model.estimated_tokens_;
-    model.rollback_last_message();
+    int tokens_after_add = model->estimated_tokens();
+    ModelTestAccess::rollback_last_message(*model);
 
-    int tokens_after_rollback = model.estimated_tokens_;
+    int tokens_after_rollback = model->estimated_tokens();
     EXPECT_EQ(tokens_after_rollback,
-              tokens_after_add - model.estimate_message_tokens(tool_call_msg));
+              tokens_after_add - ModelTestAccess::estimate_message_tokens(*model, tool_call_msg));
 }
 
 TEST(TokenAccountingTest, ReplaceHistoryIncludesToolCalls) {
-    zoo::core::Model model(make_config(), zoo::GenerationOptions{});
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
     std::vector<zoo::ToolCallInfo> calls = {{"cid", "fn", R"({"x":1})"}};
     std::vector<zoo::Message> messages = {
@@ -145,12 +110,12 @@ TEST(TokenAccountingTest, ReplaceHistoryIncludesToolCalls) {
 
     int expected = 0;
     for (const auto& m : messages) {
-        expected += model.estimate_message_tokens(m);
+        expected += ModelTestAccess::estimate_message_tokens(*model, m);
     }
 
-    model.replace_history(zoo::HistorySnapshot{messages});
+    model->replace_history(zoo::HistorySnapshot{messages});
 
-    EXPECT_EQ(model.estimated_tokens_, expected);
+    EXPECT_EQ(model->estimated_tokens(), expected);
 }
 
 } // namespace

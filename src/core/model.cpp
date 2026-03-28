@@ -4,14 +4,10 @@
  */
 
 #include "zoo/core/model.hpp"
+#include "core/model_impl.hpp"
 
-#include <chat.h>
-#include <common.h>
 #include <llama.h>
 #include <mutex>
-
-// ToolCallingState must be complete before ~Model() = default is instantiated.
-#include "zoo/core/model_tool_calling_state.hpp"
 
 namespace zoo::core {
 
@@ -25,9 +21,7 @@ void Model::initialize_global() {
 }
 
 Model::Model(ModelConfig model_config, GenerationOptions default_generation)
-    : model_config_(std::move(model_config)),
-      default_generation_options_(std::move(default_generation)),
-      active_sampling_(default_generation_options_.sampling) {}
+    : impl_(std::make_unique<Impl>(std::move(model_config), std::move(default_generation))) {}
 
 void Model::LlamaModelDeleter::operator()(llama_model* model) const noexcept {
     if (model) {
@@ -54,6 +48,22 @@ void Model::ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const
 }
 
 Model::~Model() = default;
+
+bool Model::has_tool_calling() const noexcept {
+    return impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall;
+}
+
+bool Model::has_schema_grammar() const noexcept {
+    return impl_->grammar_mode_ == Impl::GrammarMode::Schema;
+}
+
+const ModelConfig& Model::model_config() const noexcept {
+    return impl_->model_config_;
+}
+
+const GenerationOptions& Model::default_generation_options() const noexcept {
+    return impl_->default_generation_options_;
+}
 
 Expected<std::unique_ptr<Model>> Model::load(const ModelConfig& model_config,
                                              const GenerationOptions& default_generation) {

@@ -3,7 +3,7 @@
  * @brief Unit tests for the async callback dispatcher.
  */
 
-#include "zoo/internal/agent/callback_dispatcher.hpp"
+#include "agent/callback_dispatcher.hpp"
 #include <gtest/gtest.h>
 
 #include <atomic>

@@ -5,9 +5,9 @@
 
 #include "zoo/agent.hpp"
 
+#include "agent/backend_model.hpp"
+#include "agent/runtime.hpp"
 #include "zoo/core/model.hpp"
-#include "zoo/internal/agent/backend_model.hpp"
-#include "zoo/internal/agent/runtime.hpp"
 
 namespace zoo {
 namespace runtime = internal::agent;

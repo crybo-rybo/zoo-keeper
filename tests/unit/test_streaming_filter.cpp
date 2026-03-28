@@ -3,7 +3,7 @@
  * @brief Unit tests for tool-call streaming trigger detection.
  */
 
-#include "zoo/internal/core/stream_filter.hpp"
+#include "core/stream_filter.hpp"
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>

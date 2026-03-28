@@ -3,7 +3,7 @@
  * @brief Unit tests for the agent runtime mailbox.
  */
 
-#include "zoo/internal/agent/mailbox.hpp"
+#include "agent/mailbox.hpp"
 #include <gtest/gtest.h>
 #include <utility>
 

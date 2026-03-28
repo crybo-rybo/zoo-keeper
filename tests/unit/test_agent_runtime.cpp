@@ -3,7 +3,7 @@
  * @brief Unit tests for the internal agent runtime using a fake backend.
  */
 
-#include "zoo/internal/agent/runtime.hpp"
+#include "agent/runtime.hpp"
 #include <gtest/gtest.h>
 
 #include <chrono>

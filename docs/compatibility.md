@@ -13,7 +13,7 @@ The supported public API is:
 
 The following are not part of the compatibility boundary:
 
-- headers under `include/zoo/internal/`
+- private headers under `src/`
 - implementation files under `src/`
 - private CMake/package plumbing
 - internal planning notes and draft documents under `docs/` that are not part of

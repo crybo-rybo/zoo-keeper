@@ -1,4 +1,4 @@
-#include "zoo/internal/core/stream_filter.hpp"
+#include "core/stream_filter.hpp"
 #include <common.h>
 
 namespace zoo::core {

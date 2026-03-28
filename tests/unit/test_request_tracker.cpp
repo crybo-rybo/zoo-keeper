@@ -3,7 +3,7 @@
  * @brief Unit tests for slot-backed async request storage.
  */
 
-#include "zoo/internal/agent/request_slots.hpp"
+#include "agent/request_slots.hpp"
 #include <gtest/gtest.h>
 
 namespace {

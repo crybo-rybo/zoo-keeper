@@ -3,7 +3,7 @@
  * @brief Unit tests for incremental prompt bookkeeping rules.
  */
 
-#include "zoo/internal/core/prompt_bookkeeping.hpp"
+#include "core/prompt_bookkeeping.hpp"
 #include <gtest/gtest.h>
 
 using zoo::core::commit_rendered_prompt;

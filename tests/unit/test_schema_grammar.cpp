@@ -3,7 +3,7 @@
  * @brief Unit tests for GrammarBuilder::build_schema() (standalone schema grammars).
  */
 
-#include "zoo/internal/tools/grammar.hpp"
+#include "tools/grammar.hpp"
 #include <gtest/gtest.h>
 
 namespace {
