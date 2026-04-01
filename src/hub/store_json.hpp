@@ -25,6 +25,7 @@ inline void to_json(nlohmann::json& j, const ModelInfo& info) {
         {"layer_count", info.layer_count},
         {"context_length", info.context_length},
         {"quantization", info.quantization},
+        {"metadata", info.metadata},
     };
 }
 
@@ -49,6 +50,8 @@ inline void from_json(const nlohmann::json& j, ModelInfo& info) {
         it->get_to(info.context_length);
     if (auto it = j.find("quantization"); it != j.end())
         it->get_to(info.quantization);
+    if (auto it = j.find("metadata"); it != j.end())
+        it->get_to(info.metadata);
 }
 
 // --- ModelEntry ---

@@ -4,6 +4,7 @@
  */
 
 #include "zoo/hub/huggingface.hpp"
+#include "hub/path_utils.hpp"
 
 #include <common.h>
 #include <download.h>
@@ -23,6 +24,10 @@ struct HuggingFaceClient::Impl {
             headers.emplace_back("Authorization", "Bearer " + config.token);
         }
         return headers;
+    }
+
+    [[nodiscard]] common_hf_file_res resolve_hf_file(const std::string& repo_id_with_tag) const {
+        return common_get_hf_file(repo_id_with_tag, config.token, false, make_headers());
     }
 };
 
@@ -100,31 +105,6 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
     return result;
 }
 
-Expected<HuggingFaceRepoInfo>
-HuggingFaceClient::list_gguf_files(const std::string& repo_id_with_tag) {
-    try {
-        auto hf_res =
-            common_get_hf_file(repo_id_with_tag, impl_->config.token, false, impl_->make_headers());
-
-        HuggingFaceRepoInfo info;
-        info.repo_id = hf_res.repo;
-
-        // common_get_hf_file returns the resolved GGUF file for the tag.
-        if (!hf_res.ggufFile.empty()) {
-            HuggingFaceFile file;
-            file.filename = hf_res.ggufFile;
-            file.download_url =
-                "https://huggingface.co/" + hf_res.repo + "/resolve/main/" + hf_res.ggufFile;
-            info.gguf_files.push_back(std::move(file));
-        }
-
-        return info;
-    } catch (const std::exception& e) {
-        return std::unexpected(Error{ErrorCode::HuggingFaceApiError,
-                                     "HuggingFace API error: " + std::string(e.what())});
-    }
-}
-
 Expected<std::string> HuggingFaceClient::resolve_download_url(const std::string& repo_id,
                                                               const std::string& filename) {
     return "https://huggingface.co/" + repo_id + "/resolve/main/" + filename;
@@ -132,8 +112,7 @@ Expected<std::string> HuggingFaceClient::resolve_download_url(const std::string&
 
 Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_id_with_tag) {
     try {
-        auto hf_res =
-            common_get_hf_file(repo_id_with_tag, impl_->config.token, false, impl_->make_headers());
+        auto hf_res = impl_->resolve_hf_file(repo_id_with_tag);
 
         if (hf_res.ggufFile.empty()) {
             return std::unexpected(Error{ErrorCode::ModelNotFound,
@@ -143,10 +122,23 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
         const std::string url =
             "https://huggingface.co/" + hf_res.repo + "/resolve/main/" + hf_res.ggufFile;
         const std::string cache_dir = fs_get_cache_directory();
-        const std::string dest_path = cache_dir + "/" + hf_res.ggufFile;
+        auto dest_path =
+            detail::build_download_destination(cache_dir, hf_res.repo, hf_res.ggufFile);
+        if (!dest_path) {
+            return std::unexpected(dest_path.error());
+        }
+
+        std::error_code ec;
+        std::filesystem::create_directories(dest_path->parent_path(), ec);
+        if (ec) {
+            return std::unexpected(
+                Error{ErrorCode::FilesystemError,
+                      "Failed to create download directory: " + dest_path->parent_path().string(),
+                      ec.message()});
+        }
 
         common_params_model model_params;
-        model_params.path = dest_path;
+        model_params.path = dest_path->string();
         model_params.url = url;
         model_params.hf_repo = hf_res.repo;
         model_params.hf_file = hf_res.ggufFile;
@@ -158,7 +150,7 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
                                          "Failed to download model from: " + repo_id_with_tag});
         }
 
-        return dest_path;
+        return dest_path->string();
     } catch (const std::exception& e) {
         return std::unexpected(
             Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});

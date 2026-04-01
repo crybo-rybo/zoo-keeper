@@ -223,7 +223,7 @@ auto store = zoo::hub::ModelStore::open().value();
 auto hf = zoo::hub::HuggingFaceClient::create().value();
 
 // Pull a model (ETag caching, resume, split-file support)
-store->pull(*hf, "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", {}, {"llama3"});
+store->pull(*hf, "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", {"llama3"});
 
 // One-liner from alias to running agent
 auto agent = store->create_agent("llama3").value();
@@ -262,7 +262,7 @@ if (!result) {
 ```bash
 scripts/test.sh                     # Unit tests (pure logic, no model needed)
 scripts/build.sh -DZOO_BUILD_HUB=ON
-scripts/test.sh -R "Hub"            # Hub layer tests
+scripts/test.sh -R "HuggingFace|ModelStore|AutoConfig|GgufInspector|HubPath"
 
 # Integration tests (requires a real GGUF model)
 scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON

@@ -3,7 +3,8 @@
  * @brief Umbrella include for the public zoo-keeper API surface.
  *
  * Consumers can include this header to access the core model wrapper, tool
- * system, and asynchronous agent orchestration layers.
+ * system, asynchronous agent orchestration layer, and the optional hub layer
+ * when built with `ZOO_BUILD_HUB=ON`.
  */
 
 #pragma once

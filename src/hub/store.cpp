@@ -4,10 +4,14 @@
  */
 
 #include "zoo/hub/store.hpp"
+#include "hub/path_utils.hpp"
 #include "hub/store_json.hpp"
 #include "zoo/hub/inspector.hpp"
 
+#include <common.h>
+
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -16,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <random>
 #include <sstream>
+#include <unordered_set>
 
 namespace zoo::hub {
 
@@ -48,6 +53,40 @@ std::string default_store_directory() {
         home = ".";
     }
     return home + "/.zoo-keeper/models";
+}
+
+bool is_blank(std::string_view value) {
+    return value.find_first_not_of(" \t\n\r\f\v") == std::string_view::npos;
+}
+
+Expected<void> validate_alias_value(std::string_view alias) {
+    if (is_blank(alias)) {
+        return std::unexpected(Error{ErrorCode::InvalidConfig, "Alias cannot be empty"});
+    }
+    return {};
+}
+
+Expected<void> validate_catalog_entries(const std::vector<ModelEntry>& entries) {
+    std::unordered_set<std::string> aliases;
+    for (const auto& entry : entries) {
+        std::unordered_set<std::string> entry_aliases;
+        for (const auto& alias : entry.aliases) {
+            if (auto result = validate_alias_value(alias); !result) {
+                return std::unexpected(
+                    Error{ErrorCode::StoreCorrupted, "Catalog contains an empty alias"});
+            }
+            if (!entry_aliases.insert(alias).second) {
+                return std::unexpected(
+                    Error{ErrorCode::StoreCorrupted,
+                          "Catalog contains duplicate aliases on entry: " + entry.id});
+            }
+            if (!aliases.insert(alias).second) {
+                return std::unexpected(
+                    Error{ErrorCode::StoreCorrupted, "Catalog contains duplicate alias: " + alias});
+            }
+        }
+    }
+    return {};
 }
 
 } // namespace
@@ -83,6 +122,9 @@ struct ModelStore::Impl {
         } catch (const nlohmann::json::exception& e) {
             return std::unexpected(Error{ErrorCode::StoreCorrupted,
                                          "Failed to parse catalog: " + std::string(e.what())});
+        }
+        if (auto result = validate_catalog_entries(entries); !result) {
+            return std::unexpected(result.error());
         }
         return {};
     }
@@ -147,6 +189,35 @@ struct ModelStore::Impl {
     }
 };
 
+Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries,
+                                          std::span<const std::string> aliases,
+                                          std::optional<size_t> skip_index = std::nullopt) {
+    std::unordered_set<std::string> seen;
+    for (const auto& alias : aliases) {
+        if (auto result = validate_alias_value(alias); !result) {
+            return std::unexpected(result.error());
+        }
+        if (!seen.insert(alias).second) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidConfig, "Duplicate alias in request: " + alias});
+        }
+    }
+
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (skip_index.has_value() && *skip_index == i) {
+            continue;
+        }
+        for (const auto& alias : entries[i].aliases) {
+            if (seen.contains(alias)) {
+                return std::unexpected(
+                    Error{ErrorCode::ModelAlreadyExists, "Alias already in use: " + alias});
+            }
+        }
+    }
+
+    return {};
+}
+
 Expected<std::unique_ptr<ModelStore>> ModelStore::open(ModelStoreConfig config) {
     if (config.store_directory.empty()) {
         config.store_directory = default_store_directory();
@@ -183,6 +254,10 @@ ModelStore& ModelStore::operator=(ModelStore&&) noexcept = default;
 Expected<ModelEntry> ModelStore::add(const std::string& file_path,
                                      std::vector<std::string> aliases) {
     const auto abs_path = std::filesystem::absolute(file_path).string();
+
+    if (auto result = validate_aliases_for_store(impl_->entries, aliases); !result) {
+        return std::unexpected(result.error());
+    }
 
     // Check for duplicates.
     for (const auto& entry : impl_->entries) {
@@ -237,15 +312,9 @@ Expected<void> ModelStore::add_alias(const std::string& name_or_alias,
     if (!idx) {
         return std::unexpected(idx.error());
     }
-
-    // Check the alias isn't already in use.
-    for (const auto& entry : impl_->entries) {
-        for (const auto& alias : entry.aliases) {
-            if (alias == new_alias) {
-                return std::unexpected(
-                    Error{ErrorCode::ModelAlreadyExists, "Alias already in use: " + new_alias});
-            }
-        }
+    std::array<std::string, 1> aliases{new_alias};
+    if (auto result = validate_aliases_for_store(impl_->entries, aliases, *idx); !result) {
+        return std::unexpected(result.error());
     }
 
     impl_->entries[*idx].aliases.push_back(new_alias);
@@ -292,7 +361,6 @@ Expected<std::unique_ptr<Agent>> ModelStore::create_agent(const std::string& nam
 }
 
 Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::string& identifier,
-                                      DownloadProgressCallback /*on_progress*/,
                                       std::vector<std::string> aliases) {
     auto parsed = HuggingFaceClient::parse_identifier(identifier);
     if (!parsed) {
@@ -306,14 +374,20 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
     }
 
     std::string local_path;
+    std::string source_url;
     if (parsed->filename) {
         // Specific file requested — resolve URL and download directly.
         auto url = client.resolve_download_url(parsed->repo_id, *parsed->filename);
         if (!url) {
             return std::unexpected(url.error());
         }
-        const std::string dest = impl_->config.store_directory + "/" + *parsed->filename;
-        auto result = client.download_file(*url, dest);
+        source_url = *url;
+        auto dest = detail::build_download_destination(impl_->config.store_directory,
+                                                       parsed->repo_id, *parsed->filename);
+        if (!dest) {
+            return std::unexpected(dest.error());
+        }
+        auto result = client.download_file(*url, dest->string());
         if (!result) {
             return std::unexpected(result.error());
         }
@@ -325,6 +399,16 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
             return std::unexpected(result.error());
         }
         local_path = *result;
+
+        const auto repo_root = std::filesystem::path(fs_get_cache_directory()) / parsed->repo_id;
+        const auto relative = std::filesystem::path(local_path).lexically_relative(repo_root);
+        if (!relative.empty() && relative.native().find("..") == std::string::npos) {
+            auto url = client.resolve_download_url(parsed->repo_id, relative.generic_string());
+            if (!url) {
+                return std::unexpected(url.error());
+            }
+            source_url = *url;
+        }
     }
 
     auto entry = add(local_path, std::move(aliases));
@@ -335,6 +419,7 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
     // Annotate with HuggingFace source info.
     auto idx = impl_->find_index(entry->id);
     if (idx) {
+        impl_->entries[*idx].source_url = std::move(source_url);
         impl_->entries[*idx].huggingface_repo = parsed->repo_id;
         impl_->save_catalog(); // Best-effort save of annotations.
         return impl_->entries[*idx];

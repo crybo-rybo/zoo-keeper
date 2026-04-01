@@ -1,6 +1,6 @@
 /**
  * @file types.hpp
- * @brief Value types for the hub layer: model metadata, catalog entries, and download state.
+ * @brief Value types for the hub layer: model metadata and catalog entries.
  */
 
 #pragma once
@@ -9,7 +9,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -73,40 +72,5 @@ struct ModelEntry {
 
     bool operator==(const ModelEntry& other) const = default;
 };
-
-/**
- * @brief Metadata for a single GGUF file in a HuggingFace repository.
- */
-struct HuggingFaceFile {
-    std::string filename;     ///< Filename within the repository (e.g. "model.Q4_K_M.gguf").
-    uint64_t size_bytes = 0;  ///< File size in bytes.
-    std::string download_url; ///< Resolved full download URL.
-
-    bool operator==(const HuggingFaceFile& other) const = default;
-};
-
-/**
- * @brief Summary of GGUF files available in a HuggingFace repository.
- */
-struct HuggingFaceRepoInfo {
-    std::string repo_id; ///< Repository identifier (e.g. "TheBloke/Mistral-7B-GGUF").
-    std::vector<HuggingFaceFile> gguf_files; ///< GGUF files found in the repository.
-
-    bool operator==(const HuggingFaceRepoInfo& other) const = default;
-};
-
-/**
- * @brief Progress state for an in-flight download.
- */
-struct DownloadProgress {
-    uint64_t bytes_downloaded = 0; ///< Number of bytes received so far.
-    uint64_t total_bytes = 0;      ///< Total expected bytes (0 if unknown).
-    double percent = 0.0;          ///< Download progress in [0.0, 100.0].
-};
-
-/**
- * @brief Callback invoked periodically during a model download.
- */
-using DownloadProgressCallback = std::function<void(const DownloadProgress&)>;
 
 } // namespace zoo::hub

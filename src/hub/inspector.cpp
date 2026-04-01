@@ -22,6 +22,22 @@ namespace zoo::hub {
 
 namespace {
 
+class ScopedLlamaLogSilencer {
+  public:
+    ScopedLlamaLogSilencer() {
+        llama_log_get(&original_callback_, &original_user_data_);
+        llama_log_set([](enum ggml_log_level, const char*, void*) {}, nullptr);
+    }
+
+    ~ScopedLlamaLogSilencer() {
+        llama_log_set(original_callback_, original_user_data_);
+    }
+
+  private:
+    ggml_log_callback original_callback_ = nullptr;
+    void* original_user_data_ = nullptr;
+};
+
 std::string read_gguf_string(const gguf_context* ctx, const char* key) {
     const int64_t id = gguf_find_key(ctx, key);
     if (id < 0) {
@@ -150,7 +166,7 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     core::ensure_backend_initialized();
 
     // Suppress llama.cpp log output during inspection.
-    llama_log_set([](enum ggml_log_level, const char*, void*) {}, nullptr);
+    ScopedLlamaLogSilencer silenced_logs;
 
     auto model_params = llama_model_default_params();
     model_params.vocab_only = true;

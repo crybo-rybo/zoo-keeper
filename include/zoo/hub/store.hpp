@@ -110,12 +110,10 @@ class ModelStore {
      *
      * @param client An initialized HuggingFaceClient.
      * @param identifier HuggingFace identifier ("owner/repo::file.gguf" or "owner/repo").
-     * @param on_progress Optional download progress callback.
      * @param aliases Optional short names for the model.
      * @return The new catalog entry, or an error.
      */
     Expected<ModelEntry> pull(HuggingFaceClient& client, const std::string& identifier,
-                              DownloadProgressCallback on_progress = {},
                               std::vector<std::string> aliases = {});
 
     /**

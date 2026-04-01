@@ -47,18 +47,9 @@ class HuggingFaceClient {
      * @brief Configuration for HuggingFace Hub API access.
      */
     struct Config {
-        std::string api_base_url = "https://huggingface.co"; ///< HuggingFace API base URL.
-        std::string token;        ///< Optional bearer token for gated model access.
-        int timeout_seconds = 30; ///< HTTP request timeout.
+        std::string token; ///< Optional bearer token for gated model access.
 
         [[nodiscard]] Expected<void> validate() const {
-            if (api_base_url.empty()) {
-                return std::unexpected(
-                    Error{ErrorCode::InvalidConfig, "HuggingFace API base URL cannot be empty"});
-            }
-            if (timeout_seconds <= 0) {
-                return std::unexpected(Error{ErrorCode::InvalidConfig, "Timeout must be positive"});
-            }
             return {};
         }
     };
@@ -100,17 +91,6 @@ class HuggingFaceClient {
      * @return Parsed components, or an error if the format is invalid.
      */
     static Expected<ParsedIdentifier> parse_identifier(std::string_view identifier);
-
-    /**
-     * @brief Resolves the GGUF file for a HuggingFace repository.
-     *
-     * Uses llama.cpp's Ollama-compatible HF API to resolve the best GGUF file
-     * for the given repository and optional tag. Results are cached locally.
-     *
-     * @param repo_id_with_tag Repository identifier, optionally with ":tag".
-     * @return Repository info with the resolved GGUF file, or an error.
-     */
-    Expected<HuggingFaceRepoInfo> list_gguf_files(const std::string& repo_id_with_tag);
 
     /**
      * @brief Resolves the download URL for a specific file in a repository.
