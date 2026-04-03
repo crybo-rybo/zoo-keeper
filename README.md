@@ -5,8 +5,8 @@
 <h1 align="center">Zoo-Keeper</h1>
 
 <p align="center">
-  <b>Build local, tool-using LLM applications in modern C++.</b><br/>
-  <sub>llama.cpp-backed &bull; Async agent runtime &bull; Type-safe native tools</sub>
+  <b>The C++23 SDK for embedding local LLMs into your applications.</b><br/>
+  <sub>Async agent runtime &bull; Native tool calling &bull; Structured output &bull; Zero network dependency</sub>
 </p>
 
 <p align="center">
@@ -15,30 +15,136 @@
   <img src="https://img.shields.io/badge/tests-ctest%20passing-success" alt="Tests" />
 </p>
 
-## About
+---
 
-Zoo-Keeper is a local-first C++23 library for building LLM-backed applications on top of [llama.cpp](https://github.com/ggerganov/llama.cpp). It keeps the public surface small and explicit: `zoo::core::Model` for direct inference, `zoo::Agent` for async orchestration, and `zoo::tools` for turning native callables into model-usable tools.
+## What is Zoo-Keeper?
 
-The release API is split into `zoo::ModelConfig`, `zoo::AgentConfig`, and `zoo::GenerationOptions`. Async calls return `RequestHandle<Result>` objects with `id()`, `ready()`, and `await_result()`, while completed text and extraction calls come back as `TextResponse` and `ExtractionResponse`.
+Zoo-Keeper is a C++23 inference SDK built on [llama.cpp](https://github.com/ggerganov/llama.cpp). It turns the raw llama.cpp C API into a layered, type-safe library designed to be embedded into applications — desktop software, game engines, developer tools, embedded systems, or anything that needs local LLM inference without a server.
 
-## Why Zoo-Keeper
+Think of it this way: **llama.cpp is the engine. Zoo-Keeper is the SDK.**
 
-- **Local-first by default**: run on your own hardware through `llama.cpp`, with Metal on macOS and CUDA support when enabled.
-- **Two clear abstraction levels**: use the low-level `Model` directly or move up to `Agent` when you need queued requests and tool loops.
-- **Native C++ tools**: register regular functions or JSON-backed handlers and let the library handle schema generation, validation, and execution tracking.
-- **Predictable concurrency**: callers interact through request handles, not raw futures, and the inference thread owns model state.
-- **Modern contracts**: `std::expected`-based error handling, borrowed message views, owned history snapshots, and explicit response metadata.
+```cpp
+// Five lines from zero to a running agent with tools
+auto agent = zoo::Agent::create(config).value();
+agent->set_system_prompt("You are a helpful assistant.");
+agent->register_tool("search", "Search the web", {"query"}, my_search_fn);
+auto handle = agent->chat("Find flights to Tokyo", {}, on_token);
+auto result = handle.await_result().value();
+```
 
-## Choose Your Surface
+## Why Zoo-Keeper over raw llama.cpp?
 
-| Surface | Use it when you need | What it gives you |
-|--------|-----------------------|-------------------|
-| `zoo::core::Model` | Direct, single-threaded control | Model loading, generation, retained history, and KV-cache management |
-| `zoo::Agent` | Async chat, stateless completion, streaming, and tool orchestration | Request queue, inference thread, cancellation, tool loop, and `RequestHandle<Result>` |
-| `zoo::ModelConfig` / `zoo::AgentConfig` / `zoo::GenerationOptions` | Configure runtime startup and per-call generation | Split config blocks with strict validation and JSON helpers |
-| `zoo::MessageView` / `zoo::ConversationView` / `zoo::HistorySnapshot` | Pass or inspect conversation state | Borrowed request-scoped views and owning history snapshots |
+llama.cpp is an exceptional inference engine, but it exposes a flat C API with ~200+ functions, manual resource management, and no application-level abstractions. Building a real application on it means writing hundreds of lines of threading, state management, and error handling before you get to your first inference call.
+
+Zoo-Keeper closes that gap.
+
+### Side-by-side: adding a tool-calling chat agent
+
+<table>
+<tr><th>Raw llama.cpp</th><th>Zoo-Keeper</th></tr>
+<tr>
+<td>
+
+- Manually initialize backend, load model, create context, build sampler chain
+- Implement chat history as a vector of `llama_chat_message` structs
+- Render prompts via `llama_chat_apply_template()`, track incremental offsets
+- Tokenize, batch, decode in a manual loop with `llama_batch` and `llama_decode`
+- Parse tool calls from raw text output (format-specific)
+- Execute tool handlers, format results, re-render, re-decode
+- Manage KV cache state across turns
+- Build your own threading model for async inference
+- Handle every error as a null pointer or negative int
+
+</td>
+<td>
+
+```cpp
+auto agent = zoo::Agent::create(config).value();
+agent->register_tool("add", "Add numbers",
+    {"a", "b"}, [](int a, int b) { return a + b; });
+auto handle = agent->chat("What is 2+2?");
+auto response = handle.await_result().value();
+// Tool was called, result fed back, final
+// answer generated — all automatically.
+```
+
+</td>
+</tr>
+</table>
+
+### What you get
+
+| Capability | Raw llama.cpp | Zoo-Keeper |
+|-----------|:---:|:---:|
+| Model loading and inference | Manual C API | `Model::load()` with validated config |
+| Async inference with streaming | Build your own | `Agent::chat()` returns `RequestHandle<T>` |
+| Request cancellation | Implement yourself | `agent->cancel(handle.id())` |
+| Chat history with KV cache sync | Manual bookkeeping | Built into `Model`, auto-trimmed |
+| Tool calling (29+ model formats) | Parse text yourself | Template-driven detection + execution loop |
+| Type-safe tool registration | N/A | `register_tool("name", desc, params, callable)` |
+| Tool argument validation | N/A | Automatic JSON Schema validation with retries |
+| Structured output extraction | Build grammar yourself | `agent->extract(prompt, schema)` |
+| Error handling | Null pointers, `-1` returns | `std::expected<T, Error>` with categorized codes |
+| Thread safety | Your problem | Agent owns inference thread; callers submit requests |
+| Streaming callbacks | Wire up yourself | Token callbacks on `chat()`, `complete()`, `extract()` |
+| Response metrics | Compute yourself | `TextResponse` includes latency, throughput, token usage |
+
+### What you don't get (by design)
+
+Zoo-Keeper compiles llama.cpp with `LLAMA_BUILD_TOOLS=OFF` and `LLAMA_BUILD_EXAMPLES=OFF`. Your application links only the inference core and utility libraries — no llama-server, no llama-cli, no quantization tools. The result is a focused static library (~30-50 MB) instead of the full llama.cpp distribution (~100-150 MB).
+
+## Architecture
+
+Four layers with strict downward-only dependencies. Use only what you need:
+
+Each layer depends only on the layers below it. Consumers can stop at whichever level fits their needs.
+
+| Layer | Namespace | What it does | Key types |
+|-------|-----------|-------------|-----------|
+| **Hub** *(optional)* | `zoo::hub` | GGUF inspection, HuggingFace downloads, local model store, auto-configuration | `GgufInspector`, `ModelStore`, `HuggingFaceClient` |
+| **Agent** | `zoo::Agent` | Async inference runtime with request queue, per-token streaming, cancellation, agentic tool loop, and structured extraction | `Agent`, `RequestHandle<T>`, `TextResponse`, `ExtractionResponse` |
+| **Tools** | `zoo::tools` | Tool registration, JSON Schema generation from C++ signatures, argument validation. Header-only with zero llama.cpp dependency | `ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator` |
+| **Core** | `zoo::core` | Direct synchronous llama.cpp wrapper — model loading, prompt rendering, generation, chat history, KV cache management | `Model`, `ModelConfig`, `GenerationOptions` |
+
+**Threading model:** The Agent owns a single inference thread. Callers submit requests via `chat()`, `complete()`, or `extract()` and receive a `RequestHandle<T>`. All model access is confined to the inference thread — no locks in the hot path.
+
+## Use Cases
+
+**Desktop applications** — Ship local AI features without requiring users to install Python, run a server, or sign up for an API. Zoo-Keeper links as a static library alongside your application.
+
+**Developer tools** — Build code assistants, local copilots, or CLI tools with on-device inference and tool calling. The Agent runtime handles the full request-tool-response loop.
+
+**Game engines and creative tools** — Integrate NPCs, procedural content generation, or in-context assistance with predictable latency and streaming token delivery.
+
+**Edge and embedded systems** — Run quantized models on constrained hardware. Zoo-Keeper's CPU-first defaults and optional GPU offloading (Metal, CUDA) adapt to the target platform.
+
+**Prototyping and research** — Iterate on agentic workflows with native tools, structured extraction, and full control over sampling parameters — without the overhead of a REST API layer.
 
 ## Quick Start
+
+### Build
+
+```bash
+git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
+cd zoo-keeper
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
+```
+
+### Integrate via CMake
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(zoo-keeper
+    GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(zoo-keeper)
+
+target_link_libraries(my_app PRIVATE ZooKeeper::zoo)
+```
+
+### Run your first agent
 
 ```cpp
 #include <iostream>
@@ -48,24 +154,22 @@ int main() {
     zoo::ModelConfig model;
     model.model_path = "models/llama-3-8b.gguf";
     model.context_size = 8192;
-    model.n_gpu_layers = 0;
+    model.n_gpu_layers = -1; // Offload all layers to GPU
 
-    zoo::AgentConfig agent;
-    agent.max_history_messages = 32;
+    auto agent = zoo::Agent::create(model).value();
+    agent->set_system_prompt("You are a concise assistant.");
 
-    zoo::GenerationOptions generation;
-    generation.max_tokens = 256;
+    // Register a native C++ function as a tool
+    agent->register_tool("add", "Add two integers", {"a", "b"},
+        [](int a, int b) { return a + b; });
 
-    auto agent_result = zoo::Agent::create(model, agent, generation);
-    if (!agent_result) {
-        std::cerr << agent_result.error().to_string() << '\n';
-        return 1;
-    }
+    // Stream tokens as they arrive
+    auto on_token = [](std::string_view token) {
+        std::cout << token << std::flush;
+        return zoo::TokenAction::Continue;
+    };
 
-    auto agent = std::move(*agent_result);
-    agent->set_system_prompt("You are a concise assistant. Use tools when helpful.");
-
-    auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "What is 42 + 58?"});
+    auto handle = agent->chat("What is 42 + 58?", {}, on_token);
     auto response = handle.await_result();
 
     if (!response) {
@@ -73,88 +177,115 @@ int main() {
         return 1;
     }
 
-    std::cout << response->text << '\n';
-    return 0;
+    std::cout << "\n\nTokens: " << response->usage.total_tokens
+              << " | " << response->metrics.tokens_per_second << " tok/s\n";
 }
 ```
 
-## What You Get
+## Feature Highlights
 
-- **Async inference** with per-token streaming callbacks, cancellable requests, and `RequestHandle<Result>`
-- **Structured tool calling** with typed registration, manual JSON schema registration, validation, and optional `tool_trace`
-- **Grammar-constrained structured output** via `extract()` and `ExtractionResponse::data`
-- **Conversation management** with system prompts, `MessageView`/`ConversationView`, and `HistorySnapshot`
-- **Concrete response metadata** including token usage, latency, and throughput metrics
+### Native tool calling
 
-## Build and Link
+Register any C++ callable and Zoo-Keeper generates the JSON Schema, detects tool calls from model output (29+ template formats), validates arguments, executes the handler, and feeds results back into the conversation:
+
+```cpp
+agent->register_tool("get_weather", "Get current weather", {"city"},
+    [](std::string city) -> std::string {
+        return fetch_weather(city);  // Your code
+    });
+
+// The agent automatically:
+// 1. Detects the model wants to call get_weather
+// 2. Validates {"city": "Tokyo"} against the schema
+// 3. Calls your lambda
+// 4. Feeds the result back to the model
+// 5. Generates the final response
+```
+
+### Structured output extraction
+
+Constrain model output to a JSON Schema using grammar-guided generation:
+
+```cpp
+auto schema = R"({"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}}})";
+auto handle = agent->extract("Extract info: John is 30 years old", schema);
+auto result = handle.await_result().value();
+
+// result.data == {"name": "John", "age": 30}
+```
+
+### Model hub (optional)
+
+Build with `ZOO_BUILD_HUB=ON` for GGUF inspection, HuggingFace downloading, and a local model store. Downloads share the llama.cpp cache — models fetched by any llama.cpp tool are automatically available:
+
+```cpp
+auto store = zoo::hub::ModelStore::open().value();
+auto hf = zoo::hub::HuggingFaceClient::create().value();
+
+// Pull a model (ETag caching, resume, split-file support)
+store->pull(*hf, "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", {"llama3"});
+
+// One-liner from alias to running agent
+auto agent = store->create_agent("llama3").value();
+```
+
+### Error handling
+
+Every fallible operation returns `Expected<T>` (`std::expected<T, Error>`). No exceptions, no null checks, no mystery crashes:
+
+```cpp
+auto result = zoo::Agent::create(config);
+if (!result) {
+    // Categorized error codes: InvalidModelPath, ModelLoadFailed,
+    // ContextCreationFailed, ToolValidationFailed, ...
+    std::cerr << result.error().to_string() << '\n';
+}
+```
+
+## API Surface
+
+| Type | Purpose |
+|------|---------|
+| `zoo::core::Model` | Direct synchronous llama.cpp wrapper — model loading, generation, history, KV cache |
+| `zoo::Agent` | Async runtime — request queue, streaming, tool loop, structured extraction |
+| `zoo::tools::ToolRegistry` | Thread-safe tool registration with typed callables or JSON Schema handlers |
+| `zoo::RequestHandle<T>` | Async result handle with `id()`, `ready()`, `await_result()`, cancellation |
+| `zoo::TextResponse` | Generated text + token usage + latency metrics + optional tool trace |
+| `zoo::ExtractionResponse` | Parsed JSON output + raw text + usage + metrics |
+| `zoo::ModelConfig` / `zoo::AgentConfig` / `zoo::GenerationOptions` | Validated configuration with JSON serialization |
+| `zoo::hub::GgufInspector` | GGUF metadata reading without loading weights |
+| `zoo::hub::ModelStore` | Local model catalog with aliases and auto-configuration |
+| `zoo::hub::HuggingFaceClient` | HuggingFace downloading with shared llama.cpp cache |
+
+## Testing
 
 ```bash
-git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
-cd zoo-keeper
-scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
+scripts/test.sh                     # Unit tests (pure logic, no model needed)
+scripts/build.sh -DZOO_BUILD_HUB=ON
+scripts/test.sh -R "HuggingFace|ModelStore|AutoConfig|GgufInspector|HubPath"
+
+# Integration tests (requires a real GGUF model)
+scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
+ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 ```
-
-For consumers, `ZooKeeper::zoo` is the primary CMake target. See [docs/building.md](docs/building.md) for:
-
-- submodule and `FetchContent` setup
-- installed-package usage
-- Metal and CUDA options
-- sanitizers and coverage
-- integration-test setup
-
-## Architecture at a Glance
-
-Zoo-Keeper follows a strict three-layer design:
-
-```text
-Layer 3: zoo::Agent  -> async orchestration, request queue, streaming, tool loop
-Layer 2: zoo::tools  -> registry, parser, schema validation, grammar generation
-Layer 1: zoo::core   -> direct llama.cpp wrapper and incremental prompt management
-```
-
-This split keeps the synchronous llama.cpp wrapper honest and small, while the agent runtime owns concurrency and orchestration explicitly instead of hiding it behind a vague abstraction.
-
-See [docs/architecture.md](docs/architecture.md) for the full threading model and internal boundaries.
 
 ## Documentation
 
 | Guide | Description |
 |-------|-------------|
-| [Getting Started](docs/getting-started.md) | First build, first agent, and core API overview |
-| [Building](docs/building.md) | CMake usage, platform setup, sanitizers, coverage, install/package details |
-| [Configuration](docs/configuration.md) | Runtime config, sampling parameters, generation limits, and history budgets |
-| [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, and error handling |
-| [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless, error codes |
-| [Examples](docs/examples.md) | Focused example programs for streaming, cancellation, tools, and error handling |
-| [Architecture](docs/architecture.md) | Layering, runtime ownership, threading model, and target structure |
-| [Compatibility](docs/compatibility.md) | Public API boundary, intended 1.x stability policy, and deprecation rules |
-| [Migration](MIGRATION.md) | Upgrade notes for major API changes, including `v1.0.3` to `v1.1.0` |
-| [API Reference](docs/building.md#api-reference) | Generate Doxygen locally or browse the published reference |
-
-Generate the API reference locally with:
-
-```bash
-cmake --preset docs && cmake --build --preset docs
-```
-
-## Testing
-
-The default build runs the test suite, and CI also smoke-tests build-tree and installed-package CMake consumers.
-
-```bash
-scripts/test.sh
-```
-
-For live smoke coverage against a real model:
-
-```bash
-scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
-ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf scripts/test.sh
-```
+| [Getting Started](docs/getting-started.md) | First build, first agent, core API walkthrough |
+| [Building](docs/building.md) | CMake setup, FetchContent, Metal/CUDA, sanitizers, install/package |
+| [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, history budgets |
+| [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
+| [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
+| [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
+| [Examples](docs/examples.md) | Streaming, cancellation, tools, error handling, model store |
+| [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
+| [Migration](MIGRATION.md) | Upgrade notes for major API changes |
 
 ## Acknowledgments
 
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov — the inference engine beneath the SDK
 - [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann
 - [GoogleTest](https://github.com/google/googletest) by Google
 

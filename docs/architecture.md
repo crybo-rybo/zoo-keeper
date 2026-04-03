@@ -1,13 +1,14 @@
 # Architecture
 
-Zoo-Keeper exposes three public layers with a simple dependency direction:
-higher layers build on lower layers, and consumers can stop at the lowest layer
-that fits their needs.
+Zoo-Keeper exposes three core public layers plus an optional hub layer. Higher
+layers build on lower layers, and consumers can stop at the lowest layer that
+fits their needs.
 
 ## Public Layers
 
 | Layer | Primary Types | Responsibility |
 |-------|---------------|----------------|
+| Hub *(optional)* | `zoo::hub::GgufInspector`, `zoo::hub::HuggingFaceClient`, `zoo::hub::ModelStore` | GGUF inspection, HuggingFace downloads, local model cataloging |
 | Agent | `zoo::Agent`, `zoo::RequestHandle<Result>` | Async request submission, background inference, native tool orchestration |
 | Tools | `zoo::tools::ToolRegistry`, `zoo::tools::ToolCallParser`, `zoo::tools::ToolArgumentsValidator` | Tool registration, native tool-call parsing, schema validation |
 | Core | `zoo::core::Model` | Direct synchronous llama.cpp wrapper |
