@@ -110,15 +110,17 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 
 | Dependency | Version | Integration | Notes |
 |------------|---------|-------------|-------|
-| [llama.cpp](https://github.com/ggerganov/llama.cpp) | pinned | Git submodule | Core inference engine |
+| [llama.cpp](https://github.com/ggerganov/llama.cpp) | pinned | Git submodule or optional CMake FetchContent | Core inference engine |
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.11+ | CMake FetchContent | JSON parsing |
 | [GoogleTest](https://github.com/google/googletest) | 1.14+ | CMake FetchContent | Tests only |
 | [Doxygen](https://www.doxygen.nl/) | host tool | System package | Required only when `ZOO_BUILD_DOCS=ON` |
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
-All FetchContent dependencies are downloaded automatically during CMake
-configuration. Installed-package consumers still need a discoverable
-`nlohmann_json` package because the public headers include
+`nlohmann/json` is always downloaded automatically during CMake configuration.
+`llama.cpp` is downloaded only when `ZOO_FETCH_LLAMA=ON` and Zoo-Keeper cannot
+reuse parent-provided `llama` and `common` targets or the vendored
+`extern/llama.cpp` checkout. Installed-package consumers still need a
+discoverable `nlohmann_json` package because the public headers include
 `<nlohmann/json.hpp>`.
 
 ## Running Tests
@@ -203,6 +205,7 @@ uploads the generated output as a workflow artifact, and deploys the latest
 
 ```cmake
 include(FetchContent)
+set(ZOO_FETCH_LLAMA ON CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     zoo-keeper
@@ -213,6 +216,11 @@ FetchContent_MakeAvailable(zoo-keeper)
 
 target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 ```
+
+Use `ZOO_FETCH_LLAMA=ON` when the fetched Zoo-Keeper source tree does not
+contain `extern/llama.cpp`, such as a normal GitHub clone/archive fetched by a
+downstream project. If your parent project already builds llama.cpp and exposes
+both `llama` and `common` CMake targets, Zoo-Keeper will reuse them instead.
 
 ### Git Submodule
 
