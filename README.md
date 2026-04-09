@@ -134,6 +134,7 @@ scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 
 ```cmake
 include(FetchContent)
+set(ZOO_FETCH_LLAMA ON CACHE BOOL "" FORCE) # needed when zoo-keeper has no vendored llama.cpp checkout
 FetchContent_Declare(zoo-keeper
     GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
     GIT_TAG        main
@@ -143,6 +144,9 @@ FetchContent_MakeAvailable(zoo-keeper)
 
 target_link_libraries(my_app PRIVATE ZooKeeper::zoo)
 ```
+
+If your parent project already defines both `llama` and `common` CMake
+targets, Zoo-Keeper reuses them and you can leave `ZOO_FETCH_LLAMA` off.
 
 ### Run your first agent
 
