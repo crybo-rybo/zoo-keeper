@@ -20,10 +20,14 @@ function(zoo_enable_warnings_as_errors target)
 endfunction()
 
 function(zoo_mark_llama_includes_as_system target)
+    if(NOT DEFINED ZOO_LLAMA_SOURCE_DIR OR ZOO_LLAMA_SOURCE_DIR STREQUAL "")
+        return()
+    endif()
+
     target_include_directories(${target} SYSTEM PRIVATE
-        ${PROJECT_SOURCE_DIR}/extern/llama.cpp/common
-        ${PROJECT_SOURCE_DIR}/extern/llama.cpp/vendor
-        ${PROJECT_SOURCE_DIR}/extern/llama.cpp/include
-        ${PROJECT_SOURCE_DIR}/extern/llama.cpp/ggml/include
+        ${ZOO_LLAMA_SOURCE_DIR}/common
+        ${ZOO_LLAMA_SOURCE_DIR}/vendor
+        ${ZOO_LLAMA_SOURCE_DIR}/include
+        ${ZOO_LLAMA_SOURCE_DIR}/ggml/include
     )
 endfunction()

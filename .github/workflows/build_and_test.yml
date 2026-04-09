@@ -125,6 +125,19 @@ jobs:
             -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/build"
           cmake --build build/package-buildtree -j$(nproc)
 
+      - name: Prepare FetchContent source snapshot
+        run: |
+          mkdir -p "${RUNNER_TEMP}/zoo-fetchcontent-source"
+          rsync -a --exclude .git --exclude build "${GITHUB_WORKSPACE}/" \
+            "${RUNNER_TEMP}/zoo-fetchcontent-source/"
+          rm -rf "${RUNNER_TEMP}/zoo-fetchcontent-source/extern/llama.cpp"
+
+      - name: Smoke test FetchContent consumer
+        run: |
+          cmake -S tests/packaging/fetchcontent_consumer -B build/package-fetchcontent \
+            -DZOO_KEEPER_SOURCE_DIR="${RUNNER_TEMP}/zoo-fetchcontent-source"
+          cmake --build build/package-fetchcontent -j$(nproc)
+
       - name: Install package to temp prefix
         run: cmake --install build --prefix "${RUNNER_TEMP}/zoo-install"
 
