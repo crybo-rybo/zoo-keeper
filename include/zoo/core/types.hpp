@@ -5,9 +5,11 @@
 
 #pragma once
 
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -83,6 +85,7 @@ template <typename Result, typename... Args> class FunctionRef<Result(Args...)> 
     }
 
     Result operator()(Args... args) const {
+        assert(callback_ && "FunctionRef called with null callback");
         return callback_(object_, std::forward<Args>(args)...);
     }
 
@@ -511,6 +514,10 @@ struct ModelConfig {
         if (model_path.empty()) {
             return std::unexpected(
                 Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
+        }
+        if (!std::filesystem::exists(model_path)) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidModelPath, "Model file does not exist: " + model_path});
         }
         if (context_size <= 0) {
             return std::unexpected(

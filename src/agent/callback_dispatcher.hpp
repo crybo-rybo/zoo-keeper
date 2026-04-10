@@ -86,6 +86,12 @@ class CallbackDispatcher {
             cv_.wait(lock, [this] { return shutdown_ || !queue_.empty(); });
 
             while (!queue_.empty()) {
+                if (failure_) {
+                    queue_ = {};
+                    drain_cv_.notify_all();
+                    break;
+                }
+
                 auto entry = std::move(queue_.front());
                 queue_.pop();
                 executing_ = true;

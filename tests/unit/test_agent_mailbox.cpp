@@ -22,7 +22,7 @@ const QueuedRequest& as_request(const WorkItem& item) {
 } // namespace
 
 TEST(RuntimeMailboxTest, PopsRequestsInSubmissionOrder) {
-    RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox;
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, 11)));
     ASSERT_TRUE(mailbox.push_request(make_request(2, 22)));
@@ -39,7 +39,7 @@ TEST(RuntimeMailboxTest, PopsRequestsInSubmissionOrder) {
 }
 
 TEST(RuntimeMailboxTest, ShutdownDrainsQueuedRequestsThenStops) {
-    RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox;
 
     ASSERT_TRUE(mailbox.push_request(make_request(7, 9)));
     mailbox.shutdown();
@@ -53,14 +53,14 @@ TEST(RuntimeMailboxTest, ShutdownDrainsQueuedRequestsThenStops) {
 }
 
 TEST(RuntimeMailboxTest, RejectsNewRequestsAfterShutdown) {
-    RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox;
 
     mailbox.shutdown();
     EXPECT_FALSE(mailbox.push_request(make_request(3, 4)));
 }
 
 TEST(RuntimeMailboxTest, CommandsArePrioritizedOverRequests) {
-    RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox;
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, 1)));
 
@@ -77,7 +77,7 @@ TEST(RuntimeMailboxTest, CommandsArePrioritizedOverRequests) {
 }
 
 TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
-    RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox;
 
     mailbox.shutdown();
     auto promise = std::make_shared<std::promise<void>>();
@@ -85,7 +85,7 @@ TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
 }
 
 TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
-    RuntimeMailbox mailbox(4);
+    RuntimeMailbox mailbox;
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, 1)));
 
@@ -108,7 +108,7 @@ TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
 }
 
 TEST(RuntimeMailboxTest, ShutdownDrainsCommandsThenStops) {
-    RuntimeMailbox mailbox(2);
+    RuntimeMailbox mailbox;
 
     auto promise = std::make_shared<std::promise<void>>();
     ASSERT_TRUE(mailbox.push_command(ClearHistoryCmd{promise}));

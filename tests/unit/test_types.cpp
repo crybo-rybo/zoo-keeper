@@ -155,15 +155,23 @@ TEST(SamplingParamsJsonTest, RejectsUnknownKeys) {
 
 TEST(ModelConfigTest, ValidationSuccess) {
     zoo::ModelConfig config;
-    config.model_path = "/path/to/model.gguf";
+    config.model_path = "/dev/null";
     EXPECT_TRUE(config.validate().has_value());
+}
+
+TEST(ModelConfigTest, ValidationRejectsNonExistentPath) {
+    zoo::ModelConfig config;
+    config.model_path = "/nonexistent/path/model.gguf";
+    auto result = config.validate();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelPath);
 }
 
 TEST(ModelConfigTest, ValidationRejectsBadFields) {
     zoo::ModelConfig config;
     EXPECT_FALSE(config.validate().has_value());
 
-    config.model_path = "/path/to/model.gguf";
+    config.model_path = "/dev/null";
     config.context_size = 0;
     EXPECT_FALSE(config.validate().has_value());
 }
