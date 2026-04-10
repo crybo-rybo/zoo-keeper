@@ -8,6 +8,7 @@
 #include "backend.hpp"
 #include "zoo/core/types.hpp"
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace zoo::internal::agent {
@@ -19,8 +20,18 @@ class ScopeExit {
 
     ScopeExit(const ScopeExit&) = delete;
     ScopeExit& operator=(const ScopeExit&) = delete;
-    ScopeExit(ScopeExit&&) noexcept = default;
-    ScopeExit& operator=(ScopeExit&&) noexcept = default;
+    ScopeExit(ScopeExit&& other) noexcept : callback_(std::exchange(other.callback_, {})) {}
+    ScopeExit& operator=(ScopeExit&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        if (callback_) {
+            callback_();
+        }
+        callback_ = std::exchange(other.callback_, {});
+        return *this;
+    }
 
     ~ScopeExit() {
         if (callback_) {

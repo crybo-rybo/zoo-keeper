@@ -77,7 +77,7 @@ class AgentRuntime {
 
     void fail_pending(const Error& error);
     static void resolve_command_on_shutdown(Command& cmd);
-    void update_tool_calling();
+    bool refresh_tool_calling_state();
     void enforce_history_limit();
     template <typename Result> RequestHandle<Result> make_immediate_error_handle(Error error);
     template <typename Result> RequestHandle<Result> enqueue_request(RequestPayload payload);

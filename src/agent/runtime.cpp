@@ -221,12 +221,16 @@ Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
     assert(!inference_thread_.joinable() ||
            std::this_thread::get_id() != inference_thread_.get_id());
 
-    if (auto result = tool_registry_.register_tool(std::move(definition)); !result) {
-        return std::unexpected(result.error());
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
     }
 
-    update_tool_calling();
-    return {};
+    auto done = std::make_shared<std::promise<Expected<void>>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(RegisterToolCmd{std::move(definition), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    return future.get();
 }
 
 Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions) {
@@ -237,12 +241,16 @@ Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> d
         return {};
     }
 
-    if (auto result = tool_registry_.register_tools(std::move(definitions)); !result) {
-        return std::unexpected(result.error());
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
     }
 
-    update_tool_calling();
-    return {};
+    auto done = std::make_shared<std::promise<Expected<void>>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(RegisterToolsCmd{std::move(definitions), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    return future.get();
 }
 
 size_t AgentRuntime::tool_count() const noexcept {
@@ -321,21 +329,25 @@ void AgentRuntime::handle_command(Command& cmd) {
                        backend_->clear_history();
                        c.done->set_value();
                    },
-                   [this](RefreshToolCallingCmd& c) {
-                       bool active = false;
-                       if (c.tools.empty()) {
-                           backend_->clear_tool_grammar();
-                       } else if (backend_->set_tool_calling(c.tools)) {
-                           active = true;
-                           ZOO_LOG("info", "tool calling configured (%zu tools, format=%s)",
-                                   c.tools.size(), backend_->tool_calling_format_name());
-                       } else {
-                           backend_->clear_tool_grammar();
-                           ZOO_LOG("warn", "tool calling setup failed, falling back to "
-                                           "unconstrained generation");
+                   [this](RegisterToolCmd& c) {
+                       if (auto result = tool_registry_.register_tool(std::move(c.definition));
+                           !result) {
+                           c.done->set_value(std::unexpected(result.error()));
+                           return;
                        }
-                       tool_grammar_active_.store(active, std::memory_order_release);
-                       c.done->set_value(active);
+
+                       refresh_tool_calling_state();
+                       c.done->set_value({});
+                   },
+                   [this](RegisterToolsCmd& c) {
+                       if (auto result = tool_registry_.register_tools(std::move(c.definitions));
+                           !result) {
+                           c.done->set_value(std::unexpected(result.error()));
+                           return;
+                       }
+
+                       refresh_tool_calling_state();
+                       c.done->set_value({});
                    },
                },
                cmd);
@@ -363,16 +375,19 @@ void AgentRuntime::resolve_command_on_shutdown(Command& cmd) {
                    [](SetSystemPromptCmd& c) { c.done->set_value(); },
                    [](GetHistoryCmd& c) { c.done->set_value(HistorySnapshot{}); },
                    [](ClearHistoryCmd& c) { c.done->set_value(); },
-                   [](RefreshToolCallingCmd& c) { c.done->set_value(false); },
+                   [](RegisterToolCmd& c) {
+                       c.done->set_value(std::unexpected(
+                           Error{ErrorCode::AgentNotRunning, "Agent is not running"}));
+                   },
+                   [](RegisterToolsCmd& c) {
+                       c.done->set_value(std::unexpected(
+                           Error{ErrorCode::AgentNotRunning, "Agent is not running"}));
+                   },
                },
                cmd);
 }
 
-void AgentRuntime::update_tool_calling() {
-    if (!running_.load(std::memory_order_acquire)) {
-        return;
-    }
-
+bool AgentRuntime::refresh_tool_calling_state() {
     auto metadata = tool_registry_.get_all_tool_metadata();
     std::vector<CoreToolInfo> tools;
     tools.reserve(metadata.size());
@@ -384,12 +399,19 @@ void AgentRuntime::update_tool_calling() {
         });
     }
 
-    auto done = std::make_shared<std::promise<bool>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(RefreshToolCallingCmd{std::move(tools), std::move(done)})) {
-        return;
+    bool active = false;
+    if (tools.empty()) {
+        backend_->clear_tool_grammar();
+    } else if (backend_->set_tool_calling(tools)) {
+        active = true;
+        ZOO_LOG("info", "tool calling configured (%zu tools, format=%s)", tools.size(),
+                backend_->tool_calling_format_name());
+    } else {
+        backend_->clear_tool_grammar();
+        ZOO_LOG("warn", "tool calling setup failed, falling back to unconstrained generation");
     }
-    future.get();
+    tool_grammar_active_.store(active, std::memory_order_release);
+    return active;
 }
 
 void AgentRuntime::enforce_history_limit() {

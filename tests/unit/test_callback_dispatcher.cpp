@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <functional>
 #include <future>
 #include <string>
@@ -94,6 +95,38 @@ TEST(CallbackDispatcherTest, DestructorDrainsRemainingCallbacks) {
 TEST(CallbackDispatcherTest, NoCallbackIsNoOp) {
     CallbackDispatcher dispatcher;
     dispatcher.drain(); // should not hang
+}
+
+TEST(CallbackDispatcherTest, ThrowingCallbackDoesNotTerminateProcess) {
+    ASSERT_EXIT(
+        [] {
+            CallbackDispatcher dispatcher;
+
+            std::function<void(std::string_view)> failing = [](std::string_view) {
+                throw std::runtime_error("boom");
+            };
+            dispatcher.dispatch(failing, "x");
+
+            try {
+                dispatcher.drain();
+            } catch (const std::exception&) {
+            }
+
+            bool recovered = false;
+            std::function<void(std::string_view)> succeeding = [&](std::string_view) {
+                recovered = true;
+            };
+            dispatcher.dispatch(succeeding, "y");
+
+            try {
+                dispatcher.drain();
+            } catch (...) {
+                std::exit(2);
+            }
+
+            std::exit(recovered ? 0 : 3);
+        }(),
+        ::testing::ExitedWithCode(0), "");
 }
 
 } // namespace

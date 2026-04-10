@@ -40,6 +40,7 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
 
     std::chrono::steady_clock::time_point first_token_time;
     bool first_token_received = false;
+    std::chrono::steady_clock::duration generation_time_after_first_token{};
     int total_completion_tokens = 0;
     int total_prompt_tokens = 0;
     std::vector<ToolInvocation> tool_invocations;
@@ -65,6 +66,10 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
         }
 
         int completion_tokens = 0;
+        const auto generation_start_time = std::chrono::steady_clock::now();
+        const bool had_first_token_before_generation = first_token_received;
+        std::chrono::steady_clock::time_point first_token_time_this_generation;
+        bool first_token_received_this_generation = false;
 
         auto callback = [&](std::string_view token) -> TokenAction {
             if (request.streaming_callback && *request.streaming_callback) {
@@ -73,6 +78,10 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
             if (!first_token_received) {
                 first_token_time = std::chrono::steady_clock::now();
                 first_token_received = true;
+            }
+            if (!first_token_received_this_generation) {
+                first_token_time_this_generation = std::chrono::steady_clock::now();
+                first_token_received_this_generation = true;
             }
             ++completion_tokens;
             return TokenAction::Continue;
@@ -86,6 +95,14 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
         callback_dispatcher_.drain();
         if (!generated) {
             return std::unexpected(generated.error());
+        }
+        const auto generation_end_time = std::chrono::steady_clock::now();
+
+        if (first_token_received) {
+            const auto interval_start = had_first_token_before_generation
+                                            ? generation_start_time
+                                            : first_token_time_this_generation;
+            generation_time_after_first_token += (generation_end_time - interval_start);
         }
 
         total_completion_tokens += completion_tokens;
@@ -239,8 +256,8 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
             response.metrics.time_to_first_token_ms =
                 std::chrono::duration_cast<std::chrono::milliseconds>(first_token_time -
                                                                       start_time);
-            auto generation_time =
-                std::chrono::duration_cast<std::chrono::milliseconds>(end_time - first_token_time);
+            auto generation_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                generation_time_after_first_token);
             if (generation_time.count() > 0) {
                 response.metrics.tokens_per_second =
                     (total_completion_tokens * 1000.0) / generation_time.count();

@@ -4,6 +4,7 @@
  */
 
 #include "agent/runtime.hpp"
+#include "agent/runtime_helpers.hpp"
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -37,6 +38,7 @@ using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
 using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::ParsedToolResponse;
+using zoo::internal::agent::ScopeExit;
 
 class FakeBackend final : public AgentBackend {
   public:
@@ -427,6 +429,97 @@ TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {
     EXPECT_EQ(chat_result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
 }
 
+TEST(AgentRuntimeTest, RegisterToolWaitsUntilCurrentRequestCompletesBeforeBecomingVisible) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+
+    auto config = make_agent_config();
+    config.max_tool_retries = 0;
+    AgentRuntime runtime(make_model_config(), config, GenerationOptions{}, std::move(backend));
+
+    auto existing = zoo::tools::detail::make_tool_definition("existing", "Existing tool",
+                                                             std::vector<std::string>{"value"},
+                                                             [](int value) { return value; });
+    ASSERT_TRUE(existing.has_value()) << existing.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*existing)).has_value());
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    backend_ptr->push_generation(
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
+            entered->set_value();
+            release_future.wait();
+            return Expected<GenerationResult>(tool_call_generation("late", {{"value", 7}}));
+        });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"late result", 0, false, "", {}});
+    });
+
+    auto handle = runtime.chat("call late");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+
+    auto register_future = std::async(std::launch::async, [&runtime]() {
+        auto definition = zoo::tools::detail::make_tool_definition(
+            "late", "Late tool", std::vector<std::string>{"value"},
+            [](int value) { return value * 2; });
+        if (!definition) {
+            return Expected<void>(std::unexpected(definition.error()));
+        }
+        return runtime.register_tool(std::move(*definition));
+    });
+
+    EXPECT_EQ(register_future.wait_for(50ms), std::future_status::timeout);
+
+    release->set_value();
+
+    auto result = handle.await_result();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::ToolRetriesExhausted);
+
+    auto register_result = register_future.get();
+    ASSERT_TRUE(register_result.has_value()) << register_result.error().to_string();
+    EXPECT_EQ(runtime.tool_count(), 2u);
+}
+
+TEST(AgentRuntimeTest, ToolLoopThroughputExcludesToolExecutionTime) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto definition = zoo::tools::detail::make_tool_definition(
+        "slow", "Slow tool", std::vector<std::string>{"value"}, [](int value) {
+            std::this_thread::sleep_for(100ms);
+            return value * 2;
+        });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("a"), TokenAction::Continue);
+            std::this_thread::sleep_for(10ms);
+        }
+        return Expected<GenerationResult>(tool_call_generation("slow", {{"value", 5}}));
+    });
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("b"), TokenAction::Continue);
+            std::this_thread::sleep_for(10ms);
+        }
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    auto result = runtime.chat("run slow tool").await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "done");
+    EXPECT_EQ(result->usage.completion_tokens, 2);
+    EXPECT_GT(result->metrics.tokens_per_second, 50.0);
+}
+
 TEST(AgentRuntimeTest, StreamingCallbackRunsOffInferenceThread) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -455,6 +548,29 @@ TEST(AgentRuntimeTest, StreamingCallbackRunsOffInferenceThread) {
     EXPECT_NE(inference_thread_id, std::thread::id{});
     EXPECT_NE(callback_thread_id, std::thread::id{});
     EXPECT_NE(callback_thread_id, inference_thread_id);
+}
+
+TEST(ScopeExitTest, MoveConstructionTransfersSingleExecution) {
+    int calls = 0;
+
+    {
+        ScopeExit original([&] { ++calls; });
+        ScopeExit moved(std::move(original));
+    }
+
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(ScopeExitTest, MoveAssignmentTransfersSingleExecution) {
+    int calls = 0;
+
+    {
+        ScopeExit original([&] { ++calls; });
+        ScopeExit moved([] {});
+        moved = std::move(original);
+    }
+
+    EXPECT_EQ(calls, 1);
 }
 
 } // namespace

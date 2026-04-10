@@ -5,7 +5,10 @@
 
 #pragma once
 
+#include "log.hpp"
+
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <mutex>
 #include <queue>
@@ -63,6 +66,12 @@ class CallbackDispatcher {
     void drain() {
         std::unique_lock<std::mutex> lock(mutex_);
         drain_cv_.wait(lock, [this] { return queue_.empty() && !executing_; });
+        if (failure_) {
+            auto failure = failure_;
+            failure_ = nullptr;
+            lock.unlock();
+            std::rethrow_exception(failure);
+        }
     }
 
   private:
@@ -82,7 +91,27 @@ class CallbackDispatcher {
                 executing_ = true;
                 lock.unlock();
 
-                (*entry.callback)(entry.token);
+                try {
+                    (*entry.callback)(entry.token);
+                } catch (const std::exception& e) {
+                    ZOO_LOG("error", "streaming callback threw: %s", e.what());
+                    lock.lock();
+                    if (!failure_) {
+                        failure_ = std::current_exception();
+                    }
+                    executing_ = false;
+                    drain_cv_.notify_all();
+                    continue;
+                } catch (...) {
+                    ZOO_LOG("error", "streaming callback threw unknown exception");
+                    lock.lock();
+                    if (!failure_) {
+                        failure_ = std::current_exception();
+                    }
+                    executing_ = false;
+                    drain_cv_.notify_all();
+                    continue;
+                }
 
                 lock.lock();
                 executing_ = false;
@@ -101,6 +130,7 @@ class CallbackDispatcher {
     std::queue<Entry> queue_;
     bool shutdown_ = false;
     bool executing_ = false;
+    std::exception_ptr failure_;
     std::thread thread_;
 };
 
