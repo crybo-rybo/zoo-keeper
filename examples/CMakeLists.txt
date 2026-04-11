@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
 
+if(NOT ZOO_BUILD_EXAMPLES)
+    return()
+endif()
+
 function(zoo_add_example target source)
     add_executable(${target} ${source})
     target_link_libraries(${target}
