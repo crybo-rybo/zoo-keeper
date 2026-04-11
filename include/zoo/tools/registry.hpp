@@ -586,6 +586,9 @@ class ToolRegistry {
      *
      * Existing entries with the same name are replaced in place while
      * preserving registration order.
+     *
+     * @param definitions Tool definitions to register.
+     * @return Void on success.
      */
     Expected<void> register_tools(std::vector<ToolDefinition> definitions) {
         std::unique_lock lock(mutex_);

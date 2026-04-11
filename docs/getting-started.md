@@ -86,6 +86,11 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `set_system_prompt(text)` | Set or update the system prompt |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
 | `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
+| `register_tools(definitions)` | Batch-register multiple tools in a single lock acquisition |
+| `set_system_prompt(text, timeout)` | Set system prompt with timeout; returns `RequestTimeout` if inference thread is busy |
+| `get_history(timeout)` | Get history snapshot with timeout; returns `RequestTimeout` if inference thread is busy |
+| `clear_history(timeout)` | Clear conversation history with timeout; returns `RequestTimeout` if inference thread is busy |
+| `register_tool(..., timeout)` | Register a tool with timeout; returns `RequestTimeout` if inference thread is busy |
 | `stop()` | Gracefully shut down the agent |
 | `is_running()` | Check if the agent is accepting requests |
 | `clear_history()` | Clear conversation history |
@@ -150,5 +155,5 @@ if (!response) {
 
 - [Tool System](tools.md) -- register native C++ functions as model-callable tools
 - [Configuration Reference](configuration.md) -- all config options
-- [Architecture](architecture.md) -- three-layer design and threading model
+- [Architecture](architecture.md) -- four-layer design and threading model
 - [Examples Cookbook](examples.md) -- copy-paste code snippets

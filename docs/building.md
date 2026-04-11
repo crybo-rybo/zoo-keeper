@@ -142,11 +142,8 @@ The integration target exercises the concrete `Model` and `Agent` layers. Two
 failure-path tests run using vendored fixtures. Optional live smoke tests run
 when a real GGUF path is provided.
 
-`ZOO_BUILD_INTEGRATION_TESTS` is only effective when `ZOO_BUILD_TESTS=ON`,
-because the integration suite is added from `tests/CMakeLists.txt`.
-
 ```bash
-scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON \
+scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON \
     -DZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf
 scripts/test.sh -L integration
 ```

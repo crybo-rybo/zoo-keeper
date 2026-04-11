@@ -2,6 +2,38 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## v1.1.0 → v1.1.1
+
+### Hub Layer (Additive)
+
+New optional Layer 4 (`zoo::hub`) adds GGUF inspection, HuggingFace downloading,
+and a local model store. Public headers live under `include/zoo/hub/`. The key
+types are `GgufInspector`, `HuggingFaceClient`, and `ModelStore`.
+
+This is a purely additive change — non-hub consumers are unaffected. Enable with
+`-DZOO_BUILD_HUB=ON` at configure time.
+
+### Batch Tool Registration (Additive)
+
+`ToolRegistry::register_tools()` and `Agent::register_tools()` accept a
+collection of tool definitions, registering them in a single call. Existing
+per-tool `register_tool()` methods continue to work unchanged.
+
+### Callback Threading Change
+
+Streaming token callbacks now dispatch to a dedicated `CallbackDispatcher` thread
+instead of running directly on the inference thread. The guidance to avoid
+blocking in callbacks still applies, but the consequence of a slow callback is
+now dispatcher queue backup rather than inference thread stall.
+
+Tool handlers are not affected — they still run on the inference thread.
+
+### CMake Flag Independence
+
+`ZOO_BUILD_INTEGRATION_TESTS=ON` now works independently without requiring
+`ZOO_BUILD_TESTS=ON`. Previously, integration tests were gated behind the
+general test flag.
+
 ## v1.0.3 → v1.1.0
 
 Version `1.1.0` is a major API step rather than a small patch. The biggest
@@ -137,10 +169,10 @@ No breaking API changes occurred between 0.2.x and 1.0.0. The public interface w
 
 The supported public API is:
 
-- Headers under `include/zoo/` (excluding `include/zoo/internal/`)
+- Headers under `include/zoo/`
 - The primary CMake target `ZooKeeper::zoo`
 
-Internal headers (`include/zoo/internal/`), source files (`src/`), and CMake packaging internals are not part of the compatibility contract and may change in any release.
+Source files (`src/`) and CMake packaging internals are not part of the compatibility contract and may change in any release.
 
 ### CMake Target Changes
 
@@ -159,7 +191,7 @@ The `extern/llama.cpp` submodule is now pinned to a specific commit (`d1b4757ded
 ### What Has Not Changed
 
 - All public headers: `zoo/zoo.hpp`, `zoo/agent.hpp`, `zoo/core/model.hpp`, `zoo/core/types.hpp`, `zoo/tools/registry.hpp`, `zoo/tools/parser.hpp`, `zoo/tools/validation.hpp`
-- All public types: `zoo::Agent`, `zoo::core::Model`, `zoo::Message`, `zoo::Role`, `zoo::Config`, `zoo::Response`, `zoo::Error`
+- All public types: `zoo::Agent`, `zoo::core::Model`, `zoo::Message`, `zoo::Role`, `zoo::Config`, `zoo::Response`, `zoo::Error` (note: `zoo::Config` and `zoo::Response` were later split in v1.1.0 — see the v1.0.3 → v1.1.0 section for the current API surface)
 - Error handling: `std::expected`-based throughout
 - Include paths: unchanged
 

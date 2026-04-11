@@ -37,7 +37,9 @@ it by confining all access to the single inference thread.
 ## Consequences
 
 - Callers cannot directly access Model while Agent is running.
-- All callbacks execute on the inference thread — callers must not block in
-  callbacks or they will stall inference.
+- Tool handlers execute on the inference thread — callers must not block in
+  tool handlers or they will stall inference. Streaming token callbacks run on
+  the CallbackDispatcher thread; blocking in a streaming callback backs up the
+  dispatcher queue rather than stalling inference.
 - Cancellation is cooperative (checked between generation steps).
 - `Model` is still usable standalone for simple single-threaded use cases.

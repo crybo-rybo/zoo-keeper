@@ -75,6 +75,38 @@ auto result = agent->register_tool(
 Manual handlers must accept a single JSON argument object and return
 `zoo::Expected<nlohmann::json>`.
 
+## Batch Registration
+
+When registering many tools at startup, use the batch overload to avoid
+per-tool overhead:
+
+```cpp
+std::vector<zoo::tools::ToolDefinition> defs;
+
+// Build definitions with the detail helpers or by hand:
+auto add_def = zoo::tools::detail::make_tool_definition(
+    "add", "Add two integers", {"a", "b"},
+    [](int a, int b) { return a + b; });
+if (add_def) defs.push_back(std::move(*add_def));
+
+auto greet_def = zoo::tools::detail::make_tool_definition(
+    "greet", "Greet a person", {"name"},
+    [](std::string name) -> std::string { return "Hello, " + name + "!"; });
+if (greet_def) defs.push_back(std::move(*greet_def));
+
+agent->register_tools(std::move(defs));
+```
+
+`ToolRegistry::register_tools(std::vector<ToolDefinition>)` inserts every
+definition under a single lock acquisition.
+`Agent::register_tools(std::vector<ToolDefinition>)` does the same and then
+performs one `update_tool_calling()` round-trip to the inference thread,
+rather than N round-trips for N individual `register_tool` calls. An
+optional `std::chrono::nanoseconds` timeout overload is also available.
+
+Re-registering an existing tool name replaces it in place without changing
+its position in the deterministic ordering.
+
 ## Supported Manual Schema Subset
 
 Manual registration accepts a deliberately small subset of JSON Schema.

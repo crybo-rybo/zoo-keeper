@@ -86,7 +86,8 @@ auto handle =
 ## Streaming
 
 Pass an `on_token` callback to receive tokens as they are generated. The
-callback runs on the inference thread; avoid blocking inside it.
+callback runs on the CallbackDispatcher thread; avoid blocking inside it to
+prevent backing up the dispatcher queue.
 
 ```cpp
 auto handle = agent->extract(

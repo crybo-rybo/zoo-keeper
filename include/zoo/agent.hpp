@@ -228,6 +228,8 @@ class Agent {
     /**
      * @brief Replaces the current system prompt, returning RequestTimeout if the command waits too
      * long.
+     * @param prompt The new system prompt text.
+     * @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
      */
     Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
 
@@ -252,15 +254,18 @@ class Agent {
     /// Returns a history snapshot taken synchronously on the inference thread.
     [[nodiscard]] HistorySnapshot get_history() const;
 
-    /// Returns a history snapshot, or RequestTimeout if the command waits too long.
+    /// Returns a history snapshot, or `RequestTimeout` if the command waits too long.
+    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     [[nodiscard]] Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
 
     /// Clears history synchronously on the inference thread before later queued work.
     void clear_history();
 
-    /// Clears history, returning RequestTimeout if the command waits too long.
+    /// Clears history, returning `RequestTimeout` if the command waits too long.
+    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
+    /// @brief Registers a typed callable as a tool (initializer_list overload).
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::initializer_list<std::string> param_names, Func func) {
@@ -268,6 +273,8 @@ class Agent {
                              std::move(func));
     }
 
+    /// @brief Registers a typed callable as a tool with timeout (initializer_list overload).
+    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::initializer_list<std::string> param_names, Func func,
@@ -276,6 +283,7 @@ class Agent {
                              std::move(func), timeout);
     }
 
+    /// @brief Registers a typed callable as a tool (span overload).
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::span<const std::string> param_names, Func func) {
@@ -288,6 +296,8 @@ class Agent {
         return register_tool(std::move(*definition));
     }
 
+    /// @brief Registers a typed callable as a tool with timeout (span overload).
+    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::span<const std::string> param_names, Func func,
@@ -301,6 +311,7 @@ class Agent {
         return register_tool(std::move(*definition), timeout);
     }
 
+    /// @brief Registers a tool using a JSON Schema and a JSON-backed handler.
     template <typename Handler>
         requires tools::detail::is_json_handler_like_v<Handler>
     Expected<void> register_tool(const std::string& name, const std::string& description,
@@ -309,6 +320,8 @@ class Agent {
                              tools::ToolHandler(std::move(handler)));
     }
 
+    /// @brief Registers a tool using a JSON Schema and handler, with timeout.
+    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     template <typename Handler>
         requires tools::detail::is_json_handler_like_v<Handler>
     Expected<void> register_tool(const std::string& name, const std::string& description,
@@ -318,13 +331,27 @@ class Agent {
                              tools::ToolHandler(std::move(handler)), timeout);
     }
 
+    /// @brief Registers a tool from a prebuilt JSON Schema and handler.
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  nlohmann::json schema, tools::ToolHandler handler);
+    /// @brief Registers a tool from a prebuilt JSON Schema and handler, with timeout.
+    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  nlohmann::json schema, tools::ToolHandler handler,
                                  std::chrono::nanoseconds timeout);
 
+    /**
+     * @brief Registers multiple tool definitions in a single queued command.
+     * @param definitions Tool definitions to register.
+     * @return Void on success, or the first error encountered.
+     */
     Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
+    /**
+     * @brief Registers multiple tool definitions in a single queued command, with timeout.
+     * @param definitions Tool definitions to register.
+     * @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
+     * @return Void on success, or the first error encountered.
+     */
     Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions,
                                   std::chrono::nanoseconds timeout);
 

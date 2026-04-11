@@ -282,6 +282,7 @@ ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 | [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, history budgets |
 | [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
 | [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
+| [Hub Layer](docs/hub.md) | GGUF inspection, HuggingFace downloading, local model store, auto-configuration |
 | [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
 | [Examples](docs/examples.md) | Streaming, cancellation, tools, error handling, model store |
 | [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |

@@ -39,7 +39,8 @@ error.
   `complete(...)`, or `extract(...)`.
 - Request completion is observed through `RequestHandle<Result>::await_result()`.
 - Model state is owned by the inference thread while the agent is running.
-- Streaming callbacks and tool handlers execute on the inference thread.
+- Streaming token callbacks execute on the CallbackDispatcher thread. Tool
+  handlers execute on the inference thread.
 
 These guarantees are part of the public behavioral contract. Private runtime
 mechanisms that implement them are documented separately for maintainers.

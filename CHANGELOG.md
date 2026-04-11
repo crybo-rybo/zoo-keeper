@@ -5,6 +5,53 @@ All notable changes to Zoo-Keeper will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-04-10
+
+### Added
+
+- **`zoo::hub` layer (Layer 4)** — optional GGUF inspection, HuggingFace downloading,
+  and local model store with alias support. `GgufInspector` performs two-phase metadata
+  reading and generates sensible `ModelConfig` defaults via `auto_configure()`.
+  `HuggingFaceClient` wraps llama.cpp's download infrastructure using the shared cache.
+  `ModelStore` provides a JSON-persisted catalog with one-liner Model/Agent creation.
+  Build with `ZOO_BUILD_HUB=ON`.
+- **`CallbackDispatcher`** — dedicated thread for streaming callback execution, so the
+  inference thread is no longer blocked by user callback logic. Drain points ensure
+  ordering at synchronization boundaries.
+- **`ToolRegistry::register_tools()` / `Agent::register_tools()` batch APIs** — register
+  multiple tools under a single lock acquisition and a single `update_tool_calling()`
+  round-trip to the inference thread.
+
+### Changed
+
+- Registry lock is now released before executing tool handlers in `invoke()`, so
+  concurrent reads are not blocked by slow handlers.
+- Logging callback replaced with lock-free atomics; implementation moved from public
+  header to `src/log_callback.cpp`.
+- Duplicate `await_text` / `await_extraction` methods in `RequestSlots` consolidated
+  into a single `await_result<Result>` template.
+- CMake subdirectories now self-guard their own targets — flags like
+  `ZOO_BUILD_INTEGRATION_TESTS` work independently without requiring
+  `ZOO_BUILD_TESTS=ON`.
+- FetchContent llama dependency streamlined.
+- README rewritten as a positioning document with value proposition, side-by-side
+  comparisons, and integration instructions.
+
+### Fixed
+
+- Queued callbacks are now skipped after a callback failure, preventing cascading errors.
+- `replace_history` calls `note_history_rewrite()` to clear stale KV cache entries.
+- `gmtime_r` used instead of `std::gmtime` in `store.cpp` for thread safety.
+- `generate_id()` RNG is now `thread_local` for thread safety.
+- `ModelConfig::validate()` checks model file existence via `std::filesystem::exists`.
+- Null callback assertion added to `FunctionRef::operator()`.
+- Throughput test threshold relaxed to avoid CI flakes on slow runners.
+
+### Removed
+
+- Unused `request_capacity` parameter from `RuntimeMailbox`.
+- Stale plan directories and outdated documentation.
+
 ## [1.1.0] - 2026-03-26
 
 This is the first major post-1.0.3 API cut. The public surface is now
@@ -138,6 +185,7 @@ return typed handles instead of immediate results.
 - C++23 required
 - Windows is not supported
 
+[1.1.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.1...v1.0.2
