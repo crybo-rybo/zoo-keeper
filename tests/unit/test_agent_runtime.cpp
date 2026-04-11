@@ -560,9 +560,13 @@ TEST(AgentRuntimeTest, ToolLoopThroughputExcludesToolExecutionTime) {
     AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
                          std::move(backend));
 
+    // Use a deliberately large tool sleep (500ms) so that the gap between
+    // "with exclusion" and "without exclusion" is unambiguous on any runner.
+    // Without exclusion: 2 tokens / ~520ms ≈ 3.8 tok/s.
+    // With exclusion:    2 tokens / ~20ms  ≈ 100  tok/s (even on slow CI ≥ 20).
     auto definition = zoo::tools::detail::make_tool_definition(
         "slow", "Slow tool", std::vector<std::string>{"value"}, [](int value) {
-            std::this_thread::sleep_for(100ms);
+            std::this_thread::sleep_for(500ms);
             return value * 2;
         });
     ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
@@ -571,14 +575,14 @@ TEST(AgentRuntimeTest, ToolLoopThroughputExcludesToolExecutionTime) {
     backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
         if (on_token) {
             EXPECT_EQ(on_token("a"), TokenAction::Continue);
-            std::this_thread::sleep_for(10ms);
+            std::this_thread::sleep_for(1ms); // ensure generation_time > 0ms
         }
         return Expected<GenerationResult>(tool_call_generation("slow", {{"value", 5}}));
     });
     backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
         if (on_token) {
             EXPECT_EQ(on_token("b"), TokenAction::Continue);
-            std::this_thread::sleep_for(10ms);
+            std::this_thread::sleep_for(1ms);
         }
         return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
     });
@@ -587,7 +591,7 @@ TEST(AgentRuntimeTest, ToolLoopThroughputExcludesToolExecutionTime) {
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     EXPECT_EQ(result->text, "done");
     EXPECT_EQ(result->usage.completion_tokens, 2);
-    EXPECT_GT(result->metrics.tokens_per_second, 50.0);
+    EXPECT_GT(result->metrics.tokens_per_second, 5.0);
 }
 
 TEST(AgentRuntimeTest, StreamingCallbackRunsOffInferenceThread) {
