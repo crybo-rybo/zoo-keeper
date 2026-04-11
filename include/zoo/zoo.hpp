@@ -12,6 +12,9 @@
 // Version
 #include "version.hpp"
 
+// Logging
+#include "log.hpp"
+
 // Core types and model
 #include "core/model.hpp"
 #include "core/types.hpp"

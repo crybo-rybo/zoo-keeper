@@ -99,6 +99,10 @@ void Agent::set_system_prompt(std::string_view prompt) {
     impl_->runtime.set_system_prompt(prompt);
 }
 
+Expected<void> Agent::set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout) {
+    return impl_->runtime.set_system_prompt(prompt, timeout);
+}
+
 void Agent::stop() {
     impl_->runtime.stop();
 }
@@ -111,12 +115,25 @@ HistorySnapshot Agent::get_history() const {
     return impl_->runtime.get_history();
 }
 
+Expected<HistorySnapshot> Agent::get_history(std::chrono::nanoseconds timeout) const {
+    return impl_->runtime.get_history(timeout);
+}
+
 void Agent::clear_history() {
     impl_->runtime.clear_history();
 }
 
+Expected<void> Agent::clear_history(std::chrono::nanoseconds timeout) {
+    return impl_->runtime.clear_history(timeout);
+}
+
 Expected<void> Agent::register_tool(tools::ToolDefinition definition) {
     return impl_->runtime.register_tool(std::move(definition));
+}
+
+Expected<void> Agent::register_tool(tools::ToolDefinition definition,
+                                    std::chrono::nanoseconds timeout) {
+    return impl_->runtime.register_tool(std::move(definition), timeout);
 }
 
 Expected<void> Agent::register_tool(const std::string& name, const std::string& description,
@@ -129,8 +146,24 @@ Expected<void> Agent::register_tool(const std::string& name, const std::string& 
     return register_tool(std::move(*definition));
 }
 
+Expected<void> Agent::register_tool(const std::string& name, const std::string& description,
+                                    nlohmann::json schema, tools::ToolHandler handler,
+                                    std::chrono::nanoseconds timeout) {
+    auto definition =
+        tools::detail::make_tool_definition(name, description, schema, std::move(handler));
+    if (!definition) {
+        return std::unexpected(definition.error());
+    }
+    return register_tool(std::move(*definition), timeout);
+}
+
 Expected<void> Agent::register_tools(std::vector<tools::ToolDefinition> definitions) {
     return impl_->runtime.register_tools(std::move(definitions));
+}
+
+Expected<void> Agent::register_tools(std::vector<tools::ToolDefinition> definitions,
+                                     std::chrono::nanoseconds timeout) {
+    return impl_->runtime.register_tools(std::move(definitions), timeout);
 }
 
 size_t Agent::tool_count() const noexcept {

@@ -261,6 +261,41 @@ TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
     EXPECT_EQ(second_result.error().code, ErrorCode::RequestCancelled);
 }
 
+TEST(AgentRuntimeTest, AwaitResultTimeoutDoesNotConsumeHandle) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    backend_ptr->push_generation(
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
+            entered->set_value();
+            release_future.wait();
+            return Expected<GenerationResult>(GenerationResult{"eventual reply", 0, false, "", {}});
+        });
+
+    auto handle = runtime.chat("wait for me");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+
+    auto timed_out = handle.await_result(20ms);
+    ASSERT_FALSE(timed_out.has_value());
+    EXPECT_EQ(timed_out.error().code, ErrorCode::RequestTimeout);
+    EXPECT_TRUE(handle.valid());
+    EXPECT_FALSE(handle.ready());
+
+    release->set_value();
+
+    auto result = handle.await_result(1s);
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "eventual reply");
+    EXPECT_FALSE(handle.valid());
+}
+
 TEST(AgentRuntimeTest, CompleteDoesNotMutatePersistentHistory) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -386,6 +421,41 @@ TEST(AgentRuntimeTest, SetSystemPromptUpdatesHistoryThroughCommandLane) {
     ASSERT_EQ(history.size(), 1u);
     EXPECT_EQ(history[0].role, Role::System);
     EXPECT_EQ(history[0].content, "Be concise.");
+}
+
+TEST(AgentRuntimeTest, SetSystemPromptTimeoutReturnsRequestTimeoutWhenCommandLaneIsBusy) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    backend_ptr->push_generation(
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
+            entered->set_value();
+            release_future.wait();
+            return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+        });
+
+    auto request = runtime.chat("occupy inference thread");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+
+    auto timed_out = runtime.set_system_prompt("Do not wait forever.", 20ms);
+    ASSERT_FALSE(timed_out.has_value());
+    EXPECT_EQ(timed_out.error().code, ErrorCode::RequestTimeout);
+
+    release->set_value();
+    ASSERT_TRUE(request.await_result(1s).has_value());
+
+    auto history = runtime.get_history(1s);
+    ASSERT_TRUE(history.has_value()) << history.error().to_string();
+    ASSERT_GE(history->size(), 1u);
+    EXPECT_EQ((*history)[0].role, Role::System);
+    EXPECT_EQ((*history)[0].content, "Do not wait forever.");
 }
 
 TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {

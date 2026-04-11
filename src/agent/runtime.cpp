@@ -12,6 +12,8 @@
 #include "zoo/core/model.hpp"
 #include "zoo/tools/registry.hpp"
 #include <cassert>
+#include <future>
+#include <string_view>
 #include <thread>
 
 namespace zoo::internal::agent {
@@ -34,6 +36,15 @@ Expected<Result> await_immediate_handle(void* state, uint32_t, uint32_t) {
     return result;
 }
 
+template <typename Result>
+Expected<Result> await_immediate_handle_for(void* state, uint32_t slot, uint32_t generation,
+                                            std::chrono::nanoseconds, bool* completed) {
+    if (completed != nullptr) {
+        *completed = true;
+    }
+    return await_immediate_handle<Result>(state, slot, generation);
+}
+
 template <typename Result> bool ready_immediate_handle(const void*, uint32_t, uint32_t) {
     return true;
 }
@@ -52,6 +63,11 @@ std::vector<Message> materialize_conversation(ConversationView messages) {
     return owned;
 }
 
+Error command_timeout_error(std::string_view command_name) {
+    return Error{ErrorCode::RequestTimeout,
+                 "Timed out waiting for command to complete: " + std::string(command_name)};
+}
+
 } // namespace
 
 AgentRuntime::AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
@@ -60,7 +76,7 @@ AgentRuntime::AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
     : model_config_(std::move(model_config)), agent_config_(agent_config),
       default_generation_options_(std::move(default_generation)), backend_(std::move(backend)),
       request_slots_(std::make_shared<RequestSlots>(agent_config_.request_queue_capacity)),
-      request_mailbox_(agent_config_.request_queue_capacity) {
+      request_mailbox_() {
     inference_thread_ = std::thread([this]() { inference_loop(); });
 }
 
@@ -191,6 +207,24 @@ void AgentRuntime::set_system_prompt(std::string_view prompt) {
     future.get();
 }
 
+Expected<void> AgentRuntime::set_system_prompt(std::string_view prompt,
+                                               std::chrono::nanoseconds timeout) {
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<void>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(SetSystemPromptCmd{std::string(prompt), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error("set_system_prompt"));
+    }
+    future.get();
+    return {};
+}
+
 HistorySnapshot AgentRuntime::get_history() const {
     if (!running_.load(std::memory_order_acquire)) {
         return {};
@@ -200,6 +234,22 @@ HistorySnapshot AgentRuntime::get_history() const {
     auto future = done->get_future();
     if (!request_mailbox_.push_command(GetHistoryCmd{std::move(done)})) {
         return {};
+    }
+    return future.get();
+}
+
+Expected<HistorySnapshot> AgentRuntime::get_history(std::chrono::nanoseconds timeout) const {
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<HistorySnapshot>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(GetHistoryCmd{std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error("get_history"));
     }
     return future.get();
 }
@@ -217,6 +267,23 @@ void AgentRuntime::clear_history() {
     future.get();
 }
 
+Expected<void> AgentRuntime::clear_history(std::chrono::nanoseconds timeout) {
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<void>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(ClearHistoryCmd{std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error("clear_history"));
+    }
+    future.get();
+    return {};
+}
+
 Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
     assert(!inference_thread_.joinable() ||
            std::this_thread::get_id() != inference_thread_.get_id());
@@ -229,6 +296,26 @@ Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
     auto future = done->get_future();
     if (!request_mailbox_.push_command(RegisterToolCmd{std::move(definition), std::move(done)})) {
         return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    return future.get();
+}
+
+Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition,
+                                           std::chrono::nanoseconds timeout) {
+    assert(!inference_thread_.joinable() ||
+           std::this_thread::get_id() != inference_thread_.get_id());
+
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<Expected<void>>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(RegisterToolCmd{std::move(definition), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error("register_tool"));
     }
     return future.get();
 }
@@ -249,6 +336,30 @@ Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> d
     auto future = done->get_future();
     if (!request_mailbox_.push_command(RegisterToolsCmd{std::move(definitions), std::move(done)})) {
         return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    return future.get();
+}
+
+Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions,
+                                            std::chrono::nanoseconds timeout) {
+    assert(!inference_thread_.joinable() ||
+           std::this_thread::get_id() != inference_thread_.get_id());
+
+    if (definitions.empty()) {
+        return {};
+    }
+
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<Expected<void>>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(RegisterToolsCmd{std::move(definitions), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error("register_tools"));
     }
     return future.get();
 }
@@ -435,6 +546,7 @@ RequestHandle<Result> AgentRuntime::make_immediate_error_handle(Error error) {
                                  0,
                                  0,
                                  &await_immediate_handle<Result>,
+                                 &await_immediate_handle_for<Result>,
                                  &ready_immediate_handle<Result>,
                                  &release_immediate_handle<Result>};
 }
@@ -462,6 +574,7 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
                                        reservation->slot,
                                        reservation->generation,
                                        &RequestSlots::await_text_handle,
+                                       &RequestSlots::await_text_handle_for,
                                        &RequestSlots::ready_handle,
                                        &RequestSlots::release_handle};
     } else {
@@ -470,6 +583,7 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
                                        reservation->slot,
                                        reservation->generation,
                                        &RequestSlots::await_extraction_handle,
+                                       &RequestSlots::await_extraction_handle_for,
                                        &RequestSlots::ready_handle,
                                        &RequestSlots::release_handle};
     }

@@ -21,16 +21,15 @@ using WorkItem = std::variant<QueuedRequest, Command>;
 /**
  * @brief Thread-safe dual-lane mailbox for the agent runtime.
  *
- * The request lane is bounded by a configurable capacity. The command lane is
- * unbounded because control commands are rare and callers block on their result.
- * The pop order prioritizes pending commands over queued requests so that
- * model-affecting operations are applied between requests, never mid-generation.
+ * Both lanes are unbounded queues. Backpressure for requests is managed
+ * externally by `RequestSlots`; the command lane is unbounded because control
+ * commands are rare and callers block on their result. The pop order
+ * prioritizes pending commands over queued requests so that model-affecting
+ * operations are applied between requests, never mid-generation.
  */
 class RuntimeMailbox {
   public:
-    explicit RuntimeMailbox(size_t request_capacity = 0) : shutdown_(false) {
-        (void)request_capacity;
-    }
+    RuntimeMailbox() : shutdown_(false) {}
 
     /**
      * @brief Enqueues one request when capacity and shutdown state permit it.
