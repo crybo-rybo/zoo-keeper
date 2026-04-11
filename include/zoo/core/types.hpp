@@ -515,7 +515,13 @@ struct ModelConfig {
             return std::unexpected(
                 Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
         }
-        if (!std::filesystem::exists(model_path)) {
+        std::error_code ec;
+        const bool model_exists = std::filesystem::exists(model_path, ec);
+        if (ec) {
+            return std::unexpected(Error{ErrorCode::InvalidModelPath,
+                                         "Cannot access model path: " + model_path, ec.message()});
+        }
+        if (!model_exists) {
             return std::unexpected(
                 Error{ErrorCode::InvalidModelPath, "Model file does not exist: " + model_path});
         }
@@ -688,23 +694,10 @@ struct ExtractionResponse {
  */
 using RequestId = uint64_t;
 
-namespace detail {
-
-inline Role message_role(const MessageView& message) noexcept {
-    return message.role();
-}
-
-inline Role message_role(const OwnedMessage& message) noexcept {
-    return message.role;
-}
-
-} // namespace detail
-
 /**
  * @brief Validates whether a new message role can be appended to an existing history.
  */
-template <typename History>
-[[nodiscard]] inline Expected<void> validate_role_sequence(const History& messages, Role role) {
+[[nodiscard]] inline Expected<void> validate_role_sequence(ConversationView messages, Role role) {
     if (messages.size() == 0) {
         if (role == Role::Tool) {
             return std::unexpected(Error{ErrorCode::InvalidMessageSequence,
@@ -718,7 +711,7 @@ template <typename History>
                                      "System message only allowed at the beginning"});
     }
 
-    const Role last_role = detail::message_role(messages[messages.size() - 1]);
+    const Role last_role = messages[messages.size() - 1].role();
     if (role == last_role && role != Role::Tool) {
         return std::unexpected(
             Error{ErrorCode::InvalidMessageSequence,
@@ -726,6 +719,38 @@ template <typename History>
     }
 
     return {};
+}
+
+/**
+ * @brief Validates whether a new message role can be appended to an existing history snapshot.
+ */
+[[nodiscard]] inline Expected<void> validate_role_sequence(const HistorySnapshot& messages,
+                                                           Role role) {
+    return validate_role_sequence(messages.view(), role);
+}
+
+/**
+ * @brief Validates whether a new message role can be appended to an owned message span.
+ */
+[[nodiscard]] inline Expected<void> validate_role_sequence(std::span<const OwnedMessage> messages,
+                                                           Role role) {
+    return validate_role_sequence(ConversationView{messages}, role);
+}
+
+/**
+ * @brief Validates whether a new message role can be appended to an owned message vector.
+ */
+[[nodiscard]] inline Expected<void>
+validate_role_sequence(const std::vector<OwnedMessage>& messages, Role role) {
+    return validate_role_sequence(std::span<const OwnedMessage>(messages), role);
+}
+
+/**
+ * @brief Validates whether a new message role can be appended to a borrowed message span.
+ */
+[[nodiscard]] inline Expected<void> validate_role_sequence(std::span<const MessageView> messages,
+                                                           Role role) {
+    return validate_role_sequence(ConversationView{messages}, role);
 }
 
 /**

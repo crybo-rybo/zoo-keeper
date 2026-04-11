@@ -3,6 +3,7 @@
  * @brief Unit tests for hub layer: identifier parsing, auto-config, catalog JSON.
  */
 
+#include "hub/download_validation.hpp"
 #include "hub/path_utils.hpp"
 #include "zoo/hub/huggingface.hpp"
 #include "zoo/hub/inspector.hpp"
@@ -335,6 +336,40 @@ TEST(HubPathTest, PreservesNestedRepositoryFilePaths) {
     ASSERT_TRUE(destination.has_value());
     EXPECT_EQ(*destination, std::filesystem::path("/tmp/zoo-store") / "owner" / "repo" / "subdir" /
                                 "model.Q4_K_M.gguf");
+}
+
+TEST(HubDownloadValidationTest, AcceptsFileWhenExpectedSizeMatches) {
+    TempDir temp_dir;
+    const auto model_path = temp_dir.path() / "model.gguf";
+    std::ofstream out(model_path, std::ios::binary);
+    out << "gguf";
+    out.close();
+
+    auto result = zoo::hub::detail::validate_downloaded_file(model_path, 4u);
+    EXPECT_TRUE(result.has_value()) << result.error().to_string();
+}
+
+TEST(HubDownloadValidationTest, RejectsSizeMismatchBeforeCatalogRegistration) {
+    TempDir temp_dir;
+    const auto model_path = temp_dir.path() / "model.gguf";
+    std::ofstream out(model_path, std::ios::binary);
+    out << "gguf";
+    out.close();
+
+    auto result = zoo::hub::detail::validate_downloaded_file(model_path, 8u);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::DownloadFailed);
+}
+
+TEST(HubDownloadValidationTest, RejectsEmptyFileWithoutExpectedSize) {
+    TempDir temp_dir;
+    const auto model_path = temp_dir.path() / "model.gguf";
+    std::ofstream out(model_path, std::ios::binary);
+    out.close();
+
+    auto result = zoo::hub::detail::validate_downloaded_file(model_path, std::nullopt);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::DownloadFailed);
 }
 
 // ---- ModelStore catalog persistence / validation ----

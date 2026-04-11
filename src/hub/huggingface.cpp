@@ -4,12 +4,18 @@
  */
 
 #include "zoo/hub/huggingface.hpp"
+#include "hub/download_validation.hpp"
 #include "hub/path_utils.hpp"
 
 #include <common.h>
 #include <download.h>
+#if defined(LLAMA_USE_HTTPLIB)
+#include <http.h>
+#endif
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -28,6 +34,42 @@ struct HuggingFaceClient::Impl {
 
     [[nodiscard]] common_hf_file_res resolve_hf_file(const std::string& repo_id_with_tag) const {
         return common_get_hf_file(repo_id_with_tag, config.token, false, make_headers());
+    }
+
+    [[nodiscard]] Expected<std::optional<uintmax_t>>
+    remote_file_size(const std::string& url) const {
+#if defined(LLAMA_USE_HTTPLIB)
+        try {
+            auto [cli, parts] = common_http_client(url);
+            httplib::Headers headers = {{"User-Agent", "llama-cpp"}};
+            for (const auto& header : make_headers()) {
+                headers.emplace(header.first, header.second);
+            }
+            cli.set_default_headers(headers);
+
+            const auto head = cli.Head(parts.path);
+            if (!head || head->status < 200 || head->status >= 300 ||
+                !head->has_header("Content-Length")) {
+                return std::optional<uintmax_t>{};
+            }
+
+            try {
+                return static_cast<uintmax_t>(
+                    std::stoull(head->get_header_value("Content-Length")));
+            } catch (const std::exception& e) {
+                return std::unexpected(Error{ErrorCode::DownloadFailed,
+                                             "Invalid Content-Length for download URL: " + url,
+                                             e.what()});
+            }
+        } catch (const std::exception& e) {
+            return std::unexpected(Error{ErrorCode::DownloadFailed,
+                                         "Failed to inspect download metadata for: " + url,
+                                         e.what()});
+        }
+#else
+        (void)url;
+        return std::optional<uintmax_t>{};
+#endif
     }
 };
 
@@ -121,6 +163,11 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
 
         const std::string url =
             "https://huggingface.co/" + hf_res.repo + "/resolve/main/" + hf_res.ggufFile;
+        auto expected_size = impl_->remote_file_size(url);
+        if (!expected_size) {
+            return std::unexpected(expected_size.error());
+        }
+
         const std::string cache_dir = fs_get_cache_directory();
         auto dest_path =
             detail::build_download_destination(cache_dir, hf_res.repo, hf_res.ggufFile);
@@ -150,6 +197,11 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
                                          "Failed to download model from: " + repo_id_with_tag});
         }
 
+        if (auto validation = detail::validate_downloaded_file(*dest_path, *expected_size);
+            !validation) {
+            return std::unexpected(validation.error());
+        }
+
         return dest_path->string();
     } catch (const std::exception& e) {
         return std::unexpected(
@@ -159,9 +211,21 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
 
 Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
                                                        const std::string& destination_path) {
+    auto expected_size = impl_->remote_file_size(url);
+    if (!expected_size) {
+        return std::unexpected(expected_size.error());
+    }
+
     // Ensure parent directory exists.
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(destination_path).parent_path(), ec);
+    if (ec) {
+        return std::unexpected(
+            Error{ErrorCode::FilesystemError,
+                  "Failed to create download directory: " +
+                      std::filesystem::path(destination_path).parent_path().string(),
+                  ec.message()});
+    }
 
     int status = common_download_file_single(url, destination_path, impl_->config.token, false,
                                              impl_->make_headers());
@@ -174,6 +238,11 @@ Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
         return std::unexpected(
             Error{ErrorCode::DownloadFailed,
                   "Download returned HTTP " + std::to_string(status) + " for: " + url});
+    }
+
+    if (auto validation = detail::validate_downloaded_file(destination_path, *expected_size);
+        !validation) {
+        return std::unexpected(validation.error());
     }
 
     return destination_path;

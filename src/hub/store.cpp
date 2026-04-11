@@ -4,6 +4,7 @@
  */
 
 #include "zoo/hub/store.hpp"
+#include "hub/download_validation.hpp"
 #include "hub/path_utils.hpp"
 #include "hub/store_json.hpp"
 #include "zoo/hub/inspector.hpp"
@@ -411,6 +412,10 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
             }
             source_url = *url;
         }
+    }
+
+    if (auto validation = detail::validate_downloaded_file(local_path); !validation) {
+        return std::unexpected(validation.error());
     }
 
     auto entry = add(local_path, std::move(aliases));
