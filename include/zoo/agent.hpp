@@ -7,6 +7,7 @@
 
 #include "core/types.hpp"
 #include "tools/registry.hpp"
+#include <chrono>
 #include <concepts>
 #include <initializer_list>
 #include <memory>
@@ -26,15 +27,18 @@ namespace zoo {
 template <typename Result> class RequestHandle {
   public:
     using AwaitFn = Expected<Result> (*)(void*, uint32_t, uint32_t);
+    using AwaitForFn = Expected<Result> (*)(void*, uint32_t, uint32_t, std::chrono::nanoseconds,
+                                            bool*);
     using ReadyFn = bool (*)(const void*, uint32_t, uint32_t);
     using ReleaseFn = void (*)(void*, uint32_t, uint32_t);
 
     RequestHandle() noexcept = default;
 
     RequestHandle(RequestId id, std::shared_ptr<void> state, uint32_t slot, uint32_t generation,
-                  AwaitFn await_fn, ReadyFn ready_fn, ReleaseFn release_fn) noexcept
+                  AwaitFn await_fn, AwaitForFn await_for_fn, ReadyFn ready_fn,
+                  ReleaseFn release_fn) noexcept
         : id_(id), state_(std::move(state)), slot_(slot), generation_(generation), await_(await_fn),
-          ready_(ready_fn), release_(release_fn) {}
+          await_for_(await_for_fn), ready_(ready_fn), release_(release_fn) {}
 
     ~RequestHandle() {
         reset();
@@ -55,6 +59,7 @@ template <typename Result> class RequestHandle {
         slot_ = other.slot_;
         generation_ = other.generation_;
         await_ = other.await_;
+        await_for_ = other.await_for_;
         ready_ = other.ready_;
         release_ = other.release_;
 
@@ -62,6 +67,7 @@ template <typename Result> class RequestHandle {
         other.slot_ = 0;
         other.generation_ = 0;
         other.await_ = nullptr;
+        other.await_for_ = nullptr;
         other.ready_ = nullptr;
         other.release_ = nullptr;
         return *this;
@@ -79,7 +85,8 @@ template <typename Result> class RequestHandle {
     }
 
     [[nodiscard]] bool valid() const noexcept {
-        return static_cast<bool>(state_) && await_ != nullptr && release_ != nullptr;
+        return static_cast<bool>(state_) && await_ != nullptr && await_for_ != nullptr &&
+               ready_ != nullptr && release_ != nullptr;
     }
 
     [[nodiscard]] bool ready() const {
@@ -93,13 +100,24 @@ template <typename Result> class RequestHandle {
         }
 
         auto result = await_(state_.get(), slot_, generation_);
-        id_ = 0;
-        state_.reset();
-        slot_ = 0;
-        generation_ = 0;
-        await_ = nullptr;
-        ready_ = nullptr;
-        release_ = nullptr;
+        clear_handle();
+        return result;
+    }
+
+    template <typename Rep, typename Period>
+    Expected<Result> await_result(std::chrono::duration<Rep, Period> timeout) {
+        if (!valid()) {
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
+        }
+
+        bool completed = false;
+        auto result =
+            await_for_(state_.get(), slot_, generation_,
+                       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout), &completed);
+        if (completed) {
+            clear_handle();
+        }
         return result;
     }
 
@@ -108,21 +126,27 @@ template <typename Result> class RequestHandle {
             return;
         }
         release_(state_.get(), slot_, generation_);
+        clear_handle();
+    }
+
+  private:
+    void clear_handle() noexcept {
         id_ = 0;
         state_.reset();
         slot_ = 0;
         generation_ = 0;
         await_ = nullptr;
+        await_for_ = nullptr;
         ready_ = nullptr;
         release_ = nullptr;
     }
 
-  private:
     RequestId id_ = 0;
     std::shared_ptr<void> state_;
     uint32_t slot_ = 0;
     uint32_t generation_ = 0;
     AwaitFn await_ = nullptr;
+    AwaitForFn await_for_ = nullptr;
     ReadyFn ready_ = nullptr;
     ReleaseFn release_ = nullptr;
 };
@@ -201,6 +225,12 @@ class Agent {
      */
     void set_system_prompt(std::string_view prompt);
 
+    /**
+     * @brief Replaces the current system prompt, returning RequestTimeout if the command waits too
+     * long.
+     */
+    Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
+
     /// Stops the worker thread and prevents additional requests from being processed.
     void stop();
 
@@ -222,14 +252,28 @@ class Agent {
     /// Returns a history snapshot taken synchronously on the inference thread.
     [[nodiscard]] HistorySnapshot get_history() const;
 
+    /// Returns a history snapshot, or RequestTimeout if the command waits too long.
+    [[nodiscard]] Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
+
     /// Clears history synchronously on the inference thread before later queued work.
     void clear_history();
+
+    /// Clears history, returning RequestTimeout if the command waits too long.
+    Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::initializer_list<std::string> param_names, Func func) {
         return register_tool(name, description, std::vector<std::string>(param_names),
                              std::move(func));
+    }
+
+    template <typename Func>
+    Expected<void> register_tool(const std::string& name, const std::string& description,
+                                 std::initializer_list<std::string> param_names, Func func,
+                                 std::chrono::nanoseconds timeout) {
+        return register_tool(name, description, std::vector<std::string>(param_names),
+                             std::move(func), timeout);
     }
 
     template <typename Func>
@@ -244,6 +288,19 @@ class Agent {
         return register_tool(std::move(*definition));
     }
 
+    template <typename Func>
+    Expected<void> register_tool(const std::string& name, const std::string& description,
+                                 std::span<const std::string> param_names, Func func,
+                                 std::chrono::nanoseconds timeout) {
+        auto definition = tools::detail::make_tool_definition(
+            name, description, std::vector<std::string>(param_names.begin(), param_names.end()),
+            std::move(func));
+        if (!definition) {
+            return std::unexpected(definition.error());
+        }
+        return register_tool(std::move(*definition), timeout);
+    }
+
     template <typename Handler>
         requires tools::detail::is_json_handler_like_v<Handler>
     Expected<void> register_tool(const std::string& name, const std::string& description,
@@ -252,10 +309,24 @@ class Agent {
                              tools::ToolHandler(std::move(handler)));
     }
 
+    template <typename Handler>
+        requires tools::detail::is_json_handler_like_v<Handler>
+    Expected<void> register_tool(const std::string& name, const std::string& description,
+                                 const nlohmann::json& schema, Handler handler,
+                                 std::chrono::nanoseconds timeout) {
+        return register_tool(name, description, nlohmann::json(schema),
+                             tools::ToolHandler(std::move(handler)), timeout);
+    }
+
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  nlohmann::json schema, tools::ToolHandler handler);
+    Expected<void> register_tool(const std::string& name, const std::string& description,
+                                 nlohmann::json schema, tools::ToolHandler handler,
+                                 std::chrono::nanoseconds timeout);
 
     Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
+    Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions,
+                                  std::chrono::nanoseconds timeout);
 
     [[nodiscard]] size_t tool_count() const noexcept;
 
@@ -265,6 +336,8 @@ class Agent {
     Agent(ModelConfig model_config, AgentConfig agent_config, GenerationOptions default_generation,
           std::unique_ptr<Impl> impl);
     Expected<void> register_tool(tools::ToolDefinition definition);
+    Expected<void> register_tool(tools::ToolDefinition definition,
+                                 std::chrono::nanoseconds timeout);
 
     ModelConfig model_config_;
     AgentConfig agent_config_;

@@ -60,17 +60,11 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
     }
 
     ScopeExit grammar_guard([this, had_tool_calling] {
-        backend_->clear_tool_grammar();
         if (had_tool_calling) {
-            // Restore native tool calling by re-sending tool metadata.
-            auto metadata = tool_registry_.get_all_tool_metadata();
-            std::vector<CoreToolInfo> tools;
-            tools.reserve(metadata.size());
-            for (const auto& tm : metadata) {
-                tools.push_back(CoreToolInfo{tm.name, tm.description, tm.parameters_schema.dump()});
-            }
-            bool restored = backend_->set_tool_calling(tools);
-            tool_grammar_active_.store(restored, std::memory_order_release);
+            refresh_tool_calling_state();
+        } else {
+            backend_->clear_tool_grammar();
+            tool_grammar_active_.store(false, std::memory_order_release);
         }
     });
 

@@ -58,14 +58,21 @@ class AgentRuntime {
 
     void cancel(RequestId id);
     void set_system_prompt(std::string_view prompt);
+    Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
     void stop();
     bool is_running() const noexcept;
 
     HistorySnapshot get_history() const;
+    Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
     void clear_history();
+    Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
     Expected<void> register_tool(tools::ToolDefinition definition);
+    Expected<void> register_tool(tools::ToolDefinition definition,
+                                 std::chrono::nanoseconds timeout);
     Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
+    Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions,
+                                  std::chrono::nanoseconds timeout);
     size_t tool_count() const noexcept;
 
   private:
@@ -77,7 +84,7 @@ class AgentRuntime {
 
     void fail_pending(const Error& error);
     static void resolve_command_on_shutdown(Command& cmd);
-    void update_tool_calling();
+    bool refresh_tool_calling_state();
     void enforce_history_limit();
     template <typename Result> RequestHandle<Result> make_immediate_error_handle(Error error);
     template <typename Result> RequestHandle<Result> enqueue_request(RequestPayload payload);

@@ -4,6 +4,7 @@
  */
 
 #include "zoo/hub/store.hpp"
+#include "hub/download_validation.hpp"
 #include "hub/path_utils.hpp"
 #include "hub/store_json.hpp"
 #include "zoo/hub/inspector.hpp"
@@ -27,7 +28,7 @@ namespace zoo::hub {
 namespace {
 
 std::string generate_id() {
-    static std::mt19937 rng(std::random_device{}());
+    static thread_local std::mt19937 rng(std::random_device{}());
     static constexpr char kHexDigits[] = "0123456789abcdef";
     std::string id;
     id.reserve(32);
@@ -40,8 +41,10 @@ std::string generate_id() {
 std::string now_iso8601() {
     const auto now = std::chrono::system_clock::now();
     const auto time = std::chrono::system_clock::to_time_t(now);
+    std::tm buf{};
+    gmtime_r(&time, &buf);
     std::ostringstream ss;
-    ss << std::put_time(std::gmtime(&time), "%FT%TZ");
+    ss << std::put_time(&buf, "%FT%TZ");
     return ss.str();
 }
 
@@ -409,6 +412,10 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
             }
             source_url = *url;
         }
+    }
+
+    if (auto validation = detail::validate_downloaded_file(local_path); !validation) {
+        return std::unexpected(validation.error());
     }
 
     auto entry = add(local_path, std::move(aliases));

@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 #include <zoo/core/types.hpp>
+#include <zoo/tools/types.hpp>
 
 namespace zoo::internal::agent {
 
@@ -33,15 +34,21 @@ struct ClearHistoryCmd {
     std::shared_ptr<std::promise<void>> done;
 };
 
-/// Configures template-driven tool calling from tool metadata.
-struct RefreshToolCallingCmd {
-    std::vector<CoreToolInfo> tools;
-    std::shared_ptr<std::promise<bool>> done;
+/// Registers a single tool on the inference thread.
+struct RegisterToolCmd {
+    tools::ToolDefinition definition;
+    std::shared_ptr<std::promise<Expected<void>>> done;
+};
+
+/// Registers a batch of tools on the inference thread.
+struct RegisterToolsCmd {
+    std::vector<tools::ToolDefinition> definitions;
+    std::shared_ptr<std::promise<Expected<void>>> done;
 };
 
 /// Discriminated union of all control commands the runtime accepts.
-using Command =
-    std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd, RefreshToolCallingCmd>;
+using Command = std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd, RegisterToolCmd,
+                             RegisterToolsCmd>;
 
 /// Helper for exhaustive std::visit with overloaded lambdas.
 template <class... Ts> struct overloaded : Ts... {

@@ -56,13 +56,7 @@ void Model::replace_history(HistorySnapshot snapshot) {
     for (const auto& m : impl_->messages_) {
         impl_->estimated_tokens_ += estimate_message_tokens(m);
     }
-    // Invalidate the rendered-prompt cache and reset the committed position so
-    // the next generation re-renders from scratch, but intentionally skip
-    // clear_kv_cache(): the caller is restoring a previously valid history, and
-    // any stale KV entries will be overwritten when the next full prompt is
-    // decoded starting at position 0.
-    impl_->prompt_state_.dirty = true;
-    impl_->prompt_state_.committed_prompt_len = 0;
+    note_history_rewrite();
 }
 
 HistorySnapshot Model::swap_history(HistorySnapshot snapshot) {
