@@ -152,23 +152,18 @@ zoo_enable_sanitizers(zoo)
 # Coverage
 zoo_enable_coverage(zoo)
 
-# Tests
-if(ZOO_BUILD_TESTS)
+# enable_testing() must be called at the project root so that
+# `ctest --test-dir build` discovers tests registered in subdirectories.
+if(ZOO_BUILD_TESTS OR ZOO_BUILD_INTEGRATION_TESTS)
     enable_testing()
-    add_subdirectory(tests)
 endif()
 
-# Examples
-if(ZOO_BUILD_EXAMPLES)
-    add_subdirectory(examples)
-endif()
+# Subdirectories guard their own targets so that flags like
+# ZOO_BUILD_INTEGRATION_TESTS work without also requiring ZOO_BUILD_TESTS.
+add_subdirectory(tests)
+add_subdirectory(examples)
+add_subdirectory(benchmarks)
 
-# Benchmarks
-if(ZOO_BUILD_BENCHMARKS)
-    add_subdirectory(benchmarks)
-endif()
-
-# Documentation
 if(ZOO_BUILD_DOCS)
     include(cmake/Doxygen.cmake)
 endif()

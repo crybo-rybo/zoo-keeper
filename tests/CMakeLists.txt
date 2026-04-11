@@ -1,58 +1,64 @@
 cmake_minimum_required(VERSION 3.18)
 
-include(GoogleTest)
-
-set(ZOO_TEST_SOURCES
-    unit/test_types.cpp
-    unit/test_tool_registry.cpp
-    unit/test_tool_parser.cpp
-    unit/test_schema_grammar.cpp
-    unit/test_error_recovery.cpp
-    unit/test_batch.cpp
-    unit/test_prompt_bookkeeping.cpp
-    unit/test_agent_mailbox.cpp
-    unit/test_agent_runtime.cpp
-    unit/test_extraction.cpp
-    unit/test_request_tracker.cpp
-    unit/test_model_tool_calling.cpp
-    unit/test_token_accounting.cpp
-    unit/test_streaming_filter.cpp
-    unit/test_callback_dispatcher.cpp
-)
-
-if(ZOO_BUILD_HUB)
-    list(APPEND ZOO_TEST_SOURCES unit/test_hub.cpp)
+if(NOT ZOO_BUILD_TESTS AND NOT ZOO_BUILD_INTEGRATION_TESTS)
+    return()
 endif()
 
-add_executable(zoo_tests ${ZOO_TEST_SOURCES})
+include(GoogleTest)
 
-target_link_libraries(zoo_tests
-    PRIVATE
-        zoo
-        GTest::gtest
-        GTest::gtest_main
-        GTest::gmock
-)
+if(ZOO_BUILD_TESTS)
+    set(ZOO_TEST_SOURCES
+        unit/test_types.cpp
+        unit/test_tool_registry.cpp
+        unit/test_tool_parser.cpp
+        unit/test_schema_grammar.cpp
+        unit/test_error_recovery.cpp
+        unit/test_batch.cpp
+        unit/test_prompt_bookkeeping.cpp
+        unit/test_agent_mailbox.cpp
+        unit/test_agent_runtime.cpp
+        unit/test_extraction.cpp
+        unit/test_request_tracker.cpp
+        unit/test_model_tool_calling.cpp
+        unit/test_token_accounting.cpp
+        unit/test_streaming_filter.cpp
+        unit/test_callback_dispatcher.cpp
+    )
 
-target_include_directories(zoo_tests
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-        ${CMAKE_SOURCE_DIR}/src
-)
+    if(ZOO_BUILD_HUB)
+        list(APPEND ZOO_TEST_SOURCES unit/test_hub.cpp)
+    endif()
 
-zoo_mark_llama_includes_as_system(zoo_tests)
+    add_executable(zoo_tests ${ZOO_TEST_SOURCES})
 
-gtest_discover_tests(zoo_tests
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    PROPERTIES
-        LABELS "unit"
-)
+    target_link_libraries(zoo_tests
+        PRIVATE
+            zoo
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+    )
 
-zoo_set_warnings(zoo_tests PRIVATE)
-zoo_enable_warnings_as_errors(zoo_tests)
-zoo_enable_coverage(zoo_tests)
-zoo_enable_sanitizers(zoo_tests)
+    target_include_directories(zoo_tests
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    zoo_mark_llama_includes_as_system(zoo_tests)
+
+    gtest_discover_tests(zoo_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        PROPERTIES
+            LABELS "unit"
+    )
+
+    zoo_set_warnings(zoo_tests PRIVATE)
+    zoo_enable_warnings_as_errors(zoo_tests)
+    zoo_enable_coverage(zoo_tests)
+    zoo_enable_sanitizers(zoo_tests)
+endif()
 
 if(ZOO_BUILD_INTEGRATION_TESTS)
     add_subdirectory(integration)

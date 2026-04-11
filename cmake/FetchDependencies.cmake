@@ -67,8 +67,8 @@ else()
         "`-DZOO_FETCH_LLAMA=ON`.")
 endif()
 
-# GoogleTest (only if building tests)
-if(ZOO_BUILD_TESTS)
+# GoogleTest (needed by unit tests, integration tests, or both)
+if(ZOO_BUILD_TESTS OR ZOO_BUILD_INTEGRATION_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
         googletest
