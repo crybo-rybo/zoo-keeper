@@ -11,6 +11,7 @@ tests/cmake_test_discovery_*
 cmake_test_discovery_*
 plans/**
 docs/superpowers/**
+.secret/**
 .DS_Store
 *.swp
 *.swo

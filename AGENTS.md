@@ -29,6 +29,10 @@ scripts/build -DZOO_ENABLE_SANITIZERS=ON
 scripts/build -DZOO_ENABLE_COVERAGE=ON
 ```
 
+## Integration testing
+
+See `.secret/integration-testing.md` for local model paths, integration test commands, and `demo_chat` verification steps. The default integration model is `Qwen3-8B-Q4_K_M.gguf`.
+
 ## Project structure
 
 - `include/zoo/` — public API boundary
@@ -88,6 +92,42 @@ scripts/build -DZOO_ENABLE_COVERAGE=ON
 - Commit `.DS_Store`, build artifacts, or secrets
 </AgentBoundaries>
 
+## Changeset discipline
+
+This is a maturing ~8.5K SLOC codebase. Agents must treat every added line as a cost.
+
+### Hard rules
+- **< 150 SLOC added per PR** (excluding tests). Exceeding this requires splitting into multiple PRs
+- **One concern per PR** — never bundle a refactor with a feature or fix
+- **Read before writing.** Before modifying any file, read it and at least 2 files that interact with it. Do not propose changes to code you haven't read
+- **Search for prior art.** `grep`/`glob` the codebase for similar patterns before introducing new ones. If the codebase solves an analogous problem, follow that pattern
+
+### Prefer (in order)
+1. Deleting code that is no longer needed
+2. Modifying existing code to handle the new case
+3. Adding code to an existing file
+4. Creating a new file (last resort — justify why existing files won't work)
+
+### Do not add
+- New abstractions used in only one place — inline instead
+- Wrapper types that forward to an inner type without meaningful logic
+- Configuration for behavior with one correct value
+- Comments restating what code does (only comment *why*)
+- Error handling for states the architecture guarantees cannot occur
+- "Improvement" drive-bys — don't clean up code adjacent to your change in the same PR
+
+### How to split large changes
+- "Prepare" commits (rename, move, add fixtures) land before "implement" commits
+- Public header changes can be a separate PR from their implementation
+- Formatting/style fixes go in their own commit, never mixed with logic
+
+### Orientation checklist (before writing any code)
+1. Identify which layer (Core / Tools / Agent / Hub) your change belongs to
+2. Read the relevant public header(s) in `include/zoo/`
+3. Read the implementation file(s) in `src/` you intend to modify
+4. Check `tests/unit/` for existing test coverage of that area
+5. Confirm your change respects layer boundaries (no upward dependencies)
+
 ## Commit conventions
 
 - Concise, imperative, descriptive (e.g. `fix EOG token detection`)
@@ -97,4 +137,5 @@ scripts/build -DZOO_ENABLE_COVERAGE=ON
 ## Definition of done
 
 Change is done when: behavior is observable, `scripts/test` passes,
-`scripts/format` produces no diff, and builds are warning-free.
+`scripts/format` produces no diff, builds are warning-free, and the
+PR is under the SLOC limit with a single logical concern.

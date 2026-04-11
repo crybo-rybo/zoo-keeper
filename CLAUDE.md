@@ -26,6 +26,10 @@ scripts/build.sh -DZOO_ENABLE_SANITIZERS=ON
 scripts/build.sh -DZOO_ENABLE_COVERAGE=ON
 ```
 
+## Integration Testing
+
+See `.secret/integration-testing.md` for local model paths, integration test commands, and `demo_chat` verification steps. The default integration model is `Qwen3-8B-Q4_K_M.gguf`.
+
 ## Architecture
 
 C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Four layers — each depends only on layers below it:
@@ -89,6 +93,38 @@ scripts/test.sh      # All tests must pass
 - Push directly to `main`
 - Commit `.DS_Store`, build artifacts, or secrets
 </AgentBoundaries>
+
+## Changeset Discipline
+
+This codebase is approaching maturity. Every change must justify its existence. The default answer to "should I add this?" is **no**.
+
+### Size constraints
+- Target **< 150 SLOC added** per PR (excluding tests). If a change is growing beyond this, split it
+- One logical concern per changeset — do not bundle refactors with features or fixes
+- Refactoring PRs add zero net features. Feature PRs do minimal refactoring
+
+### Prefer modification over addition
+- Modify existing files before creating new ones
+- Extend existing abstractions before introducing new ones
+- Delete dead code rather than working around it
+- If a helper/utility would only be used once, inline it
+
+### Before writing code
+- **Read first.** Understand the 2–3 files surrounding your change. Check for existing patterns that solve your problem
+- Search for prior art: if the codebase already handles a similar case, follow that pattern exactly
+- Check if the problem can be solved by removing code instead of adding it
+
+### What not to add
+- Abstractions for hypothetical future use
+- Wrapper types that just forward to an inner type
+- Configuration options for behavior that has one correct value
+- Comments restating what the code does — only comment *why*
+- Defensive checks for states that internal code guarantees cannot happen
+
+### Splitting work
+- Separate "prepare" commits (moving code, renaming, adding test fixtures) from "implement" commits
+- When touching a file with poor formatting or style, fix that in a separate commit — not mixed with logic changes
+- If a change requires modifying a public header AND its implementation, consider whether the header change can land first as a smaller PR
 
 ## Git Workflow
 
