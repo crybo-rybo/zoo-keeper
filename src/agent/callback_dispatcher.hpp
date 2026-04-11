@@ -23,8 +23,9 @@ namespace zoo::internal::agent {
  *
  * The inference thread calls `dispatch()` to enqueue a callback invocation
  * without blocking on the user's callback. The dispatcher thread executes
- * callbacks in FIFO order. `drain()` blocks until all queued callbacks have
- * been executed, providing a synchronization point between generation passes.
+ * callbacks in FIFO order. `drain()` blocks until queued callbacks have been
+ * executed or skipped after a callback failure, providing a synchronization point
+ * between generation passes.
  */
 class CallbackDispatcher {
   public:
@@ -61,7 +62,7 @@ class CallbackDispatcher {
     }
 
     /**
-     * @brief Blocks until all previously dispatched callbacks have executed.
+     * @brief Blocks until all previously dispatched callbacks have completed or been skipped.
      */
     void drain() {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -86,6 +87,12 @@ class CallbackDispatcher {
             cv_.wait(lock, [this] { return shutdown_ || !queue_.empty(); });
 
             while (!queue_.empty()) {
+                if (failure_) {
+                    queue_ = {};
+                    drain_cv_.notify_all();
+                    break;
+                }
+
                 auto entry = std::move(queue_.front());
                 queue_.pop();
                 executing_ = true;

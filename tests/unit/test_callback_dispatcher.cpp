@@ -11,8 +11,10 @@
 #include <cstdlib>
 #include <functional>
 #include <future>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -127,6 +129,36 @@ TEST(CallbackDispatcherTest, ThrowingCallbackDoesNotTerminateProcess) {
             std::exit(recovered ? 0 : 3);
         }(),
         ::testing::ExitedWithCode(0), "");
+}
+
+TEST(CallbackDispatcherTest, SkipsQueuedCallbacksAfterFirstFailureUntilDrain) {
+    CallbackDispatcher dispatcher;
+
+    std::promise<void> first_callback_entered;
+    std::promise<void> release_first_callback;
+    auto release_future = release_first_callback.get_future().share();
+    std::atomic<int> attempts{0};
+
+    std::function<void(std::string_view)> failing = [&](std::string_view) {
+        const int invocation = attempts.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (invocation == 1) {
+            first_callback_entered.set_value();
+            release_future.wait();
+        }
+        throw std::runtime_error("boom");
+    };
+
+    dispatcher.dispatch(failing, "first");
+    ASSERT_EQ(first_callback_entered.get_future().wait_for(2s), std::future_status::ready);
+
+    for (int i = 0; i < 5; ++i) {
+        dispatcher.dispatch(failing, "queued");
+    }
+
+    release_first_callback.set_value();
+
+    EXPECT_THROW(dispatcher.drain(), std::runtime_error);
+    EXPECT_EQ(attempts.load(std::memory_order_relaxed), 1);
 }
 
 } // namespace
