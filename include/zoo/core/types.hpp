@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -515,7 +516,8 @@ struct ModelConfig {
             return std::unexpected(
                 Error{ErrorCode::InvalidModelPath, "Model path cannot be empty"});
         }
-        if (!std::filesystem::exists(model_path)) {
+        std::error_code fs_ec;
+        if (!std::filesystem::exists(model_path, fs_ec) || fs_ec) {
             return std::unexpected(
                 Error{ErrorCode::InvalidModelPath, "Model file does not exist: " + model_path});
         }
@@ -701,9 +703,22 @@ inline Role message_role(const OwnedMessage& message) noexcept {
 } // namespace detail
 
 /**
+ * @brief Constrains types usable as message sequences for role validation.
+ *
+ * Satisfied by `HistorySnapshot`, `std::vector<OwnedMessage>`, and any other
+ * type that provides `size()` and `operator[]` yielding something
+ * `detail::message_role()` can accept.
+ */
+template <typename T>
+concept MessageSequenceLike = requires(const T& seq, size_t i) {
+    { seq.size() } -> std::convertible_to<size_t>;
+    { detail::message_role(seq[i]) } -> std::same_as<Role>;
+};
+
+/**
  * @brief Validates whether a new message role can be appended to an existing history.
  */
-template <typename History>
+template <MessageSequenceLike History>
 [[nodiscard]] inline Expected<void> validate_role_sequence(const History& messages, Role role) {
     if (messages.size() == 0) {
         if (role == Role::Tool) {

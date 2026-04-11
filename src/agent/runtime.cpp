@@ -463,7 +463,8 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
                                        reservation->generation,
                                        &RequestSlots::await_text_handle,
                                        &RequestSlots::ready_handle,
-                                       &RequestSlots::release_handle};
+                                       &RequestSlots::release_handle,
+                                       &RequestSlots::await_text_timed_handle};
     } else {
         handle = RequestHandle<Result>{reservation->id,
                                        request_slots_,
@@ -471,7 +472,8 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
                                        reservation->generation,
                                        &RequestSlots::await_extraction_handle,
                                        &RequestSlots::ready_handle,
-                                       &RequestSlots::release_handle};
+                                       &RequestSlots::release_handle,
+                                       &RequestSlots::await_extraction_timed_handle};
     }
 
     if (!request_mailbox_.push_request(QueuedRequest{reservation->slot, reservation->generation})) {

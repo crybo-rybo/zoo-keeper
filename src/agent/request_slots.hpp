@@ -199,12 +199,27 @@ class RequestSlots {
 
     [[nodiscard]] static Expected<TextResponse> await_text_handle(void* state, uint32_t slot,
                                                                   uint32_t generation) {
-        return static_cast<RequestSlots*>(state)->await_text(slot, generation);
+        return static_cast<RequestSlots*>(state)->await_result<TextResponse>(slot, generation);
     }
 
     [[nodiscard]] static Expected<ExtractionResponse>
     await_extraction_handle(void* state, uint32_t slot, uint32_t generation) {
-        return static_cast<RequestSlots*>(state)->await_extraction(slot, generation);
+        return static_cast<RequestSlots*>(state)->await_result<ExtractionResponse>(slot,
+                                                                                   generation);
+    }
+
+    [[nodiscard]] static Expected<TextResponse>
+    await_text_timed_handle(void* state, uint32_t slot, uint32_t generation,
+                            std::chrono::milliseconds timeout) {
+        return static_cast<RequestSlots*>(state)->await_result<TextResponse>(slot, generation,
+                                                                             timeout);
+    }
+
+    [[nodiscard]] static Expected<ExtractionResponse>
+    await_extraction_timed_handle(void* state, uint32_t slot, uint32_t generation,
+                                  std::chrono::milliseconds timeout) {
+        return static_cast<RequestSlots*>(state)->await_result<ExtractionResponse>(slot, generation,
+                                                                                   timeout);
     }
 
     static void release_handle(void* state, uint32_t slot, uint32_t generation) {
@@ -264,7 +279,10 @@ class RequestSlots {
         return slot.occupied && slot.generation == generation && slot.ready;
     }
 
-    [[nodiscard]] Expected<TextResponse> await_text(uint32_t slot_index, uint32_t generation) {
+    template <typename Result>
+    [[nodiscard]] Expected<Result>
+    await_result(uint32_t slot_index, uint32_t generation,
+                 std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
         if (slot_index >= slots_.size()) {
             return std::unexpected(
                 Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
@@ -272,39 +290,25 @@ class RequestSlots {
 
         Slot& slot = *slots_[slot_index];
         std::unique_lock<std::mutex> lock(slot.mutex);
-        slot.cv.wait(lock, [&slot, generation] {
+
+        auto pred = [&slot, generation] {
             return (!slot.occupied || slot.generation != generation) || slot.ready;
-        });
+        };
+
+        if (timeout) {
+            if (!slot.cv.wait_for(lock, *timeout, pred)) {
+                return std::unexpected(Error{ErrorCode::RequestTimeout, "Request timed out"});
+            }
+        } else {
+            slot.cv.wait(lock, pred);
+        }
 
         if (!slot.occupied || slot.generation != generation) {
             return std::unexpected(
                 Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
         }
 
-        auto result = std::move(std::get<Expected<TextResponse>>(slot.result));
-        reset_locked(slot);
-        return result;
-    }
-
-    [[nodiscard]] Expected<ExtractionResponse> await_extraction(uint32_t slot_index,
-                                                                uint32_t generation) {
-        if (slot_index >= slots_.size()) {
-            return std::unexpected(
-                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
-        }
-
-        Slot& slot = *slots_[slot_index];
-        std::unique_lock<std::mutex> lock(slot.mutex);
-        slot.cv.wait(lock, [&slot, generation] {
-            return (!slot.occupied || slot.generation != generation) || slot.ready;
-        });
-
-        if (!slot.occupied || slot.generation != generation) {
-            return std::unexpected(
-                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
-        }
-
-        auto result = std::move(std::get<Expected<ExtractionResponse>>(slot.result));
+        auto result = std::move(std::get<Expected<Result>>(slot.result));
         reset_locked(slot);
         return result;
     }

@@ -413,6 +413,15 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
         }
     }
 
+    // Verify downloaded file exists and has non-zero size before registering.
+    std::error_code verify_ec;
+    auto file_size = std::filesystem::file_size(local_path, verify_ec);
+    if (verify_ec || file_size == 0) {
+        return std::unexpected(Error{ErrorCode::DownloadFailed,
+                                     "Downloaded file is missing or empty: " + local_path,
+                                     verify_ec ? verify_ec.message() : "zero-length file"});
+    }
+
     auto entry = add(local_path, std::move(aliases));
     if (!entry) {
         return std::unexpected(entry.error());

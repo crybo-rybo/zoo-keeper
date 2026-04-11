@@ -7,6 +7,7 @@
 
 #include "core/types.hpp"
 #include "tools/registry.hpp"
+#include <chrono>
 #include <concepts>
 #include <initializer_list>
 #include <memory>
@@ -26,15 +27,17 @@ namespace zoo {
 template <typename Result> class RequestHandle {
   public:
     using AwaitFn = Expected<Result> (*)(void*, uint32_t, uint32_t);
+    using TimedAwaitFn = Expected<Result> (*)(void*, uint32_t, uint32_t, std::chrono::milliseconds);
     using ReadyFn = bool (*)(const void*, uint32_t, uint32_t);
     using ReleaseFn = void (*)(void*, uint32_t, uint32_t);
 
     RequestHandle() noexcept = default;
 
     RequestHandle(RequestId id, std::shared_ptr<void> state, uint32_t slot, uint32_t generation,
-                  AwaitFn await_fn, ReadyFn ready_fn, ReleaseFn release_fn) noexcept
+                  AwaitFn await_fn, ReadyFn ready_fn, ReleaseFn release_fn,
+                  TimedAwaitFn timed_await_fn = nullptr) noexcept
         : id_(id), state_(std::move(state)), slot_(slot), generation_(generation), await_(await_fn),
-          ready_(ready_fn), release_(release_fn) {}
+          ready_(ready_fn), release_(release_fn), timed_await_(timed_await_fn) {}
 
     ~RequestHandle() {
         reset();
@@ -57,13 +60,9 @@ template <typename Result> class RequestHandle {
         await_ = other.await_;
         ready_ = other.ready_;
         release_ = other.release_;
+        timed_await_ = other.timed_await_;
 
-        other.id_ = 0;
-        other.slot_ = 0;
-        other.generation_ = 0;
-        other.await_ = nullptr;
-        other.ready_ = nullptr;
-        other.release_ = nullptr;
+        other.invalidate();
         return *this;
     }
 
@@ -91,15 +90,26 @@ template <typename Result> class RequestHandle {
             return std::unexpected(
                 Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
         }
-
         auto result = await_(state_.get(), slot_, generation_);
-        id_ = 0;
-        state_.reset();
-        slot_ = 0;
-        generation_ = 0;
-        await_ = nullptr;
-        ready_ = nullptr;
-        release_ = nullptr;
+        invalidate();
+        return result;
+    }
+
+    /**
+     * @brief Blocks until the result is available or the timeout expires.
+     *
+     * Returns `RequestTimeout` if the deadline elapses before completion.
+     */
+    Expected<Result> await_result(std::chrono::milliseconds timeout) {
+        if (!valid()) {
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
+        }
+        if (!timed_await_) {
+            return await_result();
+        }
+        auto result = timed_await_(state_.get(), slot_, generation_, timeout);
+        invalidate();
         return result;
     }
 
@@ -108,6 +118,11 @@ template <typename Result> class RequestHandle {
             return;
         }
         release_(state_.get(), slot_, generation_);
+        invalidate();
+    }
+
+  private:
+    void invalidate() noexcept {
         id_ = 0;
         state_.reset();
         slot_ = 0;
@@ -115,9 +130,9 @@ template <typename Result> class RequestHandle {
         await_ = nullptr;
         ready_ = nullptr;
         release_ = nullptr;
+        timed_await_ = nullptr;
     }
 
-  private:
     RequestId id_ = 0;
     std::shared_ptr<void> state_;
     uint32_t slot_ = 0;
@@ -125,6 +140,7 @@ template <typename Result> class RequestHandle {
     AwaitFn await_ = nullptr;
     ReadyFn ready_ = nullptr;
     ReleaseFn release_ = nullptr;
+    TimedAwaitFn timed_await_ = nullptr;
 };
 
 /**
