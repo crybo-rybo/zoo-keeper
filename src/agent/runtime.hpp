@@ -58,14 +58,21 @@ class AgentRuntime {
 
     void cancel(RequestId id);
     void set_system_prompt(std::string_view prompt);
+    Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
     void stop();
     bool is_running() const noexcept;
 
     HistorySnapshot get_history() const;
+    Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
     void clear_history();
+    Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
     Expected<void> register_tool(tools::ToolDefinition definition);
+    Expected<void> register_tool(tools::ToolDefinition definition,
+                                 std::chrono::nanoseconds timeout);
     Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
+    Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions,
+                                  std::chrono::nanoseconds timeout);
     size_t tool_count() const noexcept;
 
   private:

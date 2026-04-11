@@ -3,11 +3,59 @@
  * @brief Unit tests for shared core value types and validation helpers.
  */
 
+#include "log.hpp"
 #include "zoo/core/json.hpp"
 #include "zoo/core/types.hpp"
+#include "zoo/log.hpp"
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+namespace {
+
+class TempDir {
+  public:
+    TempDir() {
+        const auto unique =
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        path_ = std::filesystem::temp_directory_path() / ("zoo-types-tests-" + unique);
+        std::filesystem::create_directories(path_);
+    }
+
+    ~TempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+
+  private:
+    std::filesystem::path path_;
+};
+
+template <typename T>
+concept CanValidateRoleSequence =
+    requires(const T& history) { zoo::validate_role_sequence(history, zoo::Role::User); };
+
+struct UnsupportedHistory {
+    [[nodiscard]] size_t size() const noexcept {
+        return 0;
+    }
+
+    [[nodiscard]] int operator[](size_t) const noexcept {
+        return 0;
+    }
+};
+
+static_assert(!CanValidateRoleSequence<UnsupportedHistory>);
+
+} // namespace
 
 TEST(RoleTest, RoleToString) {
     EXPECT_STREQ(zoo::role_to_string(zoo::Role::System), "system");
@@ -167,6 +215,24 @@ TEST(ModelConfigTest, ValidationRejectsNonExistentPath) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelPath);
 }
 
+TEST(ModelConfigTest, ValidationUsesNonThrowingFilesystemCheck) {
+    TempDir temp_dir;
+    const auto loop_path = temp_dir.path() / "loop";
+    std::error_code ec;
+    std::filesystem::create_directory_symlink(loop_path, loop_path, ec);
+    if (ec) {
+        GTEST_SKIP() << "Could not create symlink loop: " << ec.message();
+    }
+
+    zoo::ModelConfig config;
+    config.model_path = loop_path.string();
+
+    zoo::Expected<void> result;
+    EXPECT_NO_THROW(result = config.validate());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelPath);
+}
+
 TEST(ModelConfigTest, ValidationRejectsBadFields) {
     zoo::ModelConfig config;
     EXPECT_FALSE(config.validate().has_value());
@@ -295,6 +361,40 @@ TEST(RoleValidationTest, ConsecutiveToolAllowed) {
                                               zoo::OwnedMessage::assistant("I'll use tools"),
                                               zoo::OwnedMessage::tool("result1", "id1")};
     EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::Tool).has_value());
+}
+
+TEST(RoleValidationTest, AcceptsHistorySnapshotAndConversationView) {
+    zoo::HistorySnapshot snapshot{{zoo::OwnedMessage::user("Hello")}};
+    EXPECT_TRUE(zoo::validate_role_sequence(snapshot, zoo::Role::Assistant).has_value());
+
+    const auto view = snapshot.view();
+    auto result = zoo::validate_role_sequence(view, zoo::Role::User);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
+}
+
+TEST(LoggingTest, CallbackReceivesFormattedZooLogs) {
+    struct LogRecord {
+        zoo::LogLevel level = zoo::LogLevel::Debug;
+        std::string message;
+        int calls = 0;
+    } record;
+
+    zoo::set_log_callback(
+        [](zoo::LogLevel level, const char* message, void* user_data) {
+            auto& target = *static_cast<LogRecord*>(user_data);
+            target.level = level;
+            target.message = message;
+            ++target.calls;
+        },
+        &record);
+
+    ZOO_LOG("warn", "downloaded %d bytes", 42);
+    zoo::reset_log_callback();
+
+    EXPECT_EQ(record.calls, 1);
+    EXPECT_EQ(record.level, zoo::LogLevel::Warning);
+    EXPECT_EQ(record.message, "downloaded 42 bytes");
 }
 
 TEST(TokenUsageTest, Defaults) {

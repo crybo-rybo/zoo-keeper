@@ -8,6 +8,7 @@
 #include "request.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -202,9 +203,23 @@ class RequestSlots {
         return static_cast<RequestSlots*>(state)->await_text(slot, generation);
     }
 
+    [[nodiscard]] static Expected<TextResponse>
+    await_text_handle_for(void* state, uint32_t slot, uint32_t generation,
+                          std::chrono::nanoseconds timeout, bool* completed) {
+        return static_cast<RequestSlots*>(state)->await_text_for(slot, generation, timeout,
+                                                                 completed);
+    }
+
     [[nodiscard]] static Expected<ExtractionResponse>
     await_extraction_handle(void* state, uint32_t slot, uint32_t generation) {
         return static_cast<RequestSlots*>(state)->await_extraction(slot, generation);
+    }
+
+    [[nodiscard]] static Expected<ExtractionResponse>
+    await_extraction_handle_for(void* state, uint32_t slot, uint32_t generation,
+                                std::chrono::nanoseconds timeout, bool* completed) {
+        return static_cast<RequestSlots*>(state)->await_extraction_for(slot, generation, timeout,
+                                                                       completed);
     }
 
     static void release_handle(void* state, uint32_t slot, uint32_t generation) {
@@ -286,6 +301,44 @@ class RequestSlots {
         return result;
     }
 
+    [[nodiscard]] Expected<TextResponse> await_text_for(uint32_t slot_index, uint32_t generation,
+                                                        std::chrono::nanoseconds timeout,
+                                                        bool* completed) {
+        if (completed != nullptr) {
+            *completed = false;
+        }
+
+        if (slot_index >= slots_.size()) {
+            if (completed != nullptr) {
+                *completed = true;
+            }
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
+        }
+
+        Slot& slot = *slots_[slot_index];
+        std::unique_lock<std::mutex> lock(slot.mutex);
+        const bool ready = slot.cv.wait_for(lock, timeout, [&slot, generation] {
+            return (!slot.occupied || slot.generation != generation) || slot.ready;
+        });
+        if (!ready) {
+            return std::unexpected(
+                Error{ErrorCode::RequestTimeout, "Timed out waiting for request result"});
+        }
+
+        if (completed != nullptr) {
+            *completed = true;
+        }
+        if (!slot.occupied || slot.generation != generation) {
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
+        }
+
+        auto result = std::move(std::get<Expected<TextResponse>>(slot.result));
+        reset_locked(slot);
+        return result;
+    }
+
     [[nodiscard]] Expected<ExtractionResponse> await_extraction(uint32_t slot_index,
                                                                 uint32_t generation) {
         if (slot_index >= slots_.size()) {
@@ -299,6 +352,44 @@ class RequestSlots {
             return (!slot.occupied || slot.generation != generation) || slot.ready;
         });
 
+        if (!slot.occupied || slot.generation != generation) {
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
+        }
+
+        auto result = std::move(std::get<Expected<ExtractionResponse>>(slot.result));
+        reset_locked(slot);
+        return result;
+    }
+
+    [[nodiscard]] Expected<ExtractionResponse>
+    await_extraction_for(uint32_t slot_index, uint32_t generation, std::chrono::nanoseconds timeout,
+                         bool* completed) {
+        if (completed != nullptr) {
+            *completed = false;
+        }
+
+        if (slot_index >= slots_.size()) {
+            if (completed != nullptr) {
+                *completed = true;
+            }
+            return std::unexpected(
+                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
+        }
+
+        Slot& slot = *slots_[slot_index];
+        std::unique_lock<std::mutex> lock(slot.mutex);
+        const bool ready = slot.cv.wait_for(lock, timeout, [&slot, generation] {
+            return (!slot.occupied || slot.generation != generation) || slot.ready;
+        });
+        if (!ready) {
+            return std::unexpected(
+                Error{ErrorCode::RequestTimeout, "Timed out waiting for request result"});
+        }
+
+        if (completed != nullptr) {
+            *completed = true;
+        }
         if (!slot.occupied || slot.generation != generation) {
             return std::unexpected(
                 Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
