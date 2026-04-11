@@ -13,10 +13,15 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace zoo::internal::agent {
+
+namespace test_support {
+class RequestSlotsTestPeer;
+}
 
 /**
  * @brief Reservation metadata returned when a request claims a slot.
@@ -61,6 +66,7 @@ class RequestSlots {
 
     [[nodiscard]] Expected<RequestReservation> emplace(RequestPayload payload) {
         uint32_t slot_index;
+        RequestId request_id;
         {
             std::lock_guard<std::mutex> table_lock(mutex_);
             if (free_list_.empty()) {
@@ -69,6 +75,8 @@ class RequestSlots {
             }
             slot_index = free_list_.back();
             free_list_.pop_back();
+            request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+            request_index_.emplace(request_id, slot_index);
         }
 
         Slot& slot = *slots_[slot_index];
@@ -76,7 +84,7 @@ class RequestSlots {
         slot.occupied = true;
         slot.orphaned = false;
         slot.ready = false;
-        slot.request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+        slot.request_id = request_id;
         slot.cancelled.store(false, std::memory_order_release);
         slot.payload = std::move(payload);
         slot.result = std::monostate{};
@@ -112,14 +120,20 @@ class RequestSlots {
     }
 
     void cancel(RequestId id) {
-        std::lock_guard<std::mutex> table_lock(mutex_);
-        for (auto& slot_ptr : slots_) {
-            Slot& slot = *slot_ptr;
-            std::lock_guard<std::mutex> slot_lock(slot.mutex);
-            if (slot.occupied && slot.request_id == id) {
-                slot.cancelled.store(true, std::memory_order_release);
+        std::optional<uint32_t> slot_index;
+        {
+            std::lock_guard<std::mutex> table_lock(mutex_);
+            auto it = request_index_.find(id);
+            if (it == request_index_.end()) {
                 return;
             }
+            slot_index = it->second;
+        }
+
+        Slot& slot = *slots_[*slot_index];
+        std::lock_guard<std::mutex> slot_lock(slot.mutex);
+        if (slot.occupied && slot.request_id == id) {
+            slot.cancelled.store(true, std::memory_order_release);
         }
     }
 
@@ -198,6 +212,8 @@ class RequestSlots {
     }
 
   private:
+    friend class test_support::RequestSlotsTestPeer;
+
     struct Slot {
         mutable std::mutex mutex;
         std::condition_variable cv;
@@ -328,13 +344,15 @@ class RequestSlots {
 
     /// Reset a slot and return it to the free list (caller does NOT hold mutex_).
     void reset_locked(Slot& slot) {
-        clear_slot(slot);
         std::lock_guard<std::mutex> table_lock(mutex_);
+        request_index_.erase(slot.request_id);
+        clear_slot(slot);
         free_list_.push_back(slot.index);
     }
 
     /// Reset a slot and return it to the free list (caller already holds mutex_).
     void reset_locked_with_table(Slot& slot) {
+        request_index_.erase(slot.request_id);
         clear_slot(slot);
         free_list_.push_back(slot.index);
     }
@@ -343,6 +361,7 @@ class RequestSlots {
     std::atomic<RequestId> next_request_id_{1};
     std::vector<std::unique_ptr<Slot>> slots_;
     std::vector<uint32_t> free_list_;
+    std::unordered_map<RequestId, uint32_t> request_index_;
 };
 
 } // namespace zoo::internal::agent
