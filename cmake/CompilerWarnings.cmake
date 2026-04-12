@@ -1,5 +1,4 @@
-# cmake/CompilerWarnings.cmake
-# Provides helpers for owned-target warning policy and third-party include handling.
+include_guard(GLOBAL)
 
 function(zoo_set_warnings target visibility)
     if(MSVC)
@@ -30,4 +29,16 @@ function(zoo_mark_llama_includes_as_system target)
         ${ZOO_LLAMA_SOURCE_DIR}/include
         ${ZOO_LLAMA_SOURCE_DIR}/ggml/include
     )
+endfunction()
+
+function(zoo_apply_owned_target_options target)
+    zoo_set_warnings(${target} PRIVATE)
+    zoo_enable_sanitizers(${target})
+endfunction()
+
+function(zoo_apply_strict_target_options target)
+    zoo_apply_owned_target_options(${target})
+    zoo_enable_warnings_as_errors(${target})
+    zoo_enable_coverage(${target})
+    zoo_mark_llama_includes_as_system(${target})
 endfunction()

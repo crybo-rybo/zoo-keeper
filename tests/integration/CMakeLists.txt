@@ -15,12 +15,12 @@ target_link_libraries(zoo_integration_tests
 
 target_include_directories(zoo_integration_tests
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/tests
-        ${CMAKE_SOURCE_DIR}/tests/fixtures
+        ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/tests/fixtures
 )
 
 target_compile_definitions(zoo_integration_tests PRIVATE
-    ZOO_PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    ZOO_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
 
 if(ZOO_INTEGRATION_MODEL)
@@ -30,13 +30,9 @@ if(ZOO_INTEGRATION_MODEL)
 endif()
 
 gtest_discover_tests(zoo_integration_tests
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     PROPERTIES
         LABELS "integration"
 )
 
-zoo_set_warnings(zoo_integration_tests PRIVATE)
-zoo_enable_warnings_as_errors(zoo_integration_tests)
-zoo_mark_llama_includes_as_system(zoo_integration_tests)
-zoo_enable_coverage(zoo_integration_tests)
-zoo_enable_sanitizers(zoo_integration_tests)
+zoo_apply_strict_target_options(zoo_integration_tests)
