@@ -81,7 +81,7 @@ endif()
 
 # Primary public library target
 add_library(zoo STATIC
-    src/agent/facade.cpp
+    src/agent/agent_facade.cpp
     src/agent/backend_model.cpp
     src/agent/runtime.cpp
     src/agent/runtime_tool_loop.cpp

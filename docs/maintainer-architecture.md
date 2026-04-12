@@ -14,7 +14,7 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 ### Public facade
 
 - `zoo::Agent` is a thin public facade.
-- Construction, destruction, and public forwarding live in `src/agent/facade.cpp`.
+- Construction, destruction, and public forwarding live in `src/agent/agent_facade.cpp`.
 - The facade owns configuration and a private implementation handle only.
 
 ### Private runtime
