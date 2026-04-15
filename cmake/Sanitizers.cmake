@@ -1,5 +1,4 @@
-# cmake/Sanitizers.cmake
-# Provides zoo_enable_sanitizers(target) to apply ASan + UBSan flags.
+include_guard(GLOBAL)
 
 function(zoo_enable_sanitizers target)
     if(ZOO_ENABLE_SANITIZERS AND NOT MSVC)

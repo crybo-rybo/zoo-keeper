@@ -1,3 +1,5 @@
+include_guard(GLOBAL)
+
 find_package(Doxygen REQUIRED)
 find_program(ZOO_DOXYGEN_DOT_EXECUTABLE NAMES dot)
 

@@ -43,10 +43,8 @@ if(ZOO_BUILD_TESTS)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-            ${CMAKE_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/src
     )
-
-    zoo_mark_llama_includes_as_system(zoo_tests)
 
     gtest_discover_tests(zoo_tests
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -54,10 +52,7 @@ if(ZOO_BUILD_TESTS)
             LABELS "unit"
     )
 
-    zoo_set_warnings(zoo_tests PRIVATE)
-    zoo_enable_warnings_as_errors(zoo_tests)
-    zoo_enable_coverage(zoo_tests)
-    zoo_enable_sanitizers(zoo_tests)
+    zoo_apply_strict_target_options(zoo_tests)
 endif()
 
 if(ZOO_BUILD_INTEGRATION_TESTS)

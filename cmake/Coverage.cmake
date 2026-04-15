@@ -1,5 +1,4 @@
-# cmake/Coverage.cmake
-# Provides zoo_enable_coverage(target) to apply coverage instrumentation flags.
+include_guard(GLOBAL)
 
 function(zoo_enable_coverage target)
     if(ZOO_ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

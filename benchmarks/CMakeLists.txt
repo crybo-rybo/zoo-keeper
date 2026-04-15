@@ -13,16 +13,11 @@ target_link_libraries(zoo_benchmarks
         zoo
 )
 
-target_include_directories(zoo_benchmarks
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/common
-        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/ggml/include
-        ${CMAKE_SOURCE_DIR}/extern/llama.cpp/include
-)
+zoo_apply_owned_target_options(zoo_benchmarks)
+zoo_mark_llama_includes_as_system(zoo_benchmarks)
 
-zoo_set_warnings(zoo_benchmarks PRIVATE)
-zoo_enable_sanitizers(zoo_benchmarks)
-
-install(TARGETS zoo_benchmarks
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+if(ZOO_ENABLE_INSTALL)
+    install(TARGETS zoo_benchmarks
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()

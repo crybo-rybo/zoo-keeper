@@ -10,11 +10,12 @@ function(zoo_add_example target source)
         PRIVATE
             zoo
     )
-    zoo_set_warnings(${target} PRIVATE)
-    zoo_enable_sanitizers(${target})
-    install(TARGETS ${target}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
+    zoo_apply_owned_target_options(${target})
+    if(ZOO_ENABLE_INSTALL)
+        install(TARGETS ${target}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
 endfunction()
 
 zoo_add_example(demo_chat demo_chat.cpp)
