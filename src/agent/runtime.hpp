@@ -59,6 +59,8 @@ class AgentRuntime {
     void cancel(RequestId id);
     void set_system_prompt(std::string_view prompt);
     Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
+    Expected<void> add_system_message(std::string_view message);
+    Expected<void> add_system_message(std::string_view message, std::chrono::nanoseconds timeout);
     void stop();
     bool is_running() const noexcept;
 

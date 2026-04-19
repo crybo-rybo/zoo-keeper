@@ -233,6 +233,19 @@ class Agent {
      */
     Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
 
+    /**
+     * @brief Appends a system-role message to the conversation without replacing the initial
+     * system prompt. Uses incremental history append (no KV cache flush).
+     */
+    Expected<void> add_system_message(std::string_view message);
+
+    /**
+     * @brief Appends a system-role message, returning RequestTimeout if the command waits too long.
+     * @param message The system message text to append.
+     * @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
+     */
+    Expected<void> add_system_message(std::string_view message, std::chrono::nanoseconds timeout);
+
     /// Stops the worker thread and prevents additional requests from being processed.
     void stop();
 

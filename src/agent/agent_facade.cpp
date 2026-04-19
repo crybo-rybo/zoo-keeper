@@ -103,6 +103,15 @@ Expected<void> Agent::set_system_prompt(std::string_view prompt, std::chrono::na
     return impl_->runtime.set_system_prompt(prompt, timeout);
 }
 
+Expected<void> Agent::add_system_message(std::string_view message) {
+    return impl_->runtime.add_system_message(message);
+}
+
+Expected<void> Agent::add_system_message(std::string_view message,
+                                         std::chrono::nanoseconds timeout) {
+    return impl_->runtime.add_system_message(message, timeout);
+}
+
 void Agent::stop() {
     impl_->runtime.stop();
 }

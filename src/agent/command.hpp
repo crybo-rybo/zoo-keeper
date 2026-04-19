@@ -34,6 +34,12 @@ struct ClearHistoryCmd {
     std::shared_ptr<std::promise<void>> done;
 };
 
+/// Appends a system-role message to the conversation without replacing the initial system prompt.
+struct AddSystemMessageCmd {
+    std::string message;
+    std::shared_ptr<std::promise<Expected<void>>> done;
+};
+
 /// Registers a single tool on the inference thread.
 struct RegisterToolCmd {
     tools::ToolDefinition definition;
@@ -47,8 +53,8 @@ struct RegisterToolsCmd {
 };
 
 /// Discriminated union of all control commands the runtime accepts.
-using Command = std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd, RegisterToolCmd,
-                             RegisterToolsCmd>;
+using Command = std::variant<SetSystemPromptCmd, GetHistoryCmd, ClearHistoryCmd,
+                             AddSystemMessageCmd, RegisterToolCmd, RegisterToolsCmd>;
 
 /// Helper for exhaustive std::visit with overloaded lambdas.
 template <class... Ts> struct overloaded : Ts... {
