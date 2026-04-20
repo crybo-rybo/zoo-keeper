@@ -706,11 +706,6 @@ using RequestId = uint64_t;
         return {};
     }
 
-    if (role == Role::System) {
-        return std::unexpected(Error{ErrorCode::InvalidMessageSequence,
-                                     "System message only allowed at the beginning"});
-    }
-
     const Role last_role = messages[messages.size() - 1].role();
     if (role == last_role && role != Role::Tool) {
         return std::unexpected(

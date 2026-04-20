@@ -225,6 +225,38 @@ Expected<void> AgentRuntime::set_system_prompt(std::string_view prompt,
     return {};
 }
 
+Expected<void> AgentRuntime::add_system_message(std::string_view message) {
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<Expected<void>>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(
+            AddSystemMessageCmd{std::string(message), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    return future.get();
+}
+
+Expected<void> AgentRuntime::add_system_message(std::string_view message,
+                                                std::chrono::nanoseconds timeout) {
+    if (!running_.load(std::memory_order_acquire)) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+
+    auto done = std::make_shared<std::promise<Expected<void>>>();
+    auto future = done->get_future();
+    if (!request_mailbox_.push_command(
+            AddSystemMessageCmd{std::string(message), std::move(done)})) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    }
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error("add_system_message"));
+    }
+    return future.get();
+}
+
 HistorySnapshot AgentRuntime::get_history() const {
     if (!running_.load(std::memory_order_acquire)) {
         return {};
@@ -430,38 +462,41 @@ void AgentRuntime::handle_request(QueuedRequest request) {
 }
 
 void AgentRuntime::handle_command(Command& cmd) {
-    std::visit(overloaded{
-                   [this](SetSystemPromptCmd& c) {
-                       backend_->set_system_prompt(c.prompt);
-                       c.done->set_value();
-                   },
-                   [this](GetHistoryCmd& c) { c.done->set_value(backend_->get_history()); },
-                   [this](ClearHistoryCmd& c) {
-                       backend_->clear_history();
-                       c.done->set_value();
-                   },
-                   [this](RegisterToolCmd& c) {
-                       if (auto result = tool_registry_.register_tool(std::move(c.definition));
-                           !result) {
-                           c.done->set_value(std::unexpected(result.error()));
-                           return;
-                       }
+    std::visit(
+        overloaded{
+            [this](SetSystemPromptCmd& c) {
+                backend_->set_system_prompt(c.prompt);
+                c.done->set_value();
+            },
+            [this](GetHistoryCmd& c) { c.done->set_value(backend_->get_history()); },
+            [this](ClearHistoryCmd& c) {
+                backend_->clear_history();
+                c.done->set_value();
+            },
+            [this](AddSystemMessageCmd& c) {
+                c.done->set_value(backend_->add_message(MessageView{Role::System, c.message}));
+            },
+            [this](RegisterToolCmd& c) {
+                if (auto result = tool_registry_.register_tool(std::move(c.definition)); !result) {
+                    c.done->set_value(std::unexpected(result.error()));
+                    return;
+                }
 
-                       refresh_tool_calling_state();
-                       c.done->set_value({});
-                   },
-                   [this](RegisterToolsCmd& c) {
-                       if (auto result = tool_registry_.register_tools(std::move(c.definitions));
-                           !result) {
-                           c.done->set_value(std::unexpected(result.error()));
-                           return;
-                       }
+                refresh_tool_calling_state();
+                c.done->set_value({});
+            },
+            [this](RegisterToolsCmd& c) {
+                if (auto result = tool_registry_.register_tools(std::move(c.definitions));
+                    !result) {
+                    c.done->set_value(std::unexpected(result.error()));
+                    return;
+                }
 
-                       refresh_tool_calling_state();
-                       c.done->set_value({});
-                   },
-               },
-               cmd);
+                refresh_tool_calling_state();
+                c.done->set_value({});
+            },
+        },
+        cmd);
 }
 
 void AgentRuntime::fail_pending(const Error& error) {
@@ -486,6 +521,7 @@ void AgentRuntime::resolve_command_on_shutdown(Command& cmd) {
                    [](SetSystemPromptCmd& c) { c.done->set_value(); },
                    [](GetHistoryCmd& c) { c.done->set_value(HistorySnapshot{}); },
                    [](ClearHistoryCmd& c) { c.done->set_value(); },
+                   [](AddSystemMessageCmd& c) { c.done->set_value(Expected<void>{}); },
                    [](RegisterToolCmd& c) {
                        c.done->set_value(std::unexpected(
                            Error{ErrorCode::AgentNotRunning, "Agent is not running"}));

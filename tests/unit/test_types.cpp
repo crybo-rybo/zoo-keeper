@@ -344,8 +344,13 @@ TEST(RoleValidationTest, EmptyHistoryRejectsTool) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidMessageSequence);
 }
 
-TEST(RoleValidationTest, SystemOnlyAllowedAtBeginning) {
+TEST(RoleValidationTest, SystemAllowedAfterNonSystemMessage) {
     std::vector<zoo::OwnedMessage> history = {zoo::OwnedMessage::user("Hello")};
+    EXPECT_TRUE(zoo::validate_role_sequence(history, zoo::Role::System).has_value());
+}
+
+TEST(RoleValidationTest, ConsecutiveSystemMessagesFails) {
+    std::vector<zoo::OwnedMessage> history = {zoo::OwnedMessage::system("Initial prompt")};
     auto result = zoo::validate_role_sequence(history, zoo::Role::System);
     EXPECT_FALSE(result.has_value());
 }

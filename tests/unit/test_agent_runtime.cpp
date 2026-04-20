@@ -458,6 +458,53 @@ TEST(AgentRuntimeTest, SetSystemPromptTimeoutReturnsRequestTimeoutWhenCommandLan
     EXPECT_EQ((*history)[0].content, "Do not wait forever.");
 }
 
+TEST(AgentRuntimeTest, AddSystemMessageAppendsWithoutReplacingExistingSystemPrompt) {
+    auto backend = std::make_unique<FakeBackend>();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    runtime.set_system_prompt("You are a helpful NPC.");
+
+    auto result = runtime.add_system_message("Mood: suspicious. Trust: low.");
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 2u);
+    EXPECT_EQ(history[0].role, Role::System);
+    EXPECT_EQ(history[0].content, "You are a helpful NPC.");
+    EXPECT_EQ(history[1].role, Role::System);
+    EXPECT_EQ(history[1].content, "Mood: suspicious. Trust: low.");
+}
+
+TEST(AgentRuntimeTest, AddSystemMessageTimeoutReturnsRequestTimeoutWhenBusy) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    backend_ptr->push_generation(
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
+            entered->set_value();
+            release_future.wait();
+            return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+        });
+
+    auto request = runtime.chat("occupy inference thread");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+
+    auto timed_out = runtime.add_system_message("ephemeral context", 20ms);
+    ASSERT_FALSE(timed_out.has_value());
+    EXPECT_EQ(timed_out.error().code, ErrorCode::RequestTimeout);
+
+    release->set_value();
+    ASSERT_TRUE(request.await_result(1s).has_value());
+}
+
 TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
