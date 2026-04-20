@@ -2,6 +2,48 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## v1.1.1 → v1.1.2
+
+### `add_system_message()` (Additive)
+
+`Agent::add_system_message(message)` appends a system-role message to the active
+conversation without replacing the initial system prompt and without flushing the KV
+cache. This is distinct from `set_system_prompt()`, which replaces the first message
+and forces a full history re-encode.
+
+Use `add_system_message()` to inject context mid-conversation (e.g., tool results,
+retrieval snippets, or updated instructions) without disturbing prior turns.
+
+An optional timeout overload is available:
+
+```cpp
+// No timeout — blocks until the inference thread processes the command.
+agent->add_system_message("Restrict your answer to three sentences.");
+
+// With timeout — returns RequestTimeout if the thread is busy.
+auto result = agent->add_system_message("Use metric units.", std::chrono::seconds(2));
+```
+
+### `validate_role_sequence()` Relaxed
+
+`validate_role_sequence()` no longer returns an error when a system-role message
+appears after the first position. If your code checked for that specific error to
+detect sequence violations, remove that branch — system messages anywhere in history
+are now permitted.
+
+### CMake: `ZOO_ENABLE_INSTALL` Defaulting
+
+`ZOO_ENABLE_INSTALL` now defaults to `OFF` when zoo-keeper is consumed via
+`add_subdirectory` or FetchContent. If you relied on install targets being present in
+a subdirectory build, pass `-DZOO_ENABLE_INSTALL=ON` explicitly.
+
+### CMake Module Restructure (Internal)
+
+The build system was refactored into dedicated files under `cmake/`. The public
+CMake interface (`ZooKeeper::zoo`, `ZooKeeper::zoo_core`, option names) is unchanged.
+`FetchDependencies.cmake` now delegates to `ZooKeeperDependencies.cmake`; both remain
+present for backwards compatibility.
+
 ## v1.1.0 → v1.1.1
 
 ### Hub Layer (Additive)

@@ -5,6 +5,29 @@ All notable changes to Zoo-Keeper will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-04-19
+
+### Added
+
+- **`Agent::add_system_message()`** — appends a system-role message to the active
+  conversation without replacing the initial system prompt and without flushing the
+  KV cache. An optional `std::chrono::nanoseconds` timeout overload returns
+  `RequestTimeout` if the inference thread is busy.
+
+### Changed
+
+- CMake build system refactored into dedicated modules under `cmake/`:
+  `ZooKeeperOptions.cmake`, `ZooKeeperDependencies.cmake`, `ZooKeeperTargets.cmake`,
+  `ZooKeeperInstall.cmake`, `ZooKeeperPackage.cmake`, and `ZooKeeperLlama.cmake`.
+  All modules carry `include_guard(GLOBAL)` to prevent double-inclusion.
+- New `ZOO_ENABLE_INSTALL` option controls whether install and package metadata targets
+  are generated. Defaults to `ON` when zoo-keeper is the top-level CMake project and
+  `OFF` when consumed via `add_subdirectory` or FetchContent, avoiding spurious install
+  targets in consumer builds.
+- `validate_role_sequence()` no longer rejects system-role messages that appear after
+  the first position in a conversation. System messages are now allowed anywhere in the
+  history, enabling mid-conversation system context injection via `add_system_message()`.
+
 ## [1.1.1] - 2026-04-10
 
 ### Added
@@ -185,6 +208,7 @@ return typed handles instead of immediate results.
 - C++23 required
 - Windows is not supported
 
+[1.1.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.2...v1.0.3
