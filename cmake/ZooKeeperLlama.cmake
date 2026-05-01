@@ -1,5 +1,31 @@
 include_guard(GLOBAL)
 
+# All glue that ties zoo to llama.cpp's `common` static archive lives here.
+# `common` is a load-bearing dependency (Jinja chat templates, tool-call parsing
+# for 29+ formats) but upstream does not expose it through the `llama` CMake
+# package's export set. Until that changes, zoo links it as a build-tree target
+# and installs the archive next to its own libs. See ZooKeeperConfig.cmake.in
+# for the matching consumer-side wiring that pulls libcommon.a back in via
+# `find_package(ZooKeeper)`.
+
+# Apply build-tree linkage to a zoo internal target. INSTALL_INTERFACE points at
+# `ZooKeeper::llama`, which the installed config file recreates with libcommon.a
+# folded in.
+function(zoo_target_link_llama target)
+    target_link_libraries(${target} PRIVATE
+        $<BUILD_INTERFACE:llama>
+        $<BUILD_INTERFACE:common>
+        $<INSTALL_INTERFACE:ZooKeeper::llama>
+    )
+endfunction()
+
+# Install llama.cpp's `common` static archive alongside zoo's own libraries.
+function(zoo_install_llama_common)
+    install(FILES $<TARGET_FILE:common>
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endfunction()
+
 function(zoo_collect_llama_build_link_libraries output_var)
     set(link_libraries
         "$<TARGET_FILE:common>"

@@ -1,5 +1,7 @@
 include_guard(GLOBAL)
 
+include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
+
 configure_file(
     ${PROJECT_SOURCE_DIR}/include/zoo/version.hpp.in
     ${PROJECT_BINARY_DIR}/generated/version.hpp
@@ -32,11 +34,7 @@ target_include_directories(zoo PRIVATE
     ${PROJECT_SOURCE_DIR}/src
 )
 target_compile_features(zoo PUBLIC cxx_std_23)
-target_link_libraries(zoo PRIVATE
-    $<BUILD_INTERFACE:llama>
-    $<BUILD_INTERFACE:common>
-    $<INSTALL_INTERFACE:ZooKeeper::llama>
-)
+zoo_target_link_llama(zoo)
 set_property(TARGET zoo APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:ZooKeeper::nlohmann_json>"
 )
