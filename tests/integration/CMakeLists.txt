@@ -30,7 +30,6 @@ if(ZOO_INTEGRATION_MODEL)
 endif()
 
 gtest_discover_tests(zoo_integration_tests
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     PROPERTIES
         LABELS "integration"
 )

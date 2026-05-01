@@ -4,5 +4,5 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 scripts/build-all.sh -DZOO_WARNINGS_AS_ERRORS=ON
-cmake --build build
+cmake --build build --parallel
 echo "Lint (warning-free build) passed."

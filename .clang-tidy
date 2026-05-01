@@ -1,3 +1,8 @@
+# bugprone-exception-escape is intentionally a warning, not an error. It fires
+# on example/consumer main() functions that call throwing STL (std::cout, JSON
+# parse, vector ops) without try/catch. Wrapping every example main() would
+# add boilerplate that contradicts the project's "no defensive checks" stance.
+# See commit 729363d for the original demotion rationale.
 Checks: >
   -*,
   clang-analyzer-*,

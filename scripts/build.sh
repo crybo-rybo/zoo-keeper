@@ -6,4 +6,4 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 cmake -B build "$@"
-cmake --build build
+cmake --build build --parallel

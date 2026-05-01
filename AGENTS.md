@@ -10,23 +10,23 @@ Platforms: Linux and macOS only.
 
 ```bash
 # First-time setup
-scripts/bootstrap
+scripts/bootstrap.sh
 
 # Build (with tests)
-scripts/build                         # or: scripts/build -DZOO_BUILD_EXAMPLES=ON
+scripts/build.sh                      # or: scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 
 # Run all tests
-scripts/test                          # or: scripts/test -R PatternName
+scripts/test.sh                       # or: scripts/test.sh -R PatternName
 
 # Format all C++ files
-scripts/format
+scripts/format.sh
 
 # Lint (warning-free build)
-scripts/lint
+scripts/lint.sh
 
 # Sanitizers / coverage (manual)
-scripts/build -DZOO_ENABLE_SANITIZERS=ON
-scripts/build -DZOO_ENABLE_COVERAGE=ON
+scripts/build.sh -DZOO_ENABLE_SANITIZERS=ON
+scripts/build.sh -DZOO_ENABLE_COVERAGE=ON
 ```
 
 ## Integration testing
@@ -38,21 +38,24 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 - `include/zoo/` — public API boundary
   - `core/` — `Model`, `Config`, `Message`, `Response`, `types.hpp`
   - `tools/` — `ToolRegistry`, `ToolCallParser`, `ErrorRecovery`
+  - `hub/` — optional GGUF inspection, HuggingFace, model store
   - `internal/` — private headers (grammar, interceptor, batch, agent runtime)
   - `agent.hpp` — `Agent` async orchestrator
   - `zoo.hpp` — umbrella include
 - `src/core/` — all llama.cpp calls (`model*.cpp`)
 - `src/agent/` — Agent runtime and backend
+- `src/hub/` — hub layer implementation (compiled when `ZOO_BUILD_HUB=ON`)
 - `tests/unit/` — GoogleTest suite; `tests/fixtures/` — reusable data
 - `examples/` — demo executables and sample config
 - `docs/` — architecture, guides, ADRs
 - `cmake/` — build helpers
 - `extern/llama.cpp/` — vendored submodule
 
-## Architecture (three layers)
+## Architecture (four layers)
 
 | Layer | Namespace | Depends on |
 |-------|-----------|-----------|
+| 4 — Hub *(optional)* | `zoo::hub` | Layer 1 + llama.cpp (`ZOO_BUILD_HUB=ON`) |
 | 3 — Agent | `zoo::Agent` | Layer 1 + 2 |
 | 2 — Tools | `zoo::tools` | nothing (header-only, no llama.cpp) |
 | 1 — Core  | `zoo::core`  | llama.cpp only |
@@ -75,7 +78,7 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 ## Boundaries
 
 ### Always (no permission needed)
-- Read any file, run `scripts/build`, `scripts/test`, `scripts/format`
+- Read any file, run `scripts/build.sh`, `scripts/test.sh`, `scripts/format.sh`
 - Run clang-format, ctest, cmake with standard flags
 
 ### Ask first
@@ -136,6 +139,6 @@ This is a maturing ~8.5K SLOC codebase. Agents must treat every added line as a 
 
 ## Definition of done
 
-Change is done when: behavior is observable, `scripts/test` passes,
-`scripts/format` produces no diff, builds are warning-free, and the
+Change is done when: behavior is observable, `scripts/test.sh` passes,
+`scripts/format.sh` produces no diff, builds are warning-free, and the
 PR is under the SLOC limit with a single logical concern.

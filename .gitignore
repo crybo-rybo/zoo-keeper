@@ -7,8 +7,6 @@
 build/**
 build-san/**
 cmake-build-*/
-tests/cmake_test_discovery_*
-cmake_test_discovery_*
 plans/**
 docs/superpowers/**
 .secret/**
