@@ -9,6 +9,7 @@ WarningsAsErrors: >
   clang-analyzer-*,
   bugprone-assert-side-effect,
   bugprone-branch-clone,
+  bugprone-exception-escape,
   performance-move-const-arg
 HeaderFilterRegex: '^(include/zoo|src|tests|examples)/'
 FormatStyle: file

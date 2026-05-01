@@ -27,6 +27,8 @@ custom flag combinations.
 
 ## CMake Presets
 
+Presets require CMake 3.21+ (the raw build still works on CMake 3.18+).
+
 Current presets in `CMakePresets.json` are:
 
 - configure: `default`, `dev`, `integration`, `sanitizers`, `coverage`, `docs`
@@ -134,6 +136,14 @@ scripts/test.sh -R ToolRegistryTest
 
 # Verbose output
 scripts/test.sh --verbose
+```
+
+Hub-layer unit tests (`tests/unit/test_hub.cpp`) are only compiled when the hub
+layer is enabled. To include them, configure with `-DZOO_BUILD_HUB=ON`:
+
+```bash
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON
+scripts/test.sh -R "HuggingFace|ModelStore|AutoConfig|GgufInspector|HubPath"
 ```
 
 ## Integration Tests

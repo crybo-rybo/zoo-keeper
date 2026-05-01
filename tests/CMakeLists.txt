@@ -47,7 +47,6 @@ if(ZOO_BUILD_TESTS)
     )
 
     gtest_discover_tests(zoo_tests
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         PROPERTIES
             LABELS "unit"
     )

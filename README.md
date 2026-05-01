@@ -265,7 +265,9 @@ if (!result) {
 
 ```bash
 scripts/test.sh                     # Unit tests (pure logic, no model needed)
-scripts/build.sh -DZOO_BUILD_HUB=ON
+
+# Hub-layer unit tests are only built when the hub is enabled
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON
 scripts/test.sh -R "HuggingFace|ModelStore|AutoConfig|GgufInspector|HubPath"
 
 # Integration tests (requires a real GGUF model)

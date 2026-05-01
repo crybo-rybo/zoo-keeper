@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Run clang-format on all C++ source and header files.
+# Usage:
+#   scripts/format.sh           # format in place
+#   scripts/format.sh --check   # exit non-zero if formatting would change anything (matches CI)
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -13,5 +16,27 @@ else
     CLANG_FORMAT=clang-format
 fi
 
-find src include tests examples benchmarks -type f \( -name '*.cpp' -o -name '*.hpp' \) | xargs "$CLANG_FORMAT" -i
-echo "Formatting complete."
+CHECK_MODE=0
+if [ "${1:-}" = "--check" ]; then
+    CHECK_MODE=1
+fi
+
+# Match CI's file set: skip extern/, format owned C/C++ sources and headers.
+# Use a read loop instead of `mapfile` for compatibility with macOS's stock Bash 3.2.
+files=()
+while IFS= read -r f; do
+    files+=("$f")
+done < <(git ls-files '*.hpp' '*.cpp' '*.h' '*.c' | grep -v '^extern/')
+
+if [ ${#files[@]} -eq 0 ]; then
+    echo "No files to format."
+    exit 0
+fi
+
+if [ "$CHECK_MODE" -eq 1 ]; then
+    "$CLANG_FORMAT" --dry-run --Werror "${files[@]}"
+    echo "Format check passed."
+else
+    "$CLANG_FORMAT" -i "${files[@]}"
+    echo "Formatting complete."
+fi
