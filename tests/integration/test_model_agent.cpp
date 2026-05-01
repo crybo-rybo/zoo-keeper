@@ -207,3 +207,40 @@ TEST_F(LiveModelIntegrationTest, AgentWithToolsHandlesFencedCodePrompt) {
     ASSERT_TRUE(response.has_value()) << response.error().to_string();
     EXPECT_FALSE(response->text.empty());
 }
+
+TEST_F(LiveModelIntegrationTest, AgentWithToolsInvokesToolForTimeQuery) {
+    auto cfg = config();
+    cfg.generation.max_tokens = 128;
+    cfg.generation.record_tool_trace = true;
+
+    auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
+    ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
+
+    auto& agent = *agent_result;
+    ASSERT_TRUE(agent
+                    ->register_tool("get_time", "Get the current date and time", {},
+                                    []() { return std::string("2026-03-20 12:00:00"); })
+                    .has_value());
+
+    agent->set_system_prompt(
+        "You are a helpful assistant. When the user asks for the current time, you MUST call the "
+        "get_time tool. Do not guess.");
+
+    auto handle = agent->chat("What is the current date and time right now?");
+    auto response = handle.await_result();
+
+    ASSERT_TRUE(response.has_value()) << response.error().to_string();
+    ASSERT_TRUE(response->tool_trace.has_value())
+        << "Tool trace was not recorded; expected at least one invocation of get_time";
+
+    const auto& invocations = response->tool_trace->invocations;
+    ASSERT_FALSE(invocations.empty())
+        << "Tool trace was empty; the model did not emit a parseable tool call";
+
+    const bool called_get_time =
+        std::any_of(invocations.begin(), invocations.end(),
+                    [](const zoo::ToolInvocation& inv) { return inv.name == "get_time"; });
+    EXPECT_TRUE(called_get_time) << "Expected at least one invocation named 'get_time'; got "
+                                 << invocations.size() << " invocation(s) with first name='"
+                                 << invocations.front().name << "'";
+}
