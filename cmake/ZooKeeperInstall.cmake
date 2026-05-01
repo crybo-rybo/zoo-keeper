@@ -4,6 +4,8 @@ if(NOT ZOO_ENABLE_INSTALL)
     return()
 endif()
 
+include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
+
 install(TARGETS zoo zoo_core
     EXPORT ZooKeeperTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -12,9 +14,7 @@ install(TARGETS zoo zoo_core
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES $<TARGET_FILE:common>
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
+zoo_install_llama_common()
 
 install(EXPORT ZooKeeperTargets
     FILE ZooKeeperTargets.cmake
