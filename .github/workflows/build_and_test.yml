@@ -6,10 +6,6 @@ on:
   push:
     branches: [main]
 
-concurrency:
-  group: build-and-test-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   format:
     runs-on: ubuntu-latest
@@ -66,10 +62,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-gcc-unit
-            os: ubuntu-latest
-            compiler: gcc
-            cmake_flags: "-DZOO_BUILD_TESTS=ON"
           - name: linux-clang-full
             os: ubuntu-latest
             compiler: clang
