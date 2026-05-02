@@ -25,11 +25,10 @@ else()
     option(ZOO_ENABLE_METAL "Enable Metal acceleration (macOS)" OFF)
 endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
-option(ZOO_FETCH_LLAMA "Fetch llama.cpp when vendored sources are unavailable" OFF)
 option(ZOO_BUILD_HUB "Build the hub layer (GGUF inspection, HuggingFace, model store)" OFF)
 option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
 set(ZOO_LLAMA_REPOSITORY "https://github.com/ggerganov/llama.cpp.git" CACHE STRING
-    "llama.cpp repository used when ZOO_FETCH_LLAMA=ON")
+    "llama.cpp repository used by FetchContent")
 set(ZOO_LLAMA_TAG "5cbfb18075c95437e4ac7fb50e3baf88fe137a87" CACHE STRING
-    "llama.cpp git tag or commit used when ZOO_FETCH_LLAMA=ON")
+    "llama.cpp git tag or commit used by FetchContent")
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")

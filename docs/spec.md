@@ -17,7 +17,7 @@ management, and split config types for model, agent, and per-call generation pol
 
 - C++23
 - CMake
-- llama.cpp as a vendored submodule
+- llama.cpp fetched at configure time via CMake `FetchContent` (pinned by `ZOO_LLAMA_TAG`)
 - nlohmann/json for config and schema handling
 - GoogleTest for unit and integration tests
 

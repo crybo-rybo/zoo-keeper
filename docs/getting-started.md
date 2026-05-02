@@ -6,18 +6,15 @@ This guide walks through the split public API and a minimal first agent.
 
 - **C++23 compiler**: macOS uses Clang 16+; Linux uses GCC 13+ or Clang 18+
 - **CMake 3.18+**
-- **Git** (for submodules)
+- **Git**
 - **macOS or Linux**
+- **Network access on first build** — CMake fetches llama.cpp automatically at configure time.
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
+git clone https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
-
-# If you already cloned without submodules:
-git submodule update --init --recursive
 ```
 
 ## Building

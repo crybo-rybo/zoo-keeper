@@ -43,14 +43,7 @@ if(TARGET llama OR TARGET llama-common)
             "Zoo-Keeper requires both `llama` and `llama-common` targets when a parent "
             "project provides llama.cpp. Provide both targets or neither.")
     endif()
-elseif(EXISTS "${PROJECT_SOURCE_DIR}/extern/llama.cpp/CMakeLists.txt")
-    zoo_add_llama_subdirectory(
-        "${PROJECT_SOURCE_DIR}/extern/llama.cpp"
-        "${PROJECT_BINARY_DIR}/extern/llama.cpp"
-        "vendored submodule"
-    )
-    message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
-elseif(ZOO_FETCH_LLAMA)
+else()
     zoo_configure_llama_build_options()
     FetchContent_Declare(
         llama_cpp
@@ -63,12 +56,6 @@ elseif(ZOO_FETCH_LLAMA)
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")
     set(ZOO_LLAMA_PROVIDER "FetchContent (${ZOO_LLAMA_REPOSITORY} @ ${ZOO_LLAMA_TAG})")
     message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
-else()
-    message(FATAL_ERROR
-        "llama.cpp sources are unavailable. Initialize the vendored submodule "
-        "with `git submodule update --init --recursive`, provide both `llama` "
-        "and `llama-common` targets from the parent project, or enable "
-        "`-DZOO_FETCH_LLAMA=ON`.")
 endif()
 
 if(ZOO_BUILD_TESTS OR ZOO_BUILD_INTEGRATION_TESTS)

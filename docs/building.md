@@ -3,18 +3,19 @@
 ## Quick Start
 
 ```bash
-git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
+git clone https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
-scripts/bootstrap.sh
 scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 scripts/test.sh
 ```
+
+llama.cpp is fetched automatically at CMake configure time; no submodule
+initialization is required.
 
 ## Helper Scripts
 
 Zoo-Keeper ships small wrapper scripts for the common local workflows:
 
-- `scripts/bootstrap.sh` - fetches and configures the repository dependencies
 - `scripts/build.sh` - configures and builds the project with the flags you pass
 - `scripts/build-all.sh` - enables tests, integration tests, examples, and benchmarks
 - `scripts/test.sh` - runs `ctest` against the existing `build/` tree
@@ -112,18 +113,19 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 
 | Dependency | Version | Integration | Notes |
 |------------|---------|-------------|-------|
-| [llama.cpp](https://github.com/ggerganov/llama.cpp) | pinned | Git submodule or optional CMake FetchContent | Core inference engine |
+| [llama.cpp](https://github.com/ggerganov/llama.cpp) | pinned by `ZOO_LLAMA_TAG` | CMake FetchContent (default) or parent-provided targets | Core inference engine |
 | [nlohmann/json](https://github.com/nlohmann/json) | 3.11+ | CMake FetchContent | JSON parsing |
 | [GoogleTest](https://github.com/google/googletest) | 1.14+ | CMake FetchContent | Tests only |
 | [Doxygen](https://www.doxygen.nl/) | host tool | System package | Required only when `ZOO_BUILD_DOCS=ON` |
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
-`nlohmann/json` is always downloaded automatically during CMake configuration.
-`llama.cpp` is downloaded only when `ZOO_FETCH_LLAMA=ON` and Zoo-Keeper cannot
-reuse parent-provided `llama` and `llama-common` targets or the vendored
-`extern/llama.cpp` checkout. Installed-package consumers still need a
-discoverable `nlohmann_json` package because the public headers include
-`<nlohmann/json.hpp>`.
+`nlohmann/json` and `llama.cpp` are both downloaded automatically during CMake
+configuration. To pin a different llama.cpp revision, set `ZOO_LLAMA_TAG` in
+`cmake/ZooKeeperOptions.cmake` (or override via `-DZOO_LLAMA_TAG=...`). If your
+parent project already defines `llama` and `llama-common` CMake targets,
+Zoo-Keeper reuses them and skips its own fetch. Installed-package consumers
+still need a discoverable `nlohmann_json` package because the public headers
+include `<nlohmann/json.hpp>`.
 
 ## Running Tests
 
@@ -212,8 +214,6 @@ uploads the generated output as a workflow artifact, and deploys the latest
 
 ```cmake
 include(FetchContent)
-set(ZOO_FETCH_LLAMA ON CACHE BOOL "" FORCE)
-
 FetchContent_Declare(
     zoo-keeper
     GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
@@ -224,10 +224,9 @@ FetchContent_MakeAvailable(zoo-keeper)
 target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 ```
 
-Use `ZOO_FETCH_LLAMA=ON` when the fetched Zoo-Keeper source tree does not
-contain `extern/llama.cpp`, such as a normal GitHub clone/archive fetched by a
-downstream project. If your parent project already builds llama.cpp and exposes
-both `llama` and `llama-common` CMake targets, Zoo-Keeper will reuse them instead.
+Zoo-Keeper fetches llama.cpp automatically. If your parent project already
+builds llama.cpp and exposes both `llama` and `llama-common` CMake targets,
+Zoo-Keeper reuses them and skips its own fetch.
 
 ### Git Submodule
 

@@ -9,6 +9,14 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- Replaced the `extern/llama.cpp` git submodule with CMake `FetchContent`. The
+  pinned commit is now declared via `ZOO_LLAMA_TAG` in
+  `cmake/ZooKeeperOptions.cmake`. Contributors no longer need
+  `--recurse-submodules` or `git submodule update`. The `ZOO_FETCH_LLAMA`
+  option and `scripts/bootstrap.sh` are removed.
+- The GoogleTest vocab fixture is vendored at
+  `tests/fixtures/ggml-vocab-gpt-2.gguf` (1.7 MB) instead of being read out of
+  the llama.cpp submodule's `models/` directory.
 - Updated vendored llama.cpp to release `b8992` (`5cbfb18075c95437e4ac7fb50e3baf88fe137a87`).
 - Switched CMake/package wiring from upstream `common` to `llama-common`, including
   the new `llama-common-base` sidecar archive, pkg-config, and install-tree
