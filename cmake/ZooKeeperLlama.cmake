@@ -1,34 +1,47 @@
 include_guard(GLOBAL)
 
-# All glue that ties zoo to llama.cpp's `common` static archive lives here.
-# `common` is a load-bearing dependency (Jinja chat templates, tool-call parsing
-# for 29+ formats) but upstream does not expose it through the `llama` CMake
+# All glue that ties zoo to llama.cpp's `llama-common` static archive lives here.
+# `llama-common` is a load-bearing dependency (Jinja chat templates and PEG
+# tool-call parsing) but upstream does not expose it through the `llama` CMake
 # package's export set. Until that changes, zoo links it as a build-tree target
 # and installs the archive next to its own libs. See ZooKeeperConfig.cmake.in
-# for the matching consumer-side wiring that pulls libcommon.a back in via
+# for the matching consumer-side wiring that pulls libllama-common.a back in via
 # `find_package(ZooKeeper)`.
 
 # Apply build-tree linkage to a zoo internal target. INSTALL_INTERFACE points at
-# `ZooKeeper::llama`, which the installed config file recreates with libcommon.a
-# folded in.
+# `ZooKeeper::llama`, which the installed config file recreates with the
+# llama-common archives folded in.
 function(zoo_target_link_llama target)
     target_link_libraries(${target} PRIVATE
         $<BUILD_INTERFACE:llama>
-        $<BUILD_INTERFACE:common>
+        $<BUILD_INTERFACE:llama-common>
         $<INSTALL_INTERFACE:ZooKeeper::llama>
     )
 endfunction()
 
-# Install llama.cpp's `common` static archive alongside zoo's own libraries.
+# Install llama.cpp's `llama-common` static archive alongside zoo's own libraries.
 function(zoo_install_llama_common)
-    install(FILES $<TARGET_FILE:common>
+    install(FILES $<TARGET_FILE:llama-common>
+                  $<TARGET_FILE:llama-common-base>
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endfunction()
 
+function(zoo_apply_llama_common_workarounds)
+    if(TARGET llama-common AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # b8992 common/ngram-mod.cpp uses std::fill without including <algorithm>.
+        # libstdc++ pulls <algorithm> transitively via other STL headers used by the
+        # file, so GCC builds compile cleanly; libc++ is stricter and fails. If a
+        # future GCC build also fails here, drop the gate and apply unconditionally.
+        # Removable once upstream carries the include.
+        target_compile_options(llama-common PRIVATE -include algorithm)
+    endif()
+endfunction()
+
 function(zoo_collect_llama_build_link_libraries output_var)
     set(link_libraries
-        "$<TARGET_FILE:common>"
+        "$<TARGET_FILE:llama-common>"
+        "$<TARGET_FILE:llama-common-base>"
         "$<TARGET_FILE:llama>"
         "$<TARGET_FILE:ggml>"
         "$<TARGET_FILE:ggml-base>"
@@ -63,7 +76,7 @@ function(zoo_collect_llama_build_link_libraries output_var)
 endfunction()
 
 function(zoo_collect_llama_pkgconfig_libs output_var)
-    set(libs "-L\${libdir} -lzoo -lcommon -llama -lggml -lggml-base -lggml-cpu")
+    set(libs "-L\${libdir} -lzoo -llama-common -llama-common-base -llama -lggml -lggml-base -lggml-cpu")
     if(TARGET ggml-blas)
         string(APPEND libs " -lggml-blas")
     endif()

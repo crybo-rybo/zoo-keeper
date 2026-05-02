@@ -30,6 +30,6 @@ option(ZOO_BUILD_HUB "Build the hub layer (GGUF inspection, HuggingFace, model s
 option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
 set(ZOO_LLAMA_REPOSITORY "https://github.com/ggerganov/llama.cpp.git" CACHE STRING
     "llama.cpp repository used when ZOO_FETCH_LLAMA=ON")
-set(ZOO_LLAMA_TAG "d1b4757dedbb60a811c8d7012249a96b1b702606" CACHE STRING
+set(ZOO_LLAMA_TAG "5cbfb18075c95437e4ac7fb50e3baf88fe137a87" CACHE STRING
     "llama.cpp git tag or commit used when ZOO_FETCH_LLAMA=ON")
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")

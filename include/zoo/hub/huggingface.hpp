@@ -1,6 +1,6 @@
 /**
  * @file huggingface.hpp
- * @brief HuggingFace Hub client wrapping llama.cpp common download infrastructure.
+ * @brief HuggingFace Hub client wrapping llama.cpp llama-common download infrastructure.
  */
 
 #pragma once
@@ -23,7 +23,7 @@ struct CachedModelInfo {
     std::string user;      ///< HuggingFace user/org name.
     std::string model;     ///< Model name within the repository.
     std::string tag;       ///< Version tag (e.g. "Q4_K_M", "latest").
-    size_t size_bytes = 0; ///< GGUF file size in bytes (may be 0).
+    size_t size_bytes = 0; ///< Reserved for compatibility; llama.cpp no longer reports cache size.
 
     /// Returns "user/model" or "user/model:tag" if tag is not "latest".
     [[nodiscard]] std::string to_string() const {
@@ -36,10 +36,10 @@ struct CachedModelInfo {
 /**
  * @brief Client for interacting with the HuggingFace Hub API.
  *
- * Wraps llama.cpp's `common` download infrastructure for HuggingFace resolution,
+ * Wraps llama.cpp's `llama-common` download infrastructure for HuggingFace resolution,
  * model downloading with ETag caching, resume support, and split-file handling.
- * Models are downloaded into the llama.cpp shared cache directory, so files
- * downloaded by any llama.cpp tool are immediately available.
+ * HuggingFace models are downloaded into llama.cpp's Hugging Face-style cache,
+ * so files downloaded by any llama.cpp tool are immediately available.
  */
 class HuggingFaceClient {
   public:
@@ -104,7 +104,7 @@ class HuggingFaceClient {
      * Leverages llama.cpp's download infrastructure: ETag validation, resume,
      * multi-split GGUF support, and retry with exponential backoff.
      *
-     * @param repo_id_with_tag Repository identifier, optionally with ":tag".
+     * @param repo_id_with_tag Repository identifier, optionally with ":tag" or "::filename".
      * @return The local file path to the downloaded model, or an error.
      */
     Expected<std::string> download_model(const std::string& repo_id_with_tag);

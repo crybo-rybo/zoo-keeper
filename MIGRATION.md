@@ -2,6 +2,46 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## Unreleased: llama.cpp b8992
+
+### CMake: `llama-common`
+
+Zoo-Keeper now targets llama.cpp release `b8992`, where the upstream `common`
+target/archive is named `llama-common`/`libllama-common.a`, with
+`libllama-common-base.a` as a required sidecar archive. Parent projects that
+provide llama.cpp targets must expose both `llama` and `llama-common`.
+
+Installed Zoo-Keeper packages now link consumers against both common archives.
+If you package Zoo-Keeper manually, update any allowlists or archive copy steps
+that still mention `libcommon.a`.
+
+### Hub Cache Behavior
+
+HuggingFace repository downloads now use llama.cpp's Hugging Face-style cache
+instead of Zoo-Keeper's old owner/repo directory under the store/cache path.
+`ModelStore::pull()` still registers the downloaded GGUF in Zoo-Keeper's catalog,
+but `ModelEntry::file_path` may now point under a path like:
+
+```text
+.../models--owner--repo/snapshots/<commit>/<file>.gguf
+```
+
+`CachedModelInfo::size_bytes` is retained for source compatibility but now
+reports `0`, because llama.cpp b8992 cache listing entries expose repository and
+tag only.
+
+### HuggingFace Identifiers
+
+`HuggingFaceClient::download_model()` accepts the same repo-file form that
+`ModelStore::pull()` accepts:
+
+```cpp
+hf->download_model("owner/repo::model.Q4_K_M.gguf");
+hf->download_model("owner/repo:Q4_K_M");
+```
+
+Bearer tokens continue to use `HuggingFaceClient::Config::token`.
+
 ## v1.1.1 → v1.1.2
 
 ### `add_system_message()` (Additive)

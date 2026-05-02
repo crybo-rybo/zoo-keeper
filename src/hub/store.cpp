@@ -5,11 +5,9 @@
 
 #include "zoo/hub/store.hpp"
 #include "hub/download_validation.hpp"
-#include "hub/path_utils.hpp"
+#include "hub/hf_cache_paths.hpp"
 #include "hub/store_json.hpp"
 #include "zoo/hub/inspector.hpp"
-
-#include <common.h>
 
 #include <algorithm>
 #include <array>
@@ -19,9 +17,12 @@
 #include <fstream>
 #include <iomanip>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <random>
 #include <sstream>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 
 namespace zoo::hub {
 
@@ -379,18 +380,14 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
     std::string local_path;
     std::string source_url;
     if (parsed->filename) {
-        // Specific file requested — resolve URL and download directly.
+        // Specific file requested -- keep the user-facing source URL simple,
+        // while llama.cpp stores the file in its Hugging Face cache layout.
         auto url = client.resolve_download_url(parsed->repo_id, *parsed->filename);
         if (!url) {
             return std::unexpected(url.error());
         }
         source_url = *url;
-        auto dest = detail::build_download_destination(impl_->config.store_directory,
-                                                       parsed->repo_id, *parsed->filename);
-        if (!dest) {
-            return std::unexpected(dest.error());
-        }
-        auto result = client.download_file(*url, dest->string());
+        auto result = client.download_model(identifier);
         if (!result) {
             return std::unexpected(result.error());
         }
@@ -403,14 +400,8 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
         }
         local_path = *result;
 
-        const auto repo_root = std::filesystem::path(fs_get_cache_directory()) / parsed->repo_id;
-        const auto relative = std::filesystem::path(local_path).lexically_relative(repo_root);
-        if (!relative.empty() && relative.native().find("..") == std::string::npos) {
-            auto url = client.resolve_download_url(parsed->repo_id, relative.generic_string());
-            if (!url) {
-                return std::unexpected(url.error());
-            }
-            source_url = *url;
+        if (auto url = detail::source_url_from_hf_snapshot(parsed->repo_id, local_path)) {
+            source_url = std::move(*url);
         }
     }
 
