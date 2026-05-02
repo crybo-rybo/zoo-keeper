@@ -1,6 +1,6 @@
 # Updating llama.cpp
 
-Zoo-Keeper pins llama.cpp by commit SHA in `cmake/ZooKeeperOptions.cmake` and
+Zoo-Keeper pins llama.cpp by release tag in `cmake/ZooKeeperOptions.cmake`, then
 fetches it at CMake configure time via `FetchContent`. Updating it is a
 deliberate, multi-step process because llama.cpp API and CMake target changes
 can affect Core, Hub, and packaging code.
@@ -15,8 +15,8 @@ can affect Core, Hub, and packaging code.
 
 2. **Bump `ZOO_LLAMA_TAG`** in `cmake/ZooKeeperOptions.cmake`:
    ```cmake
-   set(ZOO_LLAMA_TAG "<new-commit-sha>" CACHE STRING
-       "llama.cpp git tag or commit used by FetchContent")
+   set(ZOO_LLAMA_TAG "<new-release-tag>" CACHE STRING
+       "llama.cpp release tag used by FetchContent")
    ```
 
 3. **Force a fresh fetch and build.** FetchContent caches sources under
@@ -60,10 +60,10 @@ can affect Core, Hub, and packaging code.
   targets or changes download/parser structs, update package configs,
   pkg-config metadata, and docs in the same migration.
 - **Do not local-patch fetched llama.cpp sources.** FetchContent re-fetches
-  on every clean build, so any in-place edits would be silently discarded.
-  Carry compatibility workarounds in `cmake/ZooKeeperLlama.cmake` instead —
-  see `zoo_apply_llama_common_workarounds()` for the b8992 `-include algorithm`
-  pattern.
+  the pinned tag on every clean build, so any in-place edits would be silently
+  discarded. Carry compatibility workarounds in `cmake/ZooKeeperLlama.cmake`
+  instead — see `zoo_apply_llama_common_workarounds()` for the b8992
+  `-include algorithm` pattern.
 - **Test fixtures are vendored under `tests/fixtures/`.** Do not depend on
   files inside the FetchContent cache (`build/_deps/llama_cpp-src/`); those
   paths are not part of Zoo-Keeper's tracked sources.

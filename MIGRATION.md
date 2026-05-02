@@ -14,7 +14,7 @@ CMake's `FetchContent` now downloads llama.cpp at configure time, pinned by
   `git submodule update --init --recursive` step from your local workflow.
 - The first `cmake -B build` (or `scripts/build.sh`) requires network access
   to fetch llama.cpp. Subsequent configures reuse `build/_deps/`.
-- To pin a different llama.cpp revision, edit `ZOO_LLAMA_TAG` (or override
+- To pin a different llama.cpp release tag, edit `ZOO_LLAMA_TAG` (or override
   with `-DZOO_LLAMA_TAG=...`) — see `docs/instructions/UPDATE_LLAMA_CPP.md`.
 - Parent projects that already define `llama` and `llama-common` targets are
   unaffected; Zoo-Keeper still reuses them and skips its own fetch.

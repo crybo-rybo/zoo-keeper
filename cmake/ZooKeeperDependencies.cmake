@@ -21,6 +21,12 @@ function(zoo_configure_llama_build_options)
     set(LLAMA_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
     set(GGML_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    if(ZOO_LLAMA_TAG MATCHES "^b([0-9]+)$")
+        set(LLAMA_BUILD_NUMBER "${CMAKE_MATCH_1}" CACHE STRING "" FORCE)
+    else()
+        set(LLAMA_BUILD_NUMBER 0 CACHE STRING "" FORCE)
+    endif()
+    set(LLAMA_BUILD_COMMIT "${ZOO_LLAMA_TAG}" CACHE STRING "" FORCE)
 endfunction()
 
 function(zoo_add_llama_subdirectory source_dir binary_dir provider)
@@ -45,16 +51,16 @@ if(TARGET llama OR TARGET llama-common)
     endif()
 else()
     zoo_configure_llama_build_options()
+    set(ZOO_LLAMA_ARCHIVE_URL "${ZOO_LLAMA_ARCHIVE_BASE_URL}/${ZOO_LLAMA_TAG}.tar.gz")
     FetchContent_Declare(
         llama_cpp
-        GIT_REPOSITORY "${ZOO_LLAMA_REPOSITORY}"
-        GIT_TAG "${ZOO_LLAMA_TAG}"
-        GIT_PROGRESS TRUE
+        URL "${ZOO_LLAMA_ARCHIVE_URL}"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(llama_cpp)
     zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")
-    set(ZOO_LLAMA_PROVIDER "FetchContent (${ZOO_LLAMA_REPOSITORY} @ ${ZOO_LLAMA_TAG})")
+    set(ZOO_LLAMA_PROVIDER "FetchContent archive (${ZOO_LLAMA_ARCHIVE_URL})")
     message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
 endif()
 

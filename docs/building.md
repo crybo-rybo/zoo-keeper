@@ -120,7 +120,7 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
 `nlohmann/json` and `llama.cpp` are both downloaded automatically during CMake
-configuration. To pin a different llama.cpp revision, set `ZOO_LLAMA_TAG` in
+configuration. To pin a different llama.cpp release tag, set `ZOO_LLAMA_TAG` in
 `cmake/ZooKeeperOptions.cmake` (or override via `-DZOO_LLAMA_TAG=...`). If your
 parent project already defines `llama` and `llama-common` CMake targets,
 Zoo-Keeper reuses them and skips its own fetch. Installed-package consumers

@@ -27,8 +27,8 @@ endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
 option(ZOO_BUILD_HUB "Build the hub layer (GGUF inspection, HuggingFace, model store)" OFF)
 option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
-set(ZOO_LLAMA_REPOSITORY "https://github.com/ggerganov/llama.cpp.git" CACHE STRING
-    "llama.cpp repository used by FetchContent")
-set(ZOO_LLAMA_TAG "5cbfb18075c95437e4ac7fb50e3baf88fe137a87" CACHE STRING
-    "llama.cpp git tag or commit used by FetchContent")
+set(ZOO_LLAMA_TAG "b8992" CACHE STRING
+    "llama.cpp release tag used by FetchContent")
+set(ZOO_LLAMA_ARCHIVE_BASE_URL "https://github.com/ggerganov/llama.cpp/archive/refs/tags" CACHE STRING
+    "Base URL for llama.cpp release archives used by FetchContent")
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")

@@ -10,7 +10,7 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Changed
 
 - Replaced the `extern/llama.cpp` git submodule with CMake `FetchContent`. The
-  pinned commit is now declared via `ZOO_LLAMA_TAG` in
+  pinned release tag is now declared via `ZOO_LLAMA_TAG` in
   `cmake/ZooKeeperOptions.cmake`. Contributors no longer need
   `--recurse-submodules` or `git submodule update`. The `ZOO_FETCH_LLAMA`
   option and `scripts/bootstrap.sh` are removed.
