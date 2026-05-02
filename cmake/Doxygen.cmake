@@ -7,7 +7,6 @@ set(ZOO_DOXYGEN_OUTPUT_DIR "${PROJECT_BINARY_DIR}/docs/doxygen")
 
 set(ZOO_DOXYGEN_INPUTS
     "${PROJECT_SOURCE_DIR}/README.md"
-    "${PROJECT_SOURCE_DIR}/docs"
     "${PROJECT_SOURCE_DIR}/include"
     "${PROJECT_SOURCE_DIR}/src"
     "${PROJECT_BINARY_DIR}/generated"
@@ -54,6 +53,9 @@ configure_file(
 add_custom_target(zoo_docs
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${ZOO_DOXYGEN_OUTPUT_DIR}"
     COMMAND Doxygen::doxygen "${PROJECT_BINARY_DIR}/Doxyfile"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${PROJECT_SOURCE_DIR}/docs/images"
+            "${ZOO_DOXYGEN_OUTPUT_DIR}/html/docs/images"
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Generating API documentation with Doxygen"
     VERBATIM

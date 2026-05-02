@@ -58,17 +58,14 @@ QUIET                  = YES
 
 INPUT                  = @ZOO_DOXYGEN_INPUTS_FORMATTED@
 INPUT_ENCODING         = UTF-8
-FILE_PATTERNS          = *.hpp *.h *.cpp *.md
+FILE_PATTERNS          = *.hpp *.h *.cpp
 RECURSIVE              = YES
 EXCLUDE                = @ZOO_DOXYGEN_EXCLUDES_FORMATTED@
 EXCLUDE_PATTERNS       = */extern/* */build/* */tests/cmake_test_discovery_*
 EXCLUDE_SYMLINKS       = NO
 EXCLUDE_SYMBOLS        = zoo::tools::detail
 
-EXAMPLE_PATH           = "@PROJECT_SOURCE_DIR@/examples"
-EXAMPLE_PATTERNS       = *.cpp
 USE_MDFILE_AS_MAINPAGE = "@PROJECT_SOURCE_DIR@/README.md"
-IMAGE_PATH             = "@PROJECT_SOURCE_DIR@/docs"
 
 SOURCE_BROWSER         = YES
 INLINE_SOURCES         = NO
