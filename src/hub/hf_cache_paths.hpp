@@ -30,8 +30,7 @@ inline std::string hf_cache_repo_folder(std::string_view repo_id) {
 // from a path inside llama.cpp's HF-style cache. Returns std::nullopt when `local_path`
 // does not look like a "<...>/models--owner--repo/snapshots/<commit>/<file>" path.
 inline std::optional<std::string>
-source_url_from_hf_snapshot(std::string_view repo_id,
-                            const std::filesystem::path& local_path) {
+source_url_from_hf_snapshot(std::string_view repo_id, const std::filesystem::path& local_path) {
     std::vector<std::string> parts;
     for (const auto& part : local_path.lexically_normal()) {
         parts.push_back(part.string());
