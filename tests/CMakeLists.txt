@@ -34,6 +34,7 @@ if(ZOO_BUILD_TESTS)
     target_link_libraries(zoo_tests
         PRIVATE
             zoo
+            $<BUILD_INTERFACE:llama-common>
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
