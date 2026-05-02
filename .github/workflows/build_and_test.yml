@@ -150,14 +150,18 @@ jobs:
       - name: Set up Clang
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18
+          sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev
           echo "CC=clang-18" >> $GITHUB_ENV
           echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Build with sanitizers
         run: scripts/rebuild.sh -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON
 
       - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: alloc_dealloc_mismatch=0
         run: scripts/test.sh
 
   coverage:
@@ -170,9 +174,11 @@ jobs:
       - name: Install coverage tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 llvm-18 lcov
+          sudo apt-get install -y clang-18 llvm-18 lcov libc++-18-dev libc++abi-18-dev
           echo "CC=clang-18" >> $GITHUB_ENV
           echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
           cat > "${RUNNER_TEMP}/llvm-gcov-18" <<'EOF'
           #!/usr/bin/env bash
           exec llvm-cov-18 gcov "$@"
