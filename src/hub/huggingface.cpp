@@ -1,6 +1,6 @@
 /**
  * @file huggingface.cpp
- * @brief HuggingFace Hub API client -- wraps llama.cpp llama-common download infrastructure.
+ * @brief HuggingFace Hub API client — wraps llama.cpp llama-common download infrastructure.
  */
 
 #include "zoo/hub/huggingface.hpp"
@@ -151,21 +151,33 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
 
 Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
                                                        const std::string& destination_path) {
-    try {
-        common_params_model model_params;
-        model_params.url = url;
-        model_params.path = destination_path;
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(destination_path).parent_path(), ec);
+    if (ec) {
+        return std::unexpected(
+            Error{ErrorCode::FilesystemError,
+                  "Failed to create download directory: " +
+                      std::filesystem::path(destination_path).parent_path().string(),
+                  ec.message()});
+    }
 
-        auto download = common_download_model(model_params, impl_->download_opts());
-        if (download.model_path.empty()) {
+    try {
+        const int status =
+            common_download_file_single(url, destination_path, impl_->download_opts());
+        if (status < 0) {
             return std::unexpected(Error{ErrorCode::DownloadFailed, "Download failed for: " + url});
         }
+        if (status >= 400) {
+            return std::unexpected(
+                Error{ErrorCode::DownloadFailed,
+                      "Download returned HTTP " + std::to_string(status) + " for: " + url});
+        }
 
-        if (auto validation = detail::validate_downloaded_file(download.model_path); !validation) {
+        if (auto validation = detail::validate_downloaded_file(destination_path); !validation) {
             return std::unexpected(validation.error());
         }
 
-        return download.model_path;
+        return destination_path;
     } catch (const std::exception& e) {
         return std::unexpected(
             Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});

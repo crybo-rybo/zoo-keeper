@@ -7,16 +7,15 @@
 
 #include "zoo/core/types.hpp"
 
-#include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <string>
 
 namespace zoo::hub::detail {
 
-[[nodiscard]] inline Expected<void>
-validate_downloaded_file(const std::filesystem::path& path,
-                         std::optional<uintmax_t> expected_size_bytes = std::nullopt) {
+// Integrity model is delegated to llama.cpp's downloader (ETag/server-trust via
+// `common_download_model`/`common_download_file_single`). This local check only
+// confirms the resulting file is present and non-empty.
+[[nodiscard]] inline Expected<void> validate_downloaded_file(const std::filesystem::path& path) {
     std::error_code ec;
     const bool exists = std::filesystem::exists(path, ec);
     if (ec) {
@@ -50,13 +49,6 @@ validate_downloaded_file(const std::filesystem::path& path,
     if (actual_size == 0) {
         return std::unexpected(
             Error{ErrorCode::DownloadFailed, "Downloaded model file is empty: " + path.string()});
-    }
-
-    if (expected_size_bytes.has_value() && actual_size != *expected_size_bytes) {
-        return std::unexpected(Error{ErrorCode::DownloadFailed,
-                                     "Downloaded model size mismatch: " + path.string(),
-                                     "expected " + std::to_string(*expected_size_bytes) +
-                                         " bytes, got " + std::to_string(actual_size)});
     }
 
     return {};

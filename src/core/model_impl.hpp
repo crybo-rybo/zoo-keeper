@@ -70,6 +70,9 @@ struct Model::Impl {
     static constexpr int kTemplateOverheadPerMessage = 8;
 };
 
+// The conversion constructor copies metadata fields (format, generation_prompt, …)
+// from `params`, but the PEG parser itself must be re-loaded from `params.parser`'s
+// serialized form before it is usable.
 inline common_chat_parser_params make_tool_parser_params(const common_chat_params& params) {
     common_chat_parser_params parser_params(params);
     parser_params.parse_tool_calls = true;

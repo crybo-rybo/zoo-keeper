@@ -5,6 +5,7 @@
 
 #include "zoo/hub/store.hpp"
 #include "hub/download_validation.hpp"
+#include "hub/hf_cache_paths.hpp"
 #include "hub/store_json.hpp"
 #include "zoo/hub/inspector.hpp"
 
@@ -90,46 +91,6 @@ Expected<void> validate_catalog_entries(const std::vector<ModelEntry>& entries) 
         }
     }
     return {};
-}
-
-std::string hf_cache_repo_folder(std::string_view repo_id) {
-    std::string folder = "models--";
-    for (const char c : repo_id) {
-        if (c == '/') {
-            folder += "--";
-        } else {
-            folder += c;
-        }
-    }
-    return folder;
-}
-
-std::optional<std::string> source_url_from_hf_snapshot(std::string_view repo_id,
-                                                       const std::filesystem::path& local_path) {
-    std::vector<std::string> parts;
-    for (const auto& part : local_path.lexically_normal()) {
-        parts.push_back(part.string());
-    }
-
-    const std::string repo_folder = hf_cache_repo_folder(repo_id);
-    for (size_t i = 0; i + 3 < parts.size(); ++i) {
-        if (parts[i] != repo_folder || parts[i + 1] != "snapshots") {
-            continue;
-        }
-
-        std::filesystem::path relative;
-        for (size_t j = i + 3; j < parts.size(); ++j) {
-            relative /= parts[j];
-        }
-        if (parts[i + 2].empty() || relative.empty()) {
-            return std::nullopt;
-        }
-
-        return "https://huggingface.co/" + std::string(repo_id) + "/resolve/" + parts[i + 2] + "/" +
-               relative.generic_string();
-    }
-
-    return std::nullopt;
 }
 
 } // namespace
@@ -439,7 +400,7 @@ Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::stri
         }
         local_path = *result;
 
-        if (auto url = source_url_from_hf_snapshot(parsed->repo_id, local_path)) {
+        if (auto url = detail::source_url_from_hf_snapshot(parsed->repo_id, local_path)) {
             source_url = std::move(*url);
         }
     }
