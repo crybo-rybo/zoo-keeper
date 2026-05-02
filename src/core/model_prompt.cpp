@@ -95,18 +95,16 @@ Expected<std::string> Model::render_prompt_delta() {
     // can vary with history. Skip this when in Schema mode (extraction) to
     // avoid overwriting the caller's schema grammar with tool-call grammar.
     if (impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall && impl_->tool_state_) {
-        common_peg_arena parser;
+        common_chat_parser_params parser_params;
         try {
-            if (!params.parser.empty()) {
-                parser.load(params.parser);
-            }
+            parser_params = make_tool_parser_params(params);
         } catch (const std::exception& e) {
             return std::unexpected(
                 Error{ErrorCode::TemplateRenderFailed,
                       std::string("Failed to deserialize tool parser: ") + e.what()});
         }
 
-        impl_->tool_state_->format = params.format;
+        impl_->tool_state_->parser_params = std::move(parser_params);
         impl_->tool_state_->grammar = params.grammar;
         impl_->tool_state_->grammar_lazy = params.grammar_lazy;
         impl_->tool_state_->grammar_triggers = std::move(params.grammar_triggers);
@@ -114,8 +112,6 @@ Expected<std::string> Model::render_prompt_delta() {
             ToolCallTriggerMatcher(impl_->tool_state_->grammar_triggers);
         impl_->tool_state_->preserved_tokens = std::move(params.preserved_tokens);
         impl_->tool_state_->additional_stops = std::move(params.additional_stops);
-        impl_->tool_state_->thinking_forced_open = params.thinking_forced_open;
-        impl_->tool_state_->parser = std::move(parser);
         impl_->tool_grammar_str_ = impl_->tool_state_->grammar;
     }
 

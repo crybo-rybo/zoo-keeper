@@ -117,7 +117,7 @@ This file creates imported targets that point back into the producer build tree:
   - carries include directories and compile features
   - links transitively to `ZooKeeper::llama` and `ZooKeeper::nlohmann_json`
 - `ZooKeeper::llama`
-  - points at the built llama/ggml archives and platform link flags
+  - points at the built llama/llama-common/ggml archives and platform link flags
 - `ZooKeeper::zoo_core`
   - compatibility forwarding target to `ZooKeeper::zoo`
 
@@ -193,7 +193,7 @@ They serve different physical layouts:
 | Where are public headers? | Source tree + generated build headers | Install prefix include dir |
 | How are exported targets defined? | Hand-authored imported targets | Installed `ZooKeeperTargets.cmake` |
 | How is `nlohmann_json` resolved? | Build-tree shim target to fetched headers | `find_dependency(nlohmann_json)` |
-| How is `llama` resolved? | Build-tree shim target to built archives | `find_dependency(llama)` plus shim |
+| How is `llama` resolved? | Build-tree shim target to built archives, including `llama-common` | `find_dependency(llama)` plus `libllama-common.a` shim |
 
 So the goal is not byte-for-byte identical files. The goal is that both paths expose the same public consumer story:
 

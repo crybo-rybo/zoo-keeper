@@ -50,35 +50,29 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
         return false;
     }
 
-    // Only support structured native formats — reject generic wrapper and
-    // content-only (no tool calling) so there is a single runtime path.
-    if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY ||
-        params.format == COMMON_CHAT_FORMAT_GENERIC) {
+    // Content-only templates cannot emit structured native tool calls.
+    if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY) {
         ZOO_LOG("info", "native tool calling not available for this model (format: '%s')",
                 common_chat_format_name(params.format));
         return false;
     }
 
-    common_peg_arena parser;
+    common_chat_parser_params parser_params;
     try {
-        if (!params.parser.empty()) {
-            parser.load(params.parser);
-        }
+        parser_params = make_tool_parser_params(params);
     } catch (const std::exception&) {
         return false;
     }
 
     auto state = std::make_unique<Impl::ToolCallingState>();
     state->tools = std::move(chat_tools);
-    state->format = params.format;
+    state->parser_params = std::move(parser_params);
     state->grammar = std::move(params.grammar);
     state->grammar_lazy = params.grammar_lazy;
     state->grammar_triggers = std::move(params.grammar_triggers);
     state->trigger_matcher = ToolCallTriggerMatcher(state->grammar_triggers);
     state->preserved_tokens = std::move(params.preserved_tokens);
     state->additional_stops = std::move(params.additional_stops);
-    state->thinking_forced_open = params.thinking_forced_open;
-    state->parser = std::move(parser);
 
     impl_->tool_grammar_str_ = state->grammar;
     impl_->tool_state_ = std::move(state);
@@ -93,7 +87,8 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
 
     impl_->grammar_mode_ = Impl::GrammarMode::NativeToolCall;
     ZOO_LOG("info", "native tool calling enabled: format '%s' (%zu tools registered)",
-            common_chat_format_name(impl_->tool_state_->format), impl_->tool_state_->tools.size());
+            common_chat_format_name(impl_->tool_state_->parser_params.format),
+            impl_->tool_state_->tools.size());
     return true;
 }
 
@@ -109,15 +104,9 @@ Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
         return result;
     }
 
-    common_chat_syntax syntax;
-    syntax.format = impl_->tool_state_->format;
-    syntax.thinking_forced_open = impl_->tool_state_->thinking_forced_open;
-    syntax.parse_tool_calls = true;
-    syntax.parser = impl_->tool_state_->parser;
-
     common_chat_msg parsed;
     try {
-        parsed = common_chat_parse(std::string(text), false, syntax);
+        parsed = common_chat_parse(std::string(text), false, impl_->tool_state_->parser_params);
     } catch (const std::exception&) {
         result.content = std::string(text);
         return result;
@@ -159,7 +148,7 @@ const char* Model::tool_calling_format_name() const noexcept {
     if (!impl_->tool_state_) {
         return "none";
     }
-    return common_chat_format_name(impl_->tool_state_->format);
+    return common_chat_format_name(impl_->tool_state_->parser_params.format);
 }
 
 } // namespace zoo::core

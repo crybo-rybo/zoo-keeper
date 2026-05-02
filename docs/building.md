@@ -120,7 +120,7 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 
 `nlohmann/json` is always downloaded automatically during CMake configuration.
 `llama.cpp` is downloaded only when `ZOO_FETCH_LLAMA=ON` and Zoo-Keeper cannot
-reuse parent-provided `llama` and `common` targets or the vendored
+reuse parent-provided `llama` and `llama-common` targets or the vendored
 `extern/llama.cpp` checkout. Installed-package consumers still need a
 discoverable `nlohmann_json` package because the public headers include
 `<nlohmann/json.hpp>`.
@@ -227,7 +227,7 @@ target_link_libraries(your_target PRIVATE ZooKeeper::zoo)
 Use `ZOO_FETCH_LLAMA=ON` when the fetched Zoo-Keeper source tree does not
 contain `extern/llama.cpp`, such as a normal GitHub clone/archive fetched by a
 downstream project. If your parent project already builds llama.cpp and exposes
-both `llama` and `common` CMake targets, Zoo-Keeper will reuse them instead.
+both `llama` and `llama-common` CMake targets, Zoo-Keeper will reuse them instead.
 
 ### Git Submodule
 

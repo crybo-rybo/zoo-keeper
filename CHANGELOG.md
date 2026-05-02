@@ -7,6 +7,28 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- Updated vendored llama.cpp to release `b8992` (`5cbfb18075c95437e4ac7fb50e3baf88fe137a87`).
+- Switched CMake/package wiring from upstream `common` to `llama-common`, including
+  the new `llama-common-base` sidecar archive, pkg-config, and install-tree
+  consumer metadata.
+- Native tool parsing now stores llama.cpp b8992 `common_chat_parser_params`,
+  including `generation_prompt`, so generated assistant text is parsed with the
+  same prefix llama.cpp expects.
+- Hub HuggingFace downloads now use llama.cpp's Hugging Face-style cache and
+  `common_download_model()` for repo, repo-file, and raw URL downloads.
+
+### Fixed
+
+- Removed Hub's manual HEAD size probing and duplicate Authorization header path;
+  bearer tokens now flow through `common_download_opts::bearer_token`.
+
+### Compatibility
+
+- `CachedModelInfo::size_bytes` remains for source compatibility but is reported
+  as `0`, because llama.cpp b8992 cache listings expose repository and tag only.
+
 ## [1.1.2] - 2026-04-19
 
 ### Added

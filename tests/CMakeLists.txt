@@ -45,6 +45,10 @@ if(ZOO_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
             ${PROJECT_SOURCE_DIR}/src
     )
+    target_compile_definitions(zoo_tests
+        PRIVATE
+            ZOO_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
 
     gtest_discover_tests(zoo_tests
         PROPERTIES

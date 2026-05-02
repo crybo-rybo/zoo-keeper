@@ -1,6 +1,7 @@
 include_guard(GLOBAL)
 
 include(FetchContent)
+include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
@@ -25,6 +26,7 @@ endfunction()
 function(zoo_add_llama_subdirectory source_dir binary_dir provider)
     zoo_configure_llama_build_options()
     add_subdirectory("${source_dir}" "${binary_dir}")
+    zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${source_dir}" PARENT_SCOPE)
     set(ZOO_LLAMA_PROVIDER "${provider}" PARENT_SCOPE)
 endfunction()
@@ -32,13 +34,13 @@ endfunction()
 set(ZOO_LLAMA_SOURCE_DIR "")
 set(ZOO_LLAMA_PROVIDER "")
 
-if(TARGET llama OR TARGET common)
-    if(TARGET llama AND TARGET common)
+if(TARGET llama OR TARGET llama-common)
+    if(TARGET llama AND TARGET llama-common)
         set(ZOO_LLAMA_PROVIDER "parent project targets")
         message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
     else()
         message(FATAL_ERROR
-            "Zoo-Keeper requires both `llama` and `common` targets when a parent "
+            "Zoo-Keeper requires both `llama` and `llama-common` targets when a parent "
             "project provides llama.cpp. Provide both targets or neither.")
     endif()
 elseif(EXISTS "${PROJECT_SOURCE_DIR}/extern/llama.cpp/CMakeLists.txt")
@@ -57,6 +59,7 @@ elseif(ZOO_FETCH_LLAMA)
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(llama_cpp)
+    zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")
     set(ZOO_LLAMA_PROVIDER "FetchContent (${ZOO_LLAMA_REPOSITORY} @ ${ZOO_LLAMA_TAG})")
     message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
@@ -64,7 +67,7 @@ else()
     message(FATAL_ERROR
         "llama.cpp sources are unavailable. Initialize the vendored submodule "
         "with `git submodule update --init --recursive`, provide both `llama` "
-        "and `common` targets from the parent project, or enable "
+        "and `llama-common` targets from the parent project, or enable "
         "`-DZOO_FETCH_LLAMA=ON`.")
 endif()
 

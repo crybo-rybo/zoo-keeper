@@ -6,23 +6,23 @@ Accepted
 
 ## Context
 
-Zoo-Keeper's tool calling system delegates format detection to llama.cpp's `common_chat_templates_apply()`, which supports 29+ model-specific tool calling formats. llama.cpp also provides a generic JSON wrapper format (`COMMON_CHAT_FORMAT_GENERIC`) as a fallback for models whose chat templates do not define a native tool calling format. This wraps ALL model output in JSON envelopes like `{"response": "..."}` or `{"tool_call": {...}}`.
+Zoo-Keeper's tool calling system delegates format detection to llama.cpp's `common_chat_templates_apply()`. As of llama.cpp b8992, native tool calling is represented by PEG parser variants such as `COMMON_CHAT_FORMAT_PEG_SIMPLE`, `COMMON_CHAT_FORMAT_PEG_NATIVE`, and `COMMON_CHAT_FORMAT_PEG_GEMMA4`.
 
-Supporting the generic format required a parallel runtime code path: streaming suppression of wrapper JSON, `Role::User` messages instead of `Role::Tool` for history (because generic templates don't support the tool role), and special parsing/unwrapping logic. An earlier version of the branch implemented both paths, adding ~200 lines of runtime branching.
+Earlier llama.cpp versions also exposed a generic JSON wrapper fallback for models whose templates did not define a native tool format. Supporting that fallback required a parallel runtime code path: streaming suppression of wrapper JSON, `Role::User` messages instead of `Role::Tool` for history, and special parsing/unwrapping logic.
 
 ## Decision
 
-`Model::set_tool_calling()` rejects models that resolve to `COMMON_CHAT_FORMAT_GENERIC` or `COMMON_CHAT_FORMAT_CONTENT_ONLY`. For these models, `set_tool_calling()` returns `false` and tool calling is disabled.
+`Model::set_tool_calling()` rejects models that resolve to `COMMON_CHAT_FORMAT_CONTENT_ONLY`. For these models, `set_tool_calling()` returns `false` and tool calling is disabled.
 
-The runtime has a single tool calling code path: native structured formats only. Tool results are always injected as `Role::Tool` messages with `tool_call_id`. The standalone fallback parser remains separate from the runtime, and the runtime itself does not depend on heuristic interception utilities.
+The runtime has a single tool calling code path: llama.cpp PEG parser formats only. Tool results are always injected as `Role::Tool` messages with `tool_call_id`. The stored parser state includes llama.cpp's `generation_prompt`, because b8992 prepends that prompt before parsing generated assistant text.
 
 ## Rationale
 
 - **Simplicity:** A single code path is easier to reason about, test, and maintain. Eliminating the generic fallback removed ~750 lines of dual-path branching.
-- **Reliability:** The generic format wraps ALL output in JSON, making it impossible to reliably distinguish tool calls from normal text responses without heuristics. Native formats have explicit grammar triggers and format-specific parsers.
+- **Reliability:** The removed generic fallback wrapped all output in JSON, making it hard to distinguish tool calls from normal text without heuristics. PEG formats have explicit grammar triggers and parsers.
 - **Streaming fidelity:** Native formats stream tokens directly to callers. The generic format required buffering and suppressing wrapper JSON, adding latency and complexity.
 - **History correctness:** Native formats support `Role::Tool` messages for proper round-tripping through chat templates. The generic format required injecting tool results as `Role::User` messages, which pollutes the conversation history.
-- **Coverage is already high:** The 29+ native formats in llama.cpp cover the vast majority of models that support tool calling (Llama 3.x, Mistral, Hermes, Command-R, Qwen, DeepSeek, etc.). Models that only get the generic format typically have weak tool calling support anyway.
+- **Upstream owns format growth:** llama.cpp's PEG parser variants cover the model-specific formatting details. When upstream adds another native parser variant, Zoo-Keeper can usually consume it without runtime branching.
 
 ## Consequences
 

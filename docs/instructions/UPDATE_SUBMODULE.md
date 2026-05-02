@@ -1,8 +1,8 @@
 # Updating the llama.cpp Submodule
 
 Zoo-Keeper vendors llama.cpp as a git submodule at `extern/llama.cpp`.
-Updating it is a deliberate, multi-step process because llama.cpp API
-changes can break compilation across multiple files in `src/core/`.
+Updating it is a deliberate, multi-step process because llama.cpp API and
+CMake target changes can affect Core, Hub, and packaging code.
 
 ## Procedure
 
@@ -20,11 +20,11 @@ changes can break compilation across multiple files in `src/core/`.
    cd ../..
    ```
 
-3. **Build and fix compilation errors.** llama.cpp API changes will
-   surface as build failures in `src/core/model*.cpp` — these are the
-   only files that should need changes:
+3. **Build and fix compilation errors.** llama.cpp API changes most often
+   surface in `src/core/model*.cpp`, but updates to `common/` can also require
+   CMake/package and Hub download adaptations:
    ```bash
-   scripts/build.sh
+   scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON -DZOO_BUILD_EXAMPLES=ON
    ```
 
 4. **Run the full test suite:**
@@ -39,19 +39,25 @@ changes can break compilation across multiple files in `src/core/`.
    ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
    ```
 
-6. **Stage the submodule pointer and any adaptation changes:**
+6. **Run packaging smoke checks** when upstream CMake targets or installed
+   archives change. Verify both build-tree and install-tree consumers.
+
+7. **Stage the submodule pointer and any adaptation changes:**
    ```bash
-   git add extern/llama.cpp src/core/
+   git add extern/llama.cpp src/core/ src/hub/ cmake/ docs/
    git commit -m "chore: update llama.cpp to <version/commit>"
    ```
 
-7. **Open a PR.** Submodule updates always go through review.
+8. **Open a PR.** Submodule updates always go through review.
 
 ## Rules
 
-- **Only `src/core/model*.cpp` should need changes.** If the update
-  forces changes in tools, agent, or public headers, that indicates a
-  layer boundary violation that needs architectural discussion.
+- **Keep llama.cpp calls inside the intended layers.** Core model calls stay in
+  `src/core/model*.cpp`; optional Hub code may use llama.cpp download/cache
+  helpers behind `ZOO_BUILD_HUB=ON`.
+- **Treat `common`/`llama-common` as an integration contract.** If upstream
+  renames targets or changes download/parser structs, update package configs,
+  pkg-config metadata, and docs in the same migration.
 - **Never modify files inside `extern/llama.cpp/` directly.** If a
   local patch is needed, it should be documented in an ADR with a plan
   to upstream or remove it.

@@ -23,7 +23,11 @@
 namespace {
 
 std::filesystem::path project_source_dir() {
+#ifdef ZOO_PROJECT_SOURCE_DIR
+    return ZOO_PROJECT_SOURCE_DIR;
+#else
     return std::filesystem::current_path().parent_path();
+#endif
 }
 
 std::filesystem::path vendored_fixture_model_path() {
@@ -105,6 +109,17 @@ TEST(HuggingFaceParseTest, ParseRepoWithFile) {
     EXPECT_EQ(result->repo_id, "TheBloke/Mistral-7B-GGUF");
     ASSERT_TRUE(result->filename.has_value());
     EXPECT_EQ(*result->filename, "mistral-7b.Q4_K_M.gguf");
+}
+
+TEST(HuggingFaceParseTest, ParseRepoWithFileAndTag) {
+    auto result = zoo::hub::HuggingFaceClient::parse_identifier(
+        "bartowski/Qwen3-8B-GGUF:Q4_K_M::Qwen3-8B-Q4_K_M.gguf");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->repo_id, "bartowski/Qwen3-8B-GGUF");
+    ASSERT_TRUE(result->filename.has_value());
+    EXPECT_EQ(*result->filename, "Qwen3-8B-Q4_K_M.gguf");
+    ASSERT_TRUE(result->tag.has_value());
+    EXPECT_EQ(*result->tag, "Q4_K_M");
 }
 
 TEST(HuggingFaceParseTest, ParseRepoOnly) {

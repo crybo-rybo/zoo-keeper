@@ -43,11 +43,16 @@ auto model = zoo::core::Model::load(*config).value();
 
 ## HuggingFace Client
 
-`HuggingFaceClient` wraps llama.cpp's `common` download infrastructure.
-Downloads go into the shared llama.cpp cache directory:
+`HuggingFaceClient` wraps llama.cpp's `llama-common` download infrastructure.
+HuggingFace repository downloads go into llama.cpp's Hugging Face-style cache,
+honoring the same environment variables as llama.cpp:
 
-- macOS: `~/Library/Caches/llama.cpp/`
-- Linux: `~/.cache/llama.cpp/`
+- `LLAMA_CACHE`
+- `HF_HUB_CACHE`
+- `HUGGINGFACE_HUB_CACHE`
+- `HF_HOME`/`hub`
+- `XDG_CACHE_HOME`/`huggingface/hub`
+- `~/.cache/huggingface/hub`
 
 Models downloaded by any llama.cpp tool (llama-cli, llama-server, etc.) are
 immediately available, and vice versa. The client supports ETag caching,
@@ -62,12 +67,20 @@ if (!path) { /* handle error */ }
 
 std::cout << "Downloaded to: " << *path << "\n";
 
+// Download a specific file from a repository
+auto exact = hf->download_model(
+    "bartowski/Qwen3-8B-GGUF::Qwen3-8B-Q4_K_M.gguf");
+
 // List models already in the llama.cpp cache
 auto cached = zoo::hub::HuggingFaceClient::list_cached_models();
 for (const auto& m : cached) {
     std::cout << m.to_string() << "\n";
 }
 ```
+
+`CachedModelInfo::size_bytes` is retained for source compatibility but is
+reported as `0`, because llama.cpp's b8992 cache listing exposes repository and
+tag only.
 
 For gated models, pass a bearer token via `HuggingFaceClient::Config`:
 

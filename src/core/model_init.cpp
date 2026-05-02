@@ -74,7 +74,7 @@ Expected<void> Model::initialize() {
     // Initialize the Jinja2 chat template system from model metadata.
     auto chat_tmpls =
         ChatTemplatesHandle(common_chat_templates_init(llama_model.get(), "").release());
-    if (!chat_tmpls || !common_chat_templates_source(chat_tmpls.get())) {
+    if (!chat_tmpls || common_chat_templates_source(chat_tmpls.get()).empty()) {
         return std::unexpected(
             Error{ErrorCode::TemplateRenderFailed, "Model has no chat template"});
     }

@@ -20,15 +20,13 @@ namespace zoo::core {
 struct Model::Impl {
     struct ToolCallingState {
         std::vector<common_chat_tool> tools;
-        common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+        common_chat_parser_params parser_params;
         std::string grammar;
         bool grammar_lazy = false;
         std::vector<common_grammar_trigger> grammar_triggers;
         ToolCallTriggerMatcher trigger_matcher;
         std::vector<std::string> preserved_tokens;
         std::vector<std::string> additional_stops;
-        bool thinking_forced_open = false;
-        common_peg_arena parser;
     };
 
     struct PromptState {
@@ -71,5 +69,14 @@ struct Model::Impl {
     SamplingParams active_sampling_;
     static constexpr int kTemplateOverheadPerMessage = 8;
 };
+
+inline common_chat_parser_params make_tool_parser_params(const common_chat_params& params) {
+    common_chat_parser_params parser_params(params);
+    parser_params.parse_tool_calls = true;
+    if (!params.parser.empty()) {
+        parser_params.parser.load(params.parser);
+    }
+    return parser_params;
+}
 
 } // namespace zoo::core

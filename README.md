@@ -80,7 +80,7 @@ auto response = handle.await_result().value();
 | Async inference with streaming | Build your own | `Agent::chat()` returns `RequestHandle<T>` |
 | Request cancellation | Implement yourself | `agent->cancel(handle.id())` |
 | Chat history with KV cache sync | Manual bookkeeping | Built into `Model`, auto-trimmed |
-| Tool calling (29+ model formats) | Parse text yourself | Template-driven detection + execution loop |
+| Tool calling (llama.cpp PEG formats) | Parse text yourself | Template-driven detection + execution loop |
 | Type-safe tool registration | N/A | `register_tool("name", desc, params, callable)` |
 | Tool argument validation | N/A | Automatic JSON Schema validation with retries |
 | Structured output extraction | Build grammar yourself | `agent->extract(prompt, schema)` |
@@ -145,7 +145,7 @@ FetchContent_MakeAvailable(zoo-keeper)
 target_link_libraries(my_app PRIVATE ZooKeeper::zoo)
 ```
 
-If your parent project already defines both `llama` and `common` CMake
+If your parent project already defines both `llama` and `llama-common` CMake
 targets, Zoo-Keeper reuses them and you can leave `ZOO_FETCH_LLAMA` off.
 
 ### Run your first agent
@@ -190,7 +190,7 @@ int main() {
 
 ### Native tool calling
 
-Register any C++ callable and Zoo-Keeper generates the JSON Schema, detects tool calls from model output (29+ template formats), validates arguments, executes the handler, and feeds results back into the conversation:
+Register any C++ callable and Zoo-Keeper generates the JSON Schema, detects tool calls from llama.cpp PEG parser output, validates arguments, executes the handler, and feeds results back into the conversation:
 
 ```cpp
 agent->register_tool("get_weather", "Get current weather", {"city"},

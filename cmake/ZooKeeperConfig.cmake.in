@@ -19,12 +19,13 @@ find_dependency(nlohmann_json 3.11 CONFIG)
 
 if(NOT TARGET ZooKeeper::llama AND TARGET llama)
     add_library(ZooKeeper::llama INTERFACE IMPORTED)
-    # libcommon.a is installed by zoo_install_llama_common() in
+    # libllama-common.a is installed by zoo_install_llama_common() in
     # cmake/ZooKeeperLlama.cmake. Upstream llama.cpp does not export it from
     # its own CMake package, so consumers reach it by path through us.
     set_property(TARGET ZooKeeper::llama PROPERTY
         INTERFACE_LINK_LIBRARIES
-            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libcommon.a"
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libllama-common.a"
+            "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libllama-common-base.a"
             llama
     )
 endif()

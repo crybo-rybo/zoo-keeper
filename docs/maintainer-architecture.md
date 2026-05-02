@@ -78,7 +78,7 @@ Contributor rules:
 - `include/zoo/tools/*` contains the supported public tool API.
 - `ToolRegistry` owns normalized metadata and invocation wiring.
 - Parser and validator operate on strings and JSON, not on model internals.
-- `src/tools/*` contains private grammar helpers for schema extraction. Tool-call interception is no longer part of the product code; native tool calling is handled by llama.cpp's `common` layer.
+- `src/tools/*` contains private grammar helpers for schema extraction. Tool-call interception is no longer part of the product code; native tool calling is handled by llama.cpp's `llama-common` layer.
 
 Maintain these invariants:
 

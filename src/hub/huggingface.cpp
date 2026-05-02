@@ -1,75 +1,28 @@
 /**
  * @file huggingface.cpp
- * @brief HuggingFace Hub API client — wraps llama.cpp common download infrastructure.
+ * @brief HuggingFace Hub API client -- wraps llama.cpp llama-common download infrastructure.
  */
 
 #include "zoo/hub/huggingface.hpp"
 #include "hub/download_validation.hpp"
-#include "hub/path_utils.hpp"
 
 #include <common.h>
 #include <download.h>
-#if defined(LLAMA_USE_HTTPLIB)
-#include <http.h>
-#endif
 
-#include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace zoo::hub {
 
 struct HuggingFaceClient::Impl {
     Config config;
 
-    [[nodiscard]] common_header_list make_headers() const {
-        common_header_list headers;
-        if (!config.token.empty()) {
-            headers.emplace_back("Authorization", "Bearer " + config.token);
-        }
-        return headers;
-    }
-
-    [[nodiscard]] common_hf_file_res resolve_hf_file(const std::string& repo_id_with_tag) const {
-        return common_get_hf_file(repo_id_with_tag, config.token, false, make_headers());
-    }
-
-    [[nodiscard]] Expected<std::optional<uintmax_t>>
-    remote_file_size(const std::string& url) const {
-#if defined(LLAMA_USE_HTTPLIB)
-        try {
-            auto [cli, parts] = common_http_client(url);
-            httplib::Headers headers = {{"User-Agent", "llama-cpp"}};
-            for (const auto& header : make_headers()) {
-                headers.emplace(header.first, header.second);
-            }
-            cli.set_default_headers(headers);
-
-            const auto head = cli.Head(parts.path);
-            if (!head || head->status < 200 || head->status >= 300 ||
-                !head->has_header("Content-Length")) {
-                return std::optional<uintmax_t>{};
-            }
-
-            try {
-                return static_cast<uintmax_t>(
-                    std::stoull(head->get_header_value("Content-Length")));
-            } catch (const std::exception& e) {
-                return std::unexpected(Error{ErrorCode::DownloadFailed,
-                                             "Invalid Content-Length for download URL: " + url,
-                                             e.what()});
-            }
-        } catch (const std::exception& e) {
-            return std::unexpected(Error{ErrorCode::DownloadFailed,
-                                         "Failed to inspect download metadata for: " + url,
-                                         e.what()});
-        }
-#else
-        (void)url;
-        return std::optional<uintmax_t>{};
-#endif
+    [[nodiscard]] common_download_opts download_opts() const {
+        common_download_opts opts;
+        opts.bearer_token = config.token;
+        return opts;
     }
 };
 
@@ -114,14 +67,25 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
                       "Empty filename after '::' in: " + std::string(identifier)});
         }
         result.filename = std::string(filename);
-        result.repo_id = std::string(repo_part);
+        try {
+            auto [repo, tag] = common_download_split_repo_tag(std::string(repo_part));
+            result.repo_id = std::move(repo);
+            if (!tag.empty() && tag != "latest") {
+                result.tag = std::move(tag);
+            }
+        } catch (const std::invalid_argument&) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidModelIdentifier,
+                      "Repository ID must be in 'owner/repo' or 'owner/repo:tag' format: " +
+                          std::string(repo_part)});
+        }
     } else {
         // Use llama.cpp's split to handle "owner/repo:tag" format.
         try {
             auto [repo, tag] = common_download_split_repo_tag(std::string(identifier));
             result.repo_id = repo;
-            if (tag != "latest") {
-                result.tag = tag;
+            if (!tag.empty() && tag != "latest") {
+                result.tag = std::move(tag);
             }
         } catch (const std::invalid_argument&) {
             return std::unexpected(
@@ -154,55 +118,31 @@ Expected<std::string> HuggingFaceClient::resolve_download_url(const std::string&
 
 Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_id_with_tag) {
     try {
-        auto hf_res = impl_->resolve_hf_file(repo_id_with_tag);
-
-        if (hf_res.ggufFile.empty()) {
-            return std::unexpected(Error{ErrorCode::ModelNotFound,
-                                         "No GGUF file found in repository: " + repo_id_with_tag});
-        }
-
-        const std::string url =
-            "https://huggingface.co/" + hf_res.repo + "/resolve/main/" + hf_res.ggufFile;
-        auto expected_size = impl_->remote_file_size(url);
-        if (!expected_size) {
-            return std::unexpected(expected_size.error());
-        }
-
-        const std::string cache_dir = fs_get_cache_directory();
-        auto dest_path =
-            detail::build_download_destination(cache_dir, hf_res.repo, hf_res.ggufFile);
-        if (!dest_path) {
-            return std::unexpected(dest_path.error());
-        }
-
-        std::error_code ec;
-        std::filesystem::create_directories(dest_path->parent_path(), ec);
-        if (ec) {
-            return std::unexpected(
-                Error{ErrorCode::FilesystemError,
-                      "Failed to create download directory: " + dest_path->parent_path().string(),
-                      ec.message()});
+        auto parsed = parse_identifier(repo_id_with_tag);
+        if (!parsed) {
+            return std::unexpected(parsed.error());
         }
 
         common_params_model model_params;
-        model_params.path = dest_path->string();
-        model_params.url = url;
-        model_params.hf_repo = hf_res.repo;
-        model_params.hf_file = hf_res.ggufFile;
+        model_params.hf_repo = parsed->repo_id;
+        if (parsed->tag) {
+            model_params.hf_repo += ":" + *parsed->tag;
+        }
+        if (parsed->filename) {
+            model_params.hf_file = *parsed->filename;
+        }
 
-        bool ok =
-            common_download_model(model_params, impl_->config.token, false, impl_->make_headers());
-        if (!ok) {
+        auto download = common_download_model(model_params, impl_->download_opts());
+        if (download.model_path.empty()) {
             return std::unexpected(Error{ErrorCode::DownloadFailed,
                                          "Failed to download model from: " + repo_id_with_tag});
         }
 
-        if (auto validation = detail::validate_downloaded_file(*dest_path, *expected_size);
-            !validation) {
+        if (auto validation = detail::validate_downloaded_file(download.model_path); !validation) {
             return std::unexpected(validation.error());
         }
 
-        return dest_path->string();
+        return download.model_path;
     } catch (const std::exception& e) {
         return std::unexpected(
             Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});
@@ -211,41 +151,25 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
 
 Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
                                                        const std::string& destination_path) {
-    auto expected_size = impl_->remote_file_size(url);
-    if (!expected_size) {
-        return std::unexpected(expected_size.error());
-    }
+    try {
+        common_params_model model_params;
+        model_params.url = url;
+        model_params.path = destination_path;
 
-    // Ensure parent directory exists.
-    std::error_code ec;
-    std::filesystem::create_directories(std::filesystem::path(destination_path).parent_path(), ec);
-    if (ec) {
+        auto download = common_download_model(model_params, impl_->download_opts());
+        if (download.model_path.empty()) {
+            return std::unexpected(Error{ErrorCode::DownloadFailed, "Download failed for: " + url});
+        }
+
+        if (auto validation = detail::validate_downloaded_file(download.model_path); !validation) {
+            return std::unexpected(validation.error());
+        }
+
+        return download.model_path;
+    } catch (const std::exception& e) {
         return std::unexpected(
-            Error{ErrorCode::FilesystemError,
-                  "Failed to create download directory: " +
-                      std::filesystem::path(destination_path).parent_path().string(),
-                  ec.message()});
+            Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});
     }
-
-    int status = common_download_file_single(url, destination_path, impl_->config.token, false,
-                                             impl_->make_headers());
-
-    if (status < 0) {
-        return std::unexpected(Error{ErrorCode::DownloadFailed, "Download failed for: " + url});
-    }
-
-    if (status >= 400) {
-        return std::unexpected(
-            Error{ErrorCode::DownloadFailed,
-                  "Download returned HTTP " + std::to_string(status) + " for: " + url});
-    }
-
-    if (auto validation = detail::validate_downloaded_file(destination_path, *expected_size);
-        !validation) {
-        return std::unexpected(validation.error());
-    }
-
-    return destination_path;
 }
 
 std::vector<CachedModelInfo> HuggingFaceClient::list_cached_models() {
@@ -256,10 +180,14 @@ std::vector<CachedModelInfo> HuggingFaceClient::list_cached_models() {
 
     for (auto& entry : cached) {
         CachedModelInfo info;
-        info.user = std::move(entry.user);
-        info.model = std::move(entry.model);
-        info.tag = std::move(entry.tag);
-        info.size_bytes = entry.size;
+        const auto slash = entry.repo.find('/');
+        if (slash == std::string::npos) {
+            continue;
+        }
+        info.user = entry.repo.substr(0, slash);
+        info.model = entry.repo.substr(slash + 1);
+        info.tag = entry.tag.empty() ? "latest" : std::move(entry.tag);
+        info.size_bytes = 0;
         result.push_back(std::move(info));
     }
 
