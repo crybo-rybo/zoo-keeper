@@ -4,7 +4,7 @@
  */
 
 #include "hub/download_validation.hpp"
-#include "hub/path_utils.hpp"
+#include "hub/hf_cache_paths.hpp"
 #include "zoo/hub/huggingface.hpp"
 #include "zoo/hub/inspector.hpp"
 #include "zoo/hub/store.hpp"
@@ -329,60 +329,78 @@ TEST(CachedModelInfoTest, ToStringLatestOmitsTag) {
     EXPECT_EQ(info.to_string(), "owner/model");
 }
 
-// ---- Download destination helpers ----
+// ---- HuggingFace cache path helpers ----
 
-TEST(HubPathTest, NamespacesDownloadDestinationsByRepository) {
-    const auto first = zoo::hub::detail::build_download_destination("/tmp/zoo-cache",
-                                                                    "owner-a/repo", "model.gguf");
-    const auto second = zoo::hub::detail::build_download_destination("/tmp/zoo-cache",
-                                                                     "owner-b/repo", "model.gguf");
-
-    ASSERT_TRUE(first.has_value());
-    ASSERT_TRUE(second.has_value());
-    EXPECT_NE(*first, *second);
-    EXPECT_EQ(*first, std::filesystem::path("/tmp/zoo-cache") / "owner-a" / "repo" / "model.gguf");
-    EXPECT_EQ(*second, std::filesystem::path("/tmp/zoo-cache") / "owner-b" / "repo" / "model.gguf");
+TEST(HfCachePathsTest, RepoFolderReplacesSlashWithDoubleHyphen) {
+    EXPECT_EQ(zoo::hub::detail::hf_cache_repo_folder("owner/repo"), "models--owner--repo");
 }
 
-TEST(HubPathTest, PreservesNestedRepositoryFilePaths) {
-    const auto destination = zoo::hub::detail::build_download_destination(
-        "/tmp/zoo-store", "owner/repo", "subdir/model.Q4_K_M.gguf");
-
-    ASSERT_TRUE(destination.has_value());
-    EXPECT_EQ(*destination, std::filesystem::path("/tmp/zoo-store") / "owner" / "repo" / "subdir" /
-                                "model.Q4_K_M.gguf");
+TEST(HfCachePathsTest, RepoFolderPreservesInternalHyphens) {
+    EXPECT_EQ(zoo::hub::detail::hf_cache_repo_folder("owner/repo-with-dash"),
+              "models--owner--repo-with-dash");
 }
 
-TEST(HubDownloadValidationTest, AcceptsFileWhenExpectedSizeMatches) {
+TEST(HfCachePathsTest, SnapshotUrlBuildsResolveUrlForValidPath) {
+    const std::filesystem::path local = std::filesystem::path("/cache") / "models--owner--repo" /
+                                        "snapshots" / "abc123" / "model.gguf";
+
+    auto url = zoo::hub::detail::source_url_from_hf_snapshot("owner/repo", local);
+    ASSERT_TRUE(url.has_value());
+    EXPECT_EQ(*url, "https://huggingface.co/owner/repo/resolve/abc123/model.gguf");
+}
+
+TEST(HfCachePathsTest, SnapshotUrlPreservesNestedFilePath) {
+    const std::filesystem::path local = std::filesystem::path("/cache") / "models--owner--repo" /
+                                        "snapshots" / "abc123" / "subdir" / "model.Q4_K_M.gguf";
+
+    auto url = zoo::hub::detail::source_url_from_hf_snapshot("owner/repo", local);
+    ASSERT_TRUE(url.has_value());
+    EXPECT_EQ(*url, "https://huggingface.co/owner/repo/resolve/abc123/subdir/model.Q4_K_M.gguf");
+}
+
+TEST(HfCachePathsTest, SnapshotUrlReturnsNulloptForNonSnapshotPath) {
+    const std::filesystem::path local =
+        std::filesystem::path("/cache") / "models--owner--repo" / "blobs" / "abc123";
+
+    auto url = zoo::hub::detail::source_url_from_hf_snapshot("owner/repo", local);
+    EXPECT_FALSE(url.has_value());
+}
+
+TEST(HfCachePathsTest, SnapshotUrlReturnsNulloptForMismatchedRepo) {
+    const std::filesystem::path local = std::filesystem::path("/cache") / "models--other--repo" /
+                                        "snapshots" / "abc123" / "model.gguf";
+
+    auto url = zoo::hub::detail::source_url_from_hf_snapshot("owner/repo", local);
+    EXPECT_FALSE(url.has_value());
+}
+
+TEST(HubDownloadValidationTest, AcceptsExistingNonEmptyFile) {
     TempDir temp_dir;
     const auto model_path = temp_dir.path() / "model.gguf";
     std::ofstream out(model_path, std::ios::binary);
     out << "gguf";
     out.close();
 
-    auto result = zoo::hub::detail::validate_downloaded_file(model_path, 4u);
+    auto result = zoo::hub::detail::validate_downloaded_file(model_path);
     EXPECT_TRUE(result.has_value()) << result.error().to_string();
 }
 
-TEST(HubDownloadValidationTest, RejectsSizeMismatchBeforeCatalogRegistration) {
+TEST(HubDownloadValidationTest, RejectsEmptyFile) {
     TempDir temp_dir;
     const auto model_path = temp_dir.path() / "model.gguf";
     std::ofstream out(model_path, std::ios::binary);
-    out << "gguf";
     out.close();
 
-    auto result = zoo::hub::detail::validate_downloaded_file(model_path, 8u);
+    auto result = zoo::hub::detail::validate_downloaded_file(model_path);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::DownloadFailed);
 }
 
-TEST(HubDownloadValidationTest, RejectsEmptyFileWithoutExpectedSize) {
+TEST(HubDownloadValidationTest, RejectsMissingFile) {
     TempDir temp_dir;
-    const auto model_path = temp_dir.path() / "model.gguf";
-    std::ofstream out(model_path, std::ios::binary);
-    out.close();
+    const auto model_path = temp_dir.path() / "does-not-exist.gguf";
 
-    auto result = zoo::hub::detail::validate_downloaded_file(model_path, std::nullopt);
+    auto result = zoo::hub::detail::validate_downloaded_file(model_path);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::DownloadFailed);
 }
