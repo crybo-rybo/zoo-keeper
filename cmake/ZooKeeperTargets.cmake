@@ -13,7 +13,9 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/agent/backend_model.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/request_handle.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/runtime.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/runtime_tool_loop.cpp
+    ${PROJECT_SOURCE_DIR}/src/agent/runtime_commands.cpp
+    ${PROJECT_SOURCE_DIR}/src/agent/runtime_inference.cpp
+    ${PROJECT_SOURCE_DIR}/src/agent/runtime_lifecycle.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_extraction.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_init.cpp
