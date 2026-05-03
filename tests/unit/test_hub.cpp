@@ -151,37 +151,43 @@ TEST(HuggingFaceParseTest, ParseRepoWithLatestTag) {
 TEST(HuggingFaceParseTest, EmptyIdentifier) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    EXPECT_EQ(result.error().code,
+              zoo::hub::to_error_code(zoo::hub::HubErrorCode::InvalidModelIdentifier));
 }
 
 TEST(HuggingFaceParseTest, MissingSlash) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("just-a-name");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    EXPECT_EQ(result.error().code,
+              zoo::hub::to_error_code(zoo::hub::HubErrorCode::InvalidModelIdentifier));
 }
 
 TEST(HuggingFaceParseTest, EmptyFilenameAfterSeparator) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    EXPECT_EQ(result.error().code,
+              zoo::hub::to_error_code(zoo::hub::HubErrorCode::InvalidModelIdentifier));
 }
 
 TEST(HuggingFaceParseTest, MultipleSlashes) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("a/b/c");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    EXPECT_EQ(result.error().code,
+              zoo::hub::to_error_code(zoo::hub::HubErrorCode::InvalidModelIdentifier));
 }
 
 TEST(HuggingFaceParseTest, SlashAtStart) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("/repo");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    EXPECT_EQ(result.error().code,
+              zoo::hub::to_error_code(zoo::hub::HubErrorCode::InvalidModelIdentifier));
 }
 
 TEST(HuggingFaceParseTest, SlashAtEnd) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/");
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    EXPECT_EQ(result.error().code,
+              zoo::hub::to_error_code(zoo::hub::HubErrorCode::InvalidModelIdentifier));
 }
 
 // ---- Auto-configuration ----
@@ -393,7 +399,7 @@ TEST(HubDownloadValidationTest, RejectsEmptyFile) {
 
     auto result = zoo::hub::detail::validate_downloaded_file(model_path);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::DownloadFailed);
+    EXPECT_EQ(result.error().code, zoo::hub::to_error_code(zoo::hub::HubErrorCode::DownloadFailed));
 }
 
 TEST(HubDownloadValidationTest, RejectsMissingFile) {
@@ -402,7 +408,7 @@ TEST(HubDownloadValidationTest, RejectsMissingFile) {
 
     auto result = zoo::hub::detail::validate_downloaded_file(model_path);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::DownloadFailed);
+    EXPECT_EQ(result.error().code, zoo::hub::to_error_code(zoo::hub::HubErrorCode::DownloadFailed));
 }
 
 // ---- ModelStore catalog persistence / validation ----
@@ -479,7 +485,7 @@ TEST(ModelStoreCatalogTest, OpenRejectsDuplicateAliasesInCatalog) {
 
     auto store = zoo::hub::ModelStore::open(config);
     ASSERT_FALSE(store.has_value());
-    EXPECT_EQ(store.error().code, zoo::ErrorCode::StoreCorrupted);
+    EXPECT_EQ(store.error().code, zoo::hub::to_error_code(zoo::hub::HubErrorCode::StoreCorrupted));
 }
 
 TEST(ModelStoreCatalogTest, AddAliasRejectsEmptyAlias) {
