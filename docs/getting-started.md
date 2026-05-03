@@ -74,9 +74,10 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 |--------|-------------|
 | `create(model, agent, generation)` | Validate the split config blocks, load the model, and start the inference thread |
 | `chat(message)` | Submit a user message, returns `RequestHandle<TextResponse>` |
-| `chat(message, options, callback)` | Chat with a per-token streaming callback |
+| `chat(message, GenerationOverride::inherit_defaults(), callback)` | Chat using the configured default generation policy |
+| `chat(message, GenerationOverride::explicit_options(options), callback)` | Chat using exactly the supplied generation options |
 | `complete(messages)` | Submit a stateless request-scoped history without mutating retained history |
-| `complete(messages, options, callback)` | Stateless completion with a per-token streaming callback |
+| `complete(messages, GenerationOverride::explicit_options(options), callback)` | Stateless completion with exact per-call options |
 | `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
 | `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |
@@ -99,6 +100,11 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `agent_config()` | Access the loaded `AgentConfig` |
 | `default_generation_options()` | Access the default `GenerationOptions` |
 | `tool_count()` | Number of registered tools |
+
+Existing code that passes `GenerationOptions` remains source-compatible. For
+legacy `GenerationOptions{}` arguments, the request still inherits configured
+defaults; use `GenerationOverride::explicit_options(GenerationOptions{})` when
+you need the built-in defaults literally.
 
 ### `RequestHandle<Result>`
 

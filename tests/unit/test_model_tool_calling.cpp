@@ -77,6 +77,28 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     EXPECT_FALSE(ModelTestAccess::tool_state(*model)->parser_params.parser.empty());
 }
 
+TEST(ModelGenerationOverrideTest, InheritDefaultsUsesConfiguredDefaults) {
+    zoo::GenerationOptions defaults;
+    defaults.max_tokens = 21;
+    auto model = ModelTestAccess::make(make_config(), defaults);
+
+    auto resolved = ModelTestAccess::resolve_generation_options(
+        *model, zoo::GenerationOverride::inherit_defaults());
+
+    EXPECT_EQ(resolved.max_tokens, 21);
+}
+
+TEST(ModelGenerationOverrideTest, ExplicitBuiltInDefaultsStayExplicit) {
+    zoo::GenerationOptions defaults;
+    defaults.max_tokens = 21;
+    auto model = ModelTestAccess::make(make_config(), defaults);
+
+    auto resolved = ModelTestAccess::resolve_generation_options(
+        *model, zoo::GenerationOverride::explicit_options(zoo::GenerationOptions{}));
+
+    EXPECT_EQ(resolved.max_tokens, -1);
+}
+
 TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
     auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 

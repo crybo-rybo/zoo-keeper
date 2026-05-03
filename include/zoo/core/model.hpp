@@ -55,15 +55,13 @@ class Model {
      * @brief Generates an assistant response for a new user message.
      */
     Expected<TextResponse> generate(std::string_view user_message,
-                                    const GenerationOptions& options = GenerationOptions{},
-                                    TokenCallback on_token = {},
+                                    GenerationOverride generation = {}, TokenCallback on_token = {},
                                     CancellationCallback should_cancel = {});
 
     /**
      * @brief Generates an assistant response for a structured inbound message.
      */
-    Expected<TextResponse> generate(MessageView message,
-                                    const GenerationOptions& options = GenerationOptions{},
+    Expected<TextResponse> generate(MessageView message, GenerationOverride generation = {},
                                     TokenCallback on_token = {},
                                     CancellationCallback should_cancel = {});
 
@@ -84,9 +82,9 @@ class Model {
      *
      * @note This method does not commit the assistant turn to history.
      */
-    Expected<GenerationResult>
-    generate_from_history(const GenerationOptions& options = GenerationOptions{},
-                          TokenCallback on_token = {}, CancellationCallback should_cancel = {});
+    Expected<GenerationResult> generate_from_history(GenerationOverride generation = {},
+                                                     TokenCallback on_token = {},
+                                                     CancellationCallback should_cancel = {});
 
     /**
      * @brief Advances the incremental chat-template checkpoint to the current history.
@@ -202,8 +200,7 @@ class Model {
     [[nodiscard]] int estimate_message_tokens(const Message& message) const;
     void trim_history_to_fit();
     void rollback_last_message() noexcept;
-    [[nodiscard]] GenerationOptions
-    resolve_generation_options(const GenerationOptions& overrides) const;
+    [[nodiscard]] GenerationOptions resolve_generation_options(GenerationOverride generation) const;
 
     std::unique_ptr<Impl> impl_;
 };

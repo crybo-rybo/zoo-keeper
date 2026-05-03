@@ -57,6 +57,16 @@ struct ModelTestAccess {
     static Expected<std::string> render_prompt_delta(Model& model) {
         return model.render_prompt_delta();
     }
+
+    static GenerationOptions resolve_generation_options(Model& model,
+                                                        const GenerationOptions& overrides) {
+        return model.resolve_generation_options(GenerationOverride(overrides));
+    }
+
+    static GenerationOptions resolve_generation_options(Model& model,
+                                                        GenerationOverride generation) {
+        return model.resolve_generation_options(generation);
+    }
 };
 
 } // namespace zoo::core

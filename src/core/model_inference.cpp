@@ -213,16 +213,15 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     return generated_text;
 }
 
-Expected<TextResponse> Model::generate(std::string_view user_message,
-                                       const GenerationOptions& options, TokenCallback on_token,
-                                       CancellationCallback should_cancel) {
-    return generate(MessageView{Role::User, user_message}, options, on_token, should_cancel);
+Expected<TextResponse> Model::generate(std::string_view user_message, GenerationOverride generation,
+                                       TokenCallback on_token, CancellationCallback should_cancel) {
+    return generate(MessageView{Role::User, user_message}, generation, on_token, should_cancel);
 }
 
-Expected<TextResponse> Model::generate(MessageView message, const GenerationOptions& options,
+Expected<TextResponse> Model::generate(MessageView message, GenerationOverride generation,
                                        TokenCallback on_token, CancellationCallback should_cancel) {
     auto start_time = std::chrono::steady_clock::now();
-    auto effective_options = resolve_generation_options(options);
+    auto effective_options = resolve_generation_options(generation);
     if (auto validation = effective_options.validate(); !validation) {
         return std::unexpected(validation.error());
     }
@@ -324,10 +323,10 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
     return response;
 }
 
-Expected<Model::GenerationResult> Model::generate_from_history(const GenerationOptions& options,
+Expected<Model::GenerationResult> Model::generate_from_history(GenerationOverride generation,
                                                                TokenCallback on_token,
                                                                CancellationCallback should_cancel) {
-    auto effective_options = resolve_generation_options(options);
+    auto effective_options = resolve_generation_options(generation);
     if (auto validation = effective_options.validate(); !validation) {
         return std::unexpected(validation.error());
     }
@@ -387,11 +386,11 @@ std::vector<std::string> Model::merge_stop_sequences(std::vector<std::string> ba
     return base;
 }
 
-GenerationOptions Model::resolve_generation_options(const GenerationOptions& overrides) const {
-    if (overrides.is_default()) {
+GenerationOptions Model::resolve_generation_options(GenerationOverride generation) const {
+    if (!generation.options()) {
         return impl_->loaded_.default_generation_options;
     }
-    return overrides;
+    return *generation.options();
 }
 
 } // namespace zoo::core

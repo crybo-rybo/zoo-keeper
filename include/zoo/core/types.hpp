@@ -654,6 +654,40 @@ struct GenerationOptions {
 };
 
 /**
+ * @brief Explicit per-call generation override semantics.
+ */
+class GenerationOverride {
+  public:
+    GenerationOverride() noexcept = default;
+
+    GenerationOverride(const GenerationOptions& options)
+        : options_(options.is_default() ? std::nullopt
+                                        : std::optional<GenerationOptions>(options)) {}
+
+    GenerationOverride(GenerationOptions&& options)
+        : options_(options.is_default() ? std::nullopt
+                                        : std::optional<GenerationOptions>(std::move(options))) {}
+
+    [[nodiscard]] static GenerationOverride inherit_defaults() noexcept {
+        return {};
+    }
+
+    [[nodiscard]] static GenerationOverride explicit_options(GenerationOptions options) {
+        return GenerationOverride(std::optional<GenerationOptions>(std::move(options)));
+    }
+
+    [[nodiscard]] const std::optional<GenerationOptions>& options() const noexcept {
+        return options_;
+    }
+
+  private:
+    explicit GenerationOverride(std::optional<GenerationOptions> options) noexcept
+        : options_(std::move(options)) {}
+
+    std::optional<GenerationOptions> options_;
+};
+
+/**
  * @brief Token accounting for a completed generation.
  */
 struct TokenUsage {

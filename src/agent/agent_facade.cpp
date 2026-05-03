@@ -54,34 +54,34 @@ Agent::Agent(ModelConfig model_config, AgentConfig agent_config,
 Agent::~Agent() = default;
 
 RequestHandle<TextResponse> Agent::chat(std::string_view user_message,
-                                        const GenerationOptions& options,
+                                        GenerationOverride generation,
                                         AsyncTokenCallback callback) {
-    return impl_->runtime.chat(user_message, options, std::move(callback));
+    return impl_->runtime.chat(user_message, generation, std::move(callback));
 }
 
-RequestHandle<TextResponse> Agent::chat(MessageView message, const GenerationOptions& options,
+RequestHandle<TextResponse> Agent::chat(MessageView message, GenerationOverride generation,
                                         AsyncTokenCallback callback) {
-    return impl_->runtime.chat(message, options, std::move(callback));
+    return impl_->runtime.chat(message, generation, std::move(callback));
 }
 
 RequestHandle<TextResponse> Agent::complete(ConversationView messages,
-                                            const GenerationOptions& options,
+                                            GenerationOverride generation,
                                             AsyncTokenCallback callback) {
-    return impl_->runtime.complete(messages, options, std::move(callback));
+    return impl_->runtime.complete(messages, generation, std::move(callback));
 }
 
 RequestHandle<ExtractionResponse> Agent::extract_stateful(const nlohmann::json& output_schema,
                                                           MessageView message,
-                                                          const GenerationOptions& options,
+                                                          GenerationOverride generation,
                                                           AsyncTokenCallback callback) {
-    return impl_->runtime.extract(output_schema, message, options, std::move(callback));
+    return impl_->runtime.extract(output_schema, message, generation, std::move(callback));
 }
 
 RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
                                                  ConversationView messages,
-                                                 const GenerationOptions& options,
+                                                 GenerationOverride generation,
                                                  AsyncTokenCallback callback) {
-    return impl_->runtime.extract(output_schema, messages, options, std::move(callback));
+    return impl_->runtime.extract(output_schema, messages, generation, std::move(callback));
 }
 
 void Agent::cancel(RequestId id) {

@@ -39,26 +39,25 @@ class AgentRuntime {
     AgentRuntime& operator=(AgentRuntime&&) = delete;
 
     RequestHandle<TextResponse> chat(std::string_view user_message,
-                                     const GenerationOptions& options = GenerationOptions{},
+                                     GenerationOverride generation = {},
                                      AsyncTokenCallback callback = {});
-    RequestHandle<TextResponse> chat(MessageView message,
-                                     const GenerationOptions& options = GenerationOptions{},
+    RequestHandle<TextResponse> chat(MessageView message, GenerationOverride generation = {},
                                      AsyncTokenCallback callback = {});
     RequestHandle<TextResponse> complete(ConversationView messages,
-                                         const GenerationOptions& options = GenerationOptions{},
+                                         GenerationOverride generation = {},
                                          AsyncTokenCallback callback = {});
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, std::string_view user_message,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTokenCallback callback = {});
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, MessageView message,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTokenCallback callback = {});
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, ConversationView messages,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              std::string_view user_message,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              MessageView message,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              ConversationView messages,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
 
     void cancel(RequestId id);
     void set_system_prompt(std::string_view prompt);
@@ -114,7 +113,7 @@ class AgentRuntime {
     Expected<void> register_tools_impl(std::vector<tools::ToolDefinition> definitions,
                                        std::optional<std::chrono::nanoseconds> timeout);
 
-    GenerationOptions resolve_generation_options(const GenerationOptions& overrides) const;
+    GenerationOptions resolve_generation_options(GenerationOverride generation) const;
 
     ModelConfig model_config_;
     AgentConfig agent_config_;

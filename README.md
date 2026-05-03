@@ -178,7 +178,8 @@ int main() {
         return zoo::TokenAction::Continue;
     };
 
-    auto handle = agent->chat("What is 42 + 58?", {}, on_token);
+    auto handle =
+        agent->chat("What is 42 + 58?", zoo::GenerationOverride::inherit_defaults(), on_token);
     auto response = handle.await_result();
 
     if (!response) {
