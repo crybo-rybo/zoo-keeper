@@ -21,5 +21,9 @@ if(ZOO_BUILD_DOCS)
     include(cmake/Doxygen.cmake)
 endif()
 
+if(ZOO_ENABLE_CRAP)
+    include(cmake/Crap.cmake)
+endif()
+
 include(cmake/ZooKeeperInstall.cmake)
 include(cmake/ZooKeeperPackage.cmake)

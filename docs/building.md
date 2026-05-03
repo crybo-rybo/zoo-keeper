@@ -21,6 +21,7 @@ Zoo-Keeper ships small wrapper scripts for the common local workflows:
 - `scripts/test.sh` - runs `ctest` against the existing `build/` tree
 - `scripts/format.sh` - runs `clang-format` over the repo's C++ files
 - `scripts/lint.sh` - performs a warning-free build
+- `scripts/crap.sh` - builds with CRAP analysis enabled and runs the `crap` target
 
 `scripts/build-all.sh` is the easiest way to exercise the broad release surface
 before packaging, while `scripts/build.sh` stays useful for smaller builds or
@@ -67,6 +68,8 @@ preset enables the live-model test label set.
 | `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan + UBSan | OFF |
+| `ZOO_ENABLE_CRAP` | CRAP score analysis (complexity × coverage) — implies `ZOO_BUILD_TESTS` and `ZOO_ENABLE_COVERAGE` | OFF |
+| `ZOO_CRAP_THRESHOLD` | CRAP score at which a function is flagged (non-zero exit) | `30` |
 | `ZOO_ENABLE_INSTALL` | Generate install and package metadata | ON top-level, OFF as subproject |
 | `ZOO_ENABLE_LOGGING` | Emit runtime diagnostic logs to stderr | OFF |
 | `ZOO_WARNINGS_AS_ERRORS` | Treat warnings in zoo-owned targets as errors | OFF |
@@ -192,6 +195,56 @@ scripts/test.sh
 
 GitHub Actions also captures an `lcov` report and uploads it as a workflow
 artifact. Upload to Codecov runs only when `CODECOV_TOKEN` is available in CI.
+
+## CRAP Score
+
+CRAP (Change Risk Anti-Patterns) combines cyclomatic complexity and test
+coverage into a single risk metric per function:
+
+```
+CRAP(m) = CC(m)² × (1 − coverage%)³ + CC(m)
+```
+
+A score above 30 indicates a function that is both complex and poorly tested.
+The minimum score is 1 (simple, fully covered). Untested complex code is
+penalized exponentially — a function with cyclomatic complexity 6 and no
+coverage scores 37.
+
+### Prerequisites
+
+```bash
+pip install lizard gcovr
+```
+
+### Running
+
+```bash
+# One-shot: build + run the crap target
+scripts/crap.sh
+
+# With a tighter threshold
+scripts/crap.sh -DZOO_CRAP_THRESHOLD=20
+
+# Manually
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_ENABLE_CRAP=ON
+cmake --build build --target crap
+```
+
+`ZOO_ENABLE_CRAP=ON` automatically implies `ZOO_BUILD_TESTS=ON` and
+`ZOO_ENABLE_COVERAGE=ON` — no need to set them separately.
+
+The `crap` target:
+1. Clears any stale `.gcda` coverage files
+2. Runs the test suite to generate fresh coverage data
+3. Runs `lizard` over `src/` and `include/zoo/` for cyclomatic complexity
+4. Runs `gcovr` for per-line coverage data
+5. Computes and prints a CRAP score table sorted by score (highest first)
+
+Functions exceeding the threshold are flagged with `<-- over threshold` and
+the process exits non-zero, making this suitable as a CI gate.
+
+A timestamped JSON report (`<YYYYMMDD_HHMMSS>_crap_report.json`) is written
+automatically to the working directory on every run alongside the console output.
 
 ## API Reference
 

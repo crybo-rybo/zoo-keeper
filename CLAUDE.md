@@ -24,6 +24,9 @@ scripts/build.sh -DZOO_BUILD_HUB=ON
 # Sanitizers / coverage
 scripts/build.sh -DZOO_ENABLE_SANITIZERS=ON
 scripts/build.sh -DZOO_ENABLE_COVERAGE=ON
+
+# CRAP score (complexity × coverage risk metric) — requires: pip install lizard gcovr
+scripts/crap.sh
 ```
 
 ## Integration Testing
