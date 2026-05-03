@@ -11,32 +11,32 @@
 
 namespace zoo::core {
 
-void Model::initialize_global() {
+void initialize_model_backend() {
     ensure_backend_initialized();
 }
 
 Model::Model(ModelConfig model_config, GenerationOptions default_generation)
     : impl_(std::make_unique<Impl>(std::move(model_config), std::move(default_generation))) {}
 
-void Model::LlamaModelDeleter::operator()(llama_model* model) const noexcept {
+void LlamaModelDeleter::operator()(llama_model* model) const noexcept {
     if (model) {
         llama_model_free(model);
     }
 }
 
-void Model::LlamaContextDeleter::operator()(llama_context* context) const noexcept {
+void LlamaContextDeleter::operator()(llama_context* context) const noexcept {
     if (context) {
         llama_free(context);
     }
 }
 
-void Model::LlamaSamplerDeleter::operator()(llama_sampler* sampler) const noexcept {
+void LlamaSamplerDeleter::operator()(llama_sampler* sampler) const noexcept {
     if (sampler) {
         llama_sampler_free(sampler);
     }
 }
 
-void Model::ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const noexcept {
+void ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const noexcept {
     if (tmpls) {
         common_chat_templates_free(tmpls);
     }
@@ -70,7 +70,7 @@ Expected<std::unique_ptr<Model>> Model::load(const ModelConfig& model_config,
     }
 
     auto model = std::unique_ptr<Model>(new Model(model_config, default_generation));
-    if (auto result = model->initialize(); !result) {
+    if (auto result = initialize_model(*model->impl_); !result) {
         return std::unexpected(result.error());
     }
 
