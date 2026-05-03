@@ -80,12 +80,15 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
 | `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |
-| `set_system_prompt(text)` | Set or update the system prompt |
+| `try_set_system_prompt(text)` | Set or update the system prompt with `Expected<void>` error reporting |
+| `set_system_prompt(text)` | Best-effort system prompt update |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
 | `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
 | `register_tools(definitions)` | Batch-register multiple tools with one inference-thread command |
 | `set_system_prompt(text, timeout)` | Set system prompt with timeout; returns `RequestTimeout` if inference thread is busy |
+| `try_get_history()` | Get history snapshot with `Expected<HistorySnapshot>` error reporting |
 | `get_history(timeout)` | Get history snapshot with timeout; returns `RequestTimeout` if inference thread is busy |
+| `try_clear_history()` | Clear conversation history with `Expected<void>` error reporting |
 | `clear_history(timeout)` | Clear conversation history with timeout; returns `RequestTimeout` if inference thread is busy |
 | `register_tool(..., timeout)` | Register a tool with timeout; returns `RequestTimeout` if inference thread is busy |
 | `stop()` | Gracefully shut down the agent |
@@ -99,7 +102,7 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 
 ### `RequestHandle<Result>`
 
-Returned by async agent methods. Use `id()` to correlate or cancel a request, `ready()` to poll, and `await_result()` to block until the `Expected<Result>` is ready.
+Returned by async agent methods. Use `id()` to correlate externally, `cancel()` to request cancellation through the handle, `ready()` to poll, and `await_result()` to block until the `Expected<Result>` is ready.
 
 ### `zoo::core::Model`
 

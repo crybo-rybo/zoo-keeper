@@ -55,32 +55,32 @@ Agent::~Agent() = default;
 
 RequestHandle<TextResponse> Agent::chat(std::string_view user_message,
                                         const GenerationOptions& options,
-                                        AsyncTextCallback callback) {
+                                        AsyncTokenCallback callback) {
     return impl_->runtime.chat(user_message, options, std::move(callback));
 }
 
 RequestHandle<TextResponse> Agent::chat(MessageView message, const GenerationOptions& options,
-                                        AsyncTextCallback callback) {
+                                        AsyncTokenCallback callback) {
     return impl_->runtime.chat(message, options, std::move(callback));
 }
 
 RequestHandle<TextResponse> Agent::complete(ConversationView messages,
                                             const GenerationOptions& options,
-                                            AsyncTextCallback callback) {
+                                            AsyncTokenCallback callback) {
     return impl_->runtime.complete(messages, options, std::move(callback));
 }
 
 RequestHandle<ExtractionResponse> Agent::extract_stateful(const nlohmann::json& output_schema,
                                                           MessageView message,
                                                           const GenerationOptions& options,
-                                                          AsyncTextCallback callback) {
+                                                          AsyncTokenCallback callback) {
     return impl_->runtime.extract(output_schema, message, options, std::move(callback));
 }
 
 RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
                                                  ConversationView messages,
                                                  const GenerationOptions& options,
-                                                 AsyncTextCallback callback) {
+                                                 AsyncTokenCallback callback) {
     return impl_->runtime.extract(output_schema, messages, options, std::move(callback));
 }
 
@@ -90,6 +90,10 @@ void Agent::cancel(RequestId id) {
 
 void Agent::set_system_prompt(std::string_view prompt) {
     impl_->runtime.set_system_prompt(prompt);
+}
+
+Expected<void> Agent::try_set_system_prompt(std::string_view prompt) {
+    return impl_->runtime.try_set_system_prompt(prompt);
 }
 
 Expected<void> Agent::set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout) {
@@ -117,12 +121,20 @@ HistorySnapshot Agent::get_history() const {
     return impl_->runtime.get_history();
 }
 
+Expected<HistorySnapshot> Agent::try_get_history() const {
+    return impl_->runtime.try_get_history();
+}
+
 Expected<HistorySnapshot> Agent::get_history(std::chrono::nanoseconds timeout) const {
     return impl_->runtime.get_history(timeout);
 }
 
 void Agent::clear_history() {
     impl_->runtime.clear_history();
+}
+
+Expected<void> Agent::try_clear_history() {
+    return impl_->runtime.try_clear_history();
 }
 
 Expected<void> Agent::clear_history(std::chrono::nanoseconds timeout) {

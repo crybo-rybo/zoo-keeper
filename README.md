@@ -163,7 +163,10 @@ int main() {
     model.n_gpu_layers = -1; // Offload all layers to GPU
 
     auto agent = zoo::Agent::create(model).value();
-    agent->set_system_prompt("You are a concise assistant.");
+    if (auto set_prompt = agent->try_set_system_prompt("You are a concise assistant."); !set_prompt) {
+        std::cerr << set_prompt.error().to_string() << '\n';
+        return 1;
+    }
 
     // Register a native C++ function as a tool
     agent->register_tool("add", "Add two integers", {"a", "b"},

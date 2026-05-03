@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -514,8 +515,48 @@ using CancellationCallback = FunctionRef<bool()>;
 
 /**
  * @brief Async streaming callback stored by the agent runtime.
+ *
+ * Callables returning `void` are adapted to `TokenAction::Continue`.
  */
-using AsyncTextCallback = std::function<void(std::string_view)>;
+class AsyncTokenCallback {
+  public:
+    AsyncTokenCallback() = default;
+    AsyncTokenCallback(std::nullptr_t) noexcept {}
+
+    template <typename Callback>
+        requires(
+            !std::same_as<std::remove_cvref_t<Callback>, AsyncTokenCallback> &&
+            requires(Callback& callback, std::string_view token) {
+                std::invoke(callback, token);
+            } &&
+            (std::same_as<std::invoke_result_t<Callback&, std::string_view>, void> ||
+             std::convertible_to<std::invoke_result_t<Callback&, std::string_view>, TokenAction>))
+    AsyncTokenCallback(Callback&& callback) {
+        if constexpr (std::same_as<std::invoke_result_t<Callback&, std::string_view>, void>) {
+            callback_ = [cb = std::forward<Callback>(callback)](std::string_view token) mutable {
+                std::invoke(cb, token);
+                return TokenAction::Continue;
+            };
+        } else {
+            callback_ = [cb = std::forward<Callback>(callback)](std::string_view token) mutable {
+                return static_cast<TokenAction>(std::invoke(cb, token));
+            };
+        }
+    }
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return static_cast<bool>(callback_);
+    }
+
+    TokenAction operator()(std::string_view token) const {
+        return callback_(token);
+    }
+
+  private:
+    std::function<TokenAction(std::string_view)> callback_;
+};
+
+using AsyncTextCallback = AsyncTokenCallback;
 
 /**
  * @brief Model loading and backend configuration.

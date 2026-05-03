@@ -42,14 +42,14 @@ RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
     Message&& message,
     const GenerationOptions& options = GenerationOptions{},
-    AsyncTextCallback callback = {});
+    AsyncTokenCallback callback = {});
 
 // Stateless - use an explicit borrowed message sequence
 RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
     ConversationView messages,
     const GenerationOptions& options = GenerationOptions{},
-    AsyncTextCallback callback = {});
+    AsyncTokenCallback callback = {});
 ```
 
 These entry points return a `RequestHandle<ExtractionResponse>`. The structured
@@ -82,7 +82,8 @@ auto handle =
 
 Pass an `on_token` callback to receive tokens as they are generated. The
 callback runs on the CallbackDispatcher thread; avoid blocking inside it to
-prevent backing up the dispatcher queue.
+prevent backing up the dispatcher queue. Return `TokenAction::Stop` when the
+callback has received enough output.
 
 ```cpp
 auto handle = agent->extract(
@@ -91,6 +92,7 @@ auto handle = agent->extract(
     {},
     [](std::string_view token) {
         std::cout << token << std::flush;
+        return zoo::TokenAction::Continue;
     });
 
 auto response = handle.await_result();
@@ -98,13 +100,14 @@ auto response = handle.await_result();
 
 ## Cancellation
 
-`Agent::cancel(handle.id())` cancels an in-progress extraction with the same
-semantics as `chat()` cancellation. A cancelled extraction returns
-`ErrorCode::RequestCancelled`.
+`RequestHandle::cancel()` cancels an in-progress extraction with the same
+semantics as `chat()` cancellation. `Agent::cancel(handle.id())` remains
+available when a caller needs to correlate requests externally. A cancelled
+extraction returns `ErrorCode::RequestCancelled`.
 
 ```cpp
 auto handle = agent->extract(schema, "...");
-agent->cancel(handle.id());
+handle.cancel();
 auto response = handle.await_result();
 ```
 

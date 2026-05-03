@@ -27,13 +27,13 @@ std::vector<Message> materialize_conversation(ConversationView messages) {
 
 RequestHandle<TextResponse> AgentRuntime::chat(std::string_view user_message,
                                                const GenerationOptions& options,
-                                               AsyncTextCallback callback) {
+                                               AsyncTokenCallback callback) {
     return chat(MessageView{Role::User, user_message}, options, std::move(callback));
 }
 
 RequestHandle<TextResponse> AgentRuntime::chat(MessageView message,
                                                const GenerationOptions& options,
-                                               AsyncTextCallback callback) {
+                                               AsyncTokenCallback callback) {
     RequestPayload payload;
     payload.messages.push_back(Message::from_view(message));
     payload.history_mode = HistoryMode::Append;
@@ -45,7 +45,7 @@ RequestHandle<TextResponse> AgentRuntime::chat(MessageView message,
 
 RequestHandle<TextResponse> AgentRuntime::complete(ConversationView messages,
                                                    const GenerationOptions& options,
-                                                   AsyncTextCallback callback) {
+                                                   AsyncTokenCallback callback) {
     RequestPayload payload;
     payload.messages = materialize_conversation(messages);
     payload.history_mode = HistoryMode::Replace;
@@ -64,7 +64,7 @@ RequestHandle<TextResponse> AgentRuntime::complete(ConversationView messages,
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         std::string_view user_message,
                                                         const GenerationOptions& options,
-                                                        AsyncTextCallback callback) {
+                                                        AsyncTokenCallback callback) {
     return extract(output_schema, MessageView{Role::User, user_message}, options,
                    std::move(callback));
 }
@@ -72,7 +72,7 @@ RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& ou
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         MessageView message,
                                                         const GenerationOptions& options,
-                                                        AsyncTextCallback callback) {
+                                                        AsyncTokenCallback callback) {
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
         return make_immediate_error_handle<ExtractionResponse>(
@@ -92,7 +92,7 @@ RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& ou
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         ConversationView messages,
                                                         const GenerationOptions& options,
-                                                        AsyncTextCallback callback) {
+                                                        AsyncTokenCallback callback) {
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
         return make_immediate_error_handle<ExtractionResponse>(
@@ -150,8 +150,8 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload&& payload) {
         return make_immediate_error_handle<Result>(reservation.error());
     }
 
-    auto state = std::make_shared<SlotRequestState<Result>>(request_slots_, reservation->slot,
-                                                            reservation->generation);
+    auto state = std::make_shared<SlotRequestState<Result>>(
+        request_slots_, reservation->id, reservation->slot, reservation->generation);
     RequestHandle<Result> handle{std::move(state), reservation->id};
 
     if (!request_mailbox_.push_request(QueuedRequest{reservation->slot, reservation->generation})) {

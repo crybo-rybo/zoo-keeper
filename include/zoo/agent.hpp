@@ -77,6 +77,8 @@ template <internal::agent::RequestHandleResult Result> class RequestHandle {
 
     [[nodiscard]] bool ready() const;
 
+    void cancel() const noexcept;
+
     Expected<Result> await_result();
 
     template <typename Rep, typename Period>
@@ -117,21 +119,21 @@ class Agent {
      */
     RequestHandle<TextResponse> chat(std::string_view user_message,
                                      const GenerationOptions& options = GenerationOptions{},
-                                     AsyncTextCallback callback = {});
+                                     AsyncTokenCallback callback = {});
 
     /**
      * @brief Queues a structured single-message request for asynchronous processing.
      */
     RequestHandle<TextResponse> chat(MessageView message,
                                      const GenerationOptions& options = GenerationOptions{},
-                                     AsyncTextCallback callback = {});
+                                     AsyncTokenCallback callback = {});
 
     /**
      * @brief Queues a stateless completion against the supplied full message history.
      */
     RequestHandle<TextResponse> complete(ConversationView messages,
                                          const GenerationOptions& options = GenerationOptions{},
-                                         AsyncTextCallback callback = {});
+                                         AsyncTokenCallback callback = {});
 
     /**
      * @brief Queues a structured extraction request (stateful).
@@ -139,7 +141,7 @@ class Agent {
     template <internal::agent::ExtractMessage Message>
     RequestHandle<ExtractionResponse>
     extract(const nlohmann::json& output_schema, Message&& message,
-            const GenerationOptions& options = {}, AsyncTextCallback callback = {}) {
+            const GenerationOptions& options = {}, AsyncTokenCallback callback = {}) {
         if constexpr (std::same_as<std::remove_cvref_t<Message>, MessageView>) {
             return extract_stateful(output_schema, message, options, std::move(callback));
         } else {
@@ -156,17 +158,18 @@ class Agent {
     RequestHandle<ExtractionResponse>
     extract(const nlohmann::json& output_schema, ConversationView messages,
             const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
+            AsyncTokenCallback callback = {});
 
     /**
      * @brief Requests cancellation of a queued or running request.
      */
     void cancel(RequestId id);
 
-    /**
-     * @brief Replaces the current system prompt on the underlying model.
-     */
+    /// Best-effort system-prompt replacement. Use `try_set_system_prompt()` to observe errors.
     void set_system_prompt(std::string_view prompt);
+
+    /// Replaces the current system prompt, returning command-lane failures.
+    Expected<void> try_set_system_prompt(std::string_view prompt);
 
     /**
      * @brief Replaces the current system prompt, returning RequestTimeout if the command waits too
@@ -207,15 +210,21 @@ class Agent {
         return default_generation_options_;
     }
 
-    /// Returns a history snapshot taken synchronously on the inference thread.
+    /// Best-effort history snapshot. Use `try_get_history()` to observe errors.
     [[nodiscard]] HistorySnapshot get_history() const;
+
+    /// Returns a history snapshot, or an error if the command cannot run.
+    [[nodiscard]] Expected<HistorySnapshot> try_get_history() const;
 
     /// Returns a history snapshot, or `RequestTimeout` if the command waits too long.
     /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     [[nodiscard]] Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
 
-    /// Clears history synchronously on the inference thread before later queued work.
+    /// Best-effort history clear. Use `try_clear_history()` to observe errors.
     void clear_history();
+
+    /// Clears history, or returns an error if the command cannot run.
+    Expected<void> try_clear_history();
 
     /// Clears history, returning `RequestTimeout` if the command waits too long.
     /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
@@ -280,7 +289,7 @@ class Agent {
     RequestHandle<ExtractionResponse> extract_stateful(const nlohmann::json& output_schema,
                                                        MessageView message,
                                                        const GenerationOptions& options,
-                                                       AsyncTextCallback callback);
+                                                       AsyncTokenCallback callback);
     Expected<void> register_tool(tools::ToolDefinition definition,
                                  std::optional<std::chrono::nanoseconds> timeout = {});
 

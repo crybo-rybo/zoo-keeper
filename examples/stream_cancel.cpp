@@ -5,7 +5,6 @@
 
 #include <zoo/zoo.hpp>
 
-#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -35,20 +34,10 @@ int main(int argc, char** argv) {
     auto handle = agent->chat("Write a detailed travel guide for Iceland.", {},
                               [](std::string_view token) { std::cout << token << std::flush; });
 
-    // Safety: the canceller thread captures `agent` and `completed` by reference.
-    // This is safe because `canceller.join()` below guarantees the thread finishes
-    // before either variable goes out of scope.
-    std::atomic<bool> completed{false};
-    std::thread canceller([&agent, &completed, id = handle.id()] {
-        std::this_thread::sleep_for(250ms);
-        if (!completed.load()) {
-            agent->cancel(id);
-        }
-    });
+    std::this_thread::sleep_for(250ms);
+    handle.cancel();
 
     auto response = handle.await_result();
-    completed.store(true);
-    canceller.join();
 
     if (!response) {
         if (response.error().code == zoo::ErrorCode::RequestCancelled) {

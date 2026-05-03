@@ -40,28 +40,29 @@ class AgentRuntime {
 
     RequestHandle<TextResponse> chat(std::string_view user_message,
                                      const GenerationOptions& options = GenerationOptions{},
-                                     AsyncTextCallback callback = {});
+                                     AsyncTokenCallback callback = {});
     RequestHandle<TextResponse> chat(MessageView message,
                                      const GenerationOptions& options = GenerationOptions{},
-                                     AsyncTextCallback callback = {});
+                                     AsyncTokenCallback callback = {});
     RequestHandle<TextResponse> complete(ConversationView messages,
                                          const GenerationOptions& options = GenerationOptions{},
-                                         AsyncTextCallback callback = {});
+                                         AsyncTokenCallback callback = {});
     RequestHandle<ExtractionResponse>
     extract(const nlohmann::json& output_schema, std::string_view user_message,
             const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
+            AsyncTokenCallback callback = {});
     RequestHandle<ExtractionResponse>
     extract(const nlohmann::json& output_schema, MessageView message,
             const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
+            AsyncTokenCallback callback = {});
     RequestHandle<ExtractionResponse>
     extract(const nlohmann::json& output_schema, ConversationView messages,
             const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
+            AsyncTokenCallback callback = {});
 
     void cancel(RequestId id);
     void set_system_prompt(std::string_view prompt);
+    Expected<void> try_set_system_prompt(std::string_view prompt);
     Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
     Expected<void> add_system_message(std::string_view message);
     Expected<void> add_system_message(std::string_view message, std::chrono::nanoseconds timeout);
@@ -69,8 +70,10 @@ class AgentRuntime {
     bool is_running() const noexcept;
 
     HistorySnapshot get_history() const;
+    Expected<HistorySnapshot> try_get_history() const;
     Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
     void clear_history();
+    Expected<void> try_clear_history();
     Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
     Expected<void> register_tool(tools::ToolDefinition definition,
