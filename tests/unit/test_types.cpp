@@ -73,6 +73,22 @@ TEST(ToolCallTest, OwnedToolCallProducesBorrowedView) {
     EXPECT_EQ(view.arguments_json, R"({"city":"Boston"})");
 }
 
+TEST(ToolCallTest, ToolCallSpanSupportsBorrowedAndOwnedStorage) {
+    const std::array<zoo::ToolCallView, 1> borrowed = {
+        zoo::ToolCallView{"call_1", "lookup_weather", R"({"city":"Boston"})"}};
+    const zoo::ToolCallSpan borrowed_span{std::span<const zoo::ToolCallView>(borrowed)};
+
+    EXPECT_EQ(borrowed_span.size(), 1u);
+    EXPECT_EQ(borrowed_span[0].name, "lookup_weather");
+
+    const std::array<zoo::OwnedToolCall, 1> owned = {
+        zoo::OwnedToolCall{"call_2", "sum", R"({"a":1})"}};
+    const zoo::ToolCallSpan owned_span{std::span<const zoo::OwnedToolCall>(owned)};
+
+    EXPECT_EQ(owned_span.size(), 1u);
+    EXPECT_EQ(owned_span[0].id, "call_2");
+}
+
 TEST(MessageTest, FactoryMethodsCreateOwnedMessages) {
     auto sys = zoo::OwnedMessage::system("System message");
     EXPECT_EQ(sys.role, zoo::Role::System);
