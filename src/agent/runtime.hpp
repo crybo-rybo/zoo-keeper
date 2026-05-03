@@ -123,6 +123,7 @@ class AgentRuntime {
     std::thread inference_thread_;
     std::atomic<bool> running_{true};
     std::atomic<bool> tool_grammar_active_{false};
+    std::atomic<size_t> tool_count_{0};
     CallbackDispatcher callback_dispatcher_;
     // Declared after callback_dispatcher_: ~AgentRuntime() calls stop() which joins
     // the inference thread before any member destructor runs, so ordering here is for

@@ -254,7 +254,7 @@ if (!result) {
 |------|---------|
 | `zoo::core::Model` | Direct synchronous llama.cpp wrapper — model loading, generation, history, KV cache |
 | `zoo::Agent` | Async runtime — request queue, streaming, tool loop, structured extraction |
-| `zoo::tools::ToolRegistry` | Thread-safe tool registration with typed callables or JSON Schema handlers |
+| `zoo::tools::ToolRegistry` | Deterministic tool registration with typed callables or JSON Schema handlers; externally synchronize direct multi-threaded use |
 | `zoo::RequestHandle<T>` | Async result handle with `id()`, `ready()`, `await_result()`, cancellation |
 | `zoo::TextResponse` | Generated text + token usage + latency metrics + optional tool trace |
 | `zoo::ExtractionResponse` | Parsed JSON output + raw text + usage + metrics |

@@ -147,7 +147,7 @@ Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> d
 }
 
 size_t AgentRuntime::tool_count() const noexcept {
-    return tool_registry_.size();
+    return tool_count_.load(std::memory_order_acquire);
 }
 
 void AgentRuntime::handle_command(Command& cmd) {
@@ -174,6 +174,7 @@ void AgentRuntime::handle_command(Command& cmd) {
                 }
 
                 refresh_tool_calling_state();
+                tool_count_.store(tool_registry_.size(), std::memory_order_release);
                 c.done->set_value({});
             },
             [this](RegisterToolsCmd& c) {
@@ -184,6 +185,7 @@ void AgentRuntime::handle_command(Command& cmd) {
                 }
 
                 refresh_tool_calling_state();
+                tool_count_.store(tool_registry_.size(), std::memory_order_release);
                 c.done->set_value({});
             },
         },

@@ -709,6 +709,86 @@ TEST(AgentRuntimeTest, RegisterToolWaitsUntilCurrentRequestCompletesBeforeBecomi
     EXPECT_EQ(runtime.tool_count(), 2u);
 }
 
+TEST(AgentRuntimeTest, ToolCountCanBeReadWhileRegistrationIsQueued) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto existing = zoo::tools::detail::make_tool_definition("existing", "Existing tool",
+                                                             std::vector<std::string>{"value"},
+                                                             [](int value) { return value; });
+    ASSERT_TRUE(existing.has_value()) << existing.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*existing)).has_value());
+    ASSERT_EQ(runtime.tool_count(), 1u);
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    backend_ptr->push_generation(
+        [entered, release_future](TokenCallback, const CancellationCallback&) {
+            entered->set_value();
+            release_future.wait();
+            return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+        });
+
+    auto request = runtime.chat("occupy inference thread");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+
+    std::atomic<bool> keep_reading{true};
+    std::atomic<size_t> reads{0};
+    std::atomic<size_t> unexpected_counts{0};
+
+    auto register_future = std::async(std::launch::async, [&runtime]() {
+        auto definition = zoo::tools::detail::make_tool_definition(
+            "late", "Late tool", std::vector<std::string>{"value"},
+            [](int value) { return value * 2; });
+        if (!definition) {
+            return Expected<void>(std::unexpected(definition.error()));
+        }
+        return runtime.register_tool(std::move(*definition));
+    });
+    auto reader_future =
+        std::async(std::launch::async, [&runtime, &keep_reading, &reads, &unexpected_counts]() {
+            while (keep_reading.load(std::memory_order_acquire)) {
+                const auto count = runtime.tool_count();
+                if (count != 1u && count != 2u) {
+                    unexpected_counts.fetch_add(1u, std::memory_order_relaxed);
+                }
+                reads.fetch_add(1u, std::memory_order_relaxed);
+                std::this_thread::yield();
+            }
+        });
+    bool released = false;
+    ScopeExit cleanup([&] {
+        keep_reading.store(false, std::memory_order_release);
+        if (!released) {
+            release->set_value();
+        }
+    });
+
+    EXPECT_EQ(register_future.wait_for(50ms), std::future_status::timeout);
+    EXPECT_EQ(runtime.tool_count(), 1u);
+
+    released = true;
+    release->set_value();
+
+    auto result = request.await_result(1s);
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    auto register_result = register_future.get();
+    ASSERT_TRUE(register_result.has_value()) << register_result.error().to_string();
+
+    keep_reading.store(false, std::memory_order_release);
+    reader_future.get();
+
+    EXPECT_GT(reads.load(std::memory_order_relaxed), 0u);
+    EXPECT_EQ(unexpected_counts.load(std::memory_order_relaxed), 0u);
+    EXPECT_EQ(runtime.tool_count(), 2u);
+}
+
 TEST(AgentRuntimeTest, ToolLoopThroughputExcludesToolExecutionTime) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();

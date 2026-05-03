@@ -255,7 +255,8 @@ make_tool_definition(const std::string& name, const std::string& description,
  *
  * The registry owns normalized tool metadata, exposes deterministic JSON Schema
  * definitions for prompt construction and grammar generation, and invokes
- * registered handlers. Callers serialize registration before later reads.
+ * registered handlers. It has no internal synchronization; callers must
+ * externally serialize any access that can overlap with mutation.
  */
 class ToolRegistry {
   public:
@@ -309,7 +310,7 @@ class ToolRegistry {
     Expected<void> register_tool(ToolDefinition definition);
 
     /**
-     * @brief Registers multiple tool definitions under a single lock acquisition.
+     * @brief Registers multiple tool definitions as one ordered batch.
      *
      * Existing entries with the same name are replaced in place while
      * preserving registration order.

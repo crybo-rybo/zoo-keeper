@@ -98,11 +98,13 @@ agent->register_tools(std::move(defs));
 ```
 
 `ToolRegistry::register_tools(std::vector<ToolDefinition>)` inserts every
-definition under a single lock acquisition.
-`Agent::register_tools(std::vector<ToolDefinition>)` does the same and then
-performs one `update_tool_calling()` round-trip to the inference thread,
-rather than N round-trips for N individual `register_tool` calls. An
-optional `std::chrono::nanoseconds` timeout overload is also available.
+definition as one ordered batch. The low-level registry is single-threaded
+unless the caller externally synchronizes access that can overlap with
+mutation.
+`Agent::register_tools(std::vector<ToolDefinition>)` queues one registration
+command on the inference thread and performs one tool-calling refresh, rather
+than N command round-trips for N individual `register_tool` calls. An optional
+`std::chrono::nanoseconds` timeout overload is also available.
 
 Re-registering an existing tool name replaces it in place without changing
 its position in the deterministic ordering.
@@ -207,7 +209,9 @@ extractions.
 
 `zoo::tools::ToolRegistry` remains public for lower-level usage, testing, or
 embedding inside custom runtimes. It is not the primary user path for normal
-application code.
+application code. The registry does not lock internally; share it across
+threads only with external synchronization around reads and writes that can
+overlap.
 
 ## Error Codes
 

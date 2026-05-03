@@ -83,7 +83,7 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `set_system_prompt(text)` | Set or update the system prompt |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
 | `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
-| `register_tools(definitions)` | Batch-register multiple tools in a single lock acquisition |
+| `register_tools(definitions)` | Batch-register multiple tools with one inference-thread command |
 | `set_system_prompt(text, timeout)` | Set system prompt with timeout; returns `RequestTimeout` if inference thread is busy |
 | `get_history(timeout)` | Get history snapshot with timeout; returns `RequestTimeout` if inference thread is busy |
 | `clear_history(timeout)` | Clear conversation history with timeout; returns `RequestTimeout` if inference thread is busy |
