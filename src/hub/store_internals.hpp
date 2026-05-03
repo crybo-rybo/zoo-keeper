@@ -36,22 +36,22 @@ class ModelResolver {
 
 class ModelImporter {
   public:
-    [[nodiscard]] static Expected<ModelEntry>
-    add_local_file(std::vector<ModelEntry>& entries, const CatalogRepository& repository,
-                   const std::string& file_path, std::vector<std::string> aliases);
+    [[nodiscard]] static Expected<ModelEntry> add_local_file(std::vector<ModelEntry>& entries,
+                                                             const CatalogRepository& repository,
+                                                             const std::string& file_path,
+                                                             std::vector<std::string> aliases);
 };
 
 class HubPullService {
   public:
     [[nodiscard]] static Expected<ModelEntry>
-    pull(HuggingFaceClient& client, const std::string& identifier,
-         std::vector<std::string> aliases, std::vector<ModelEntry>& entries,
-         const CatalogRepository& repository);
+    pull(HuggingFaceClient& client, const std::string& identifier, std::vector<std::string> aliases,
+         std::vector<ModelEntry>& entries, const CatalogRepository& repository);
 
     [[nodiscard]] static Expected<ModelEntry>
-    persist_source_annotation(std::vector<ModelEntry>& entries,
-                              const CatalogRepository& repository, const std::string& entry_id,
-                              std::string source_url, std::string repo_id);
+    persist_source_annotation(std::vector<ModelEntry>& entries, const CatalogRepository& repository,
+                              const std::string& entry_id, std::string source_url,
+                              std::string repo_id);
 };
 
 } // namespace zoo::hub::detail
