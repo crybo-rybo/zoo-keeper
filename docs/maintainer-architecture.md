@@ -88,12 +88,14 @@ Maintain these invariants:
 
 ## Runtime Implementation Split
 
-The `AgentRuntime` implementation is split across three files by responsibility:
+The `AgentRuntime` implementation is split across five files by responsibility:
 
 | File | Responsibility |
 |------|----------------|
-| `src/agent/runtime.cpp` | Lifecycle, request submission, inference loop dispatch, command handling, shutdown |
-| `src/agent/runtime_tool_loop.cpp` | Agentic tool loop (generate → detect → execute → re-generate) |
+| `src/agent/runtime.cpp` | Public request submission: `chat()`, `extract()`, `cancel()` |
+| `src/agent/runtime_lifecycle.cpp` | Construction, start/stop, inference thread entry point, shutdown sequencing |
+| `src/agent/runtime_inference.cpp` | Inference-thread dispatch and the agentic tool loop (generate → detect → execute → re-generate) |
+| `src/agent/runtime_commands.cpp` | Synchronous command lane: tool registration, history queries, config updates |
 | `src/agent/runtime_extraction.cpp` | Schema-constrained structured output extraction |
 
 Shared helpers (`ScopeExit`, `snapshot_from_messages`, `swap_history`) live in `src/agent/runtime_helpers.hpp`.
