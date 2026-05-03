@@ -1,6 +1,6 @@
 /**
- * @file runtime_tool_loop.cpp
- * @brief Agentic tool loop: generate → detect tool calls → execute → re-generate.
+ * @file runtime_inference.cpp
+ * @brief Inference-thread dispatch and the agentic tool loop.
  */
 
 #include "agent/runtime.hpp"
@@ -9,8 +9,71 @@
 #include "log.hpp"
 #include "zoo/tools/validation.hpp"
 #include <chrono>
+#include <exception>
+#include <string>
 
 namespace zoo::internal::agent {
+
+void AgentRuntime::inference_loop() {
+    try {
+        while (running_.load(std::memory_order_acquire)) {
+            auto item_opt = request_mailbox_.pop();
+            if (!item_opt) {
+                break;
+            }
+
+            std::visit(overloaded{
+                           [this](QueuedRequest request) { handle_request(request); },
+                           [this](Command& cmd) { handle_command(cmd); },
+                       },
+                       *item_opt);
+        }
+
+        fail_pending(
+            Error{ErrorCode::AgentNotRunning, "Agent stopped before request could be processed"});
+    } catch (const std::exception& e) {
+        ZOO_LOG("error", "fatal exception escaped inference thread: %s", e.what());
+        fail_pending(Error{ErrorCode::InferenceFailed,
+                           std::string("Inference thread terminated unexpectedly: ") + e.what()});
+    } catch (...) {
+        ZOO_LOG("error", "fatal unknown exception escaped inference thread");
+        fail_pending(Error{ErrorCode::InferenceFailed, "Inference thread terminated unexpectedly"});
+    }
+}
+
+void AgentRuntime::handle_request(QueuedRequest request) {
+    const auto active_request = request_slots_->active_request(request);
+    if (!active_request.has_value()) {
+        return;
+    }
+
+    if (active_request->cancelled && active_request->cancelled->load(std::memory_order_acquire)) {
+        request_slots_->resolve_error(
+            request.slot, request.generation,
+            Error{ErrorCode::RequestCancelled, "Request cancelled before processing"});
+        return;
+    }
+
+    try {
+        if (active_request->result_kind == ResultKind::Extraction) {
+            request_slots_->resolve_extraction(request.slot, request.generation,
+                                               process_extraction_request(*active_request));
+        } else {
+            request_slots_->resolve_text(request.slot, request.generation,
+                                         process_request(*active_request));
+        }
+    } catch (const std::exception& e) {
+        ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
+        request_slots_->resolve_error(
+            request.slot, request.generation,
+            Error{ErrorCode::InferenceFailed, std::string("Unhandled exception: ") + e.what()});
+    } catch (...) {
+        ZOO_LOG("error", "unknown exception in inference thread");
+        request_slots_->resolve_error(
+            request.slot, request.generation,
+            Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
+    }
+}
 
 Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& request) {
     auto start_time = std::chrono::steady_clock::now();
@@ -271,6 +334,10 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
     return std::unexpected(
         Error{ErrorCode::ToolLoopLimitReached,
               "Tool loop iteration limit reached (" + std::to_string(max_tool_iterations) + ")"});
+}
+
+void AgentRuntime::enforce_history_limit() {
+    backend_->trim_history(agent_config_.max_history_messages);
 }
 
 } // namespace zoo::internal::agent
