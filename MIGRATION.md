@@ -2,6 +2,78 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## Unreleased
+
+### Async Request Controls
+
+`RequestHandle<Result>` now has `cancel()`, which requests cancellation without
+requiring the caller to keep an `Agent&`:
+
+```cpp
+auto handle = agent->chat("Write a long answer.");
+handle.cancel();
+```
+
+`Agent::cancel(handle.id())` remains available for callers that correlate
+requests externally.
+
+### Streaming Callbacks
+
+The primary async callback type is now `AsyncTokenCallback`, which can return
+`TokenAction::Stop` to end generation from inside the callback. Existing
+`void(std::string_view)` callback code remains source-compatible and is treated
+as `TokenAction::Continue`.
+
+```cpp
+auto handle = agent->chat(
+    "List three items.",
+    zoo::GenerationOverride::inherit_defaults(),
+    [](std::string_view token) {
+        std::cout << token << std::flush;
+        return zoo::TokenAction::Continue;
+    });
+```
+
+### Explicit Generation Overrides
+
+`GenerationOverride` distinguishes "inherit configured defaults" from "use
+these exact request options." Existing overloads that accept `GenerationOptions`
+still compile and keep their legacy inheritance behavior when passed
+`GenerationOptions{}`.
+
+Use:
+
+```cpp
+agent->chat("Use configured defaults.", zoo::GenerationOverride::inherit_defaults());
+agent->chat("Use these options exactly.",
+            zoo::GenerationOverride::explicit_options(zoo::GenerationOptions{}));
+```
+
+### Expected-Based Agent Commands
+
+`try_set_system_prompt()`, `try_get_history()`, and `try_clear_history()` expose
+command-lane failures through `Expected<T>`. The existing convenience methods
+remain best-effort helpers for source compatibility.
+
+### Tool Definition Construction
+
+Batch tool definitions can be built through the public
+`zoo::tools::make_tool_definition(...)` helpers. Code that previously used
+`zoo::tools::detail::make_tool_definition(...)` should switch to the public
+helper; the old detail name is still present for compatibility.
+
+### ToolRegistry Thread-Safety Clarification
+
+Direct `ToolRegistry` use is single-threaded unless the caller externally
+synchronizes overlapping reads and writes. `Agent` owns its runtime registry on
+the inference thread and keeps `Agent::tool_count()` synchronized internally.
+
+### Hub Store Persistence
+
+`ModelStore` catalog saves now write a temporary catalog file and atomically
+rename it over the old catalog. The public API is unchanged, but interrupted
+saves are less likely to leave a truncated `catalog.json`.
+
 ## v1.1.2 → v1.1.3
 
 ### llama.cpp moved to FetchContent
