@@ -18,6 +18,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace zoo {
@@ -137,12 +138,12 @@ class ToolCallSpan {
   public:
     constexpr ToolCallSpan() noexcept = default;
     constexpr explicit ToolCallSpan(std::span<const ToolCallView> borrowed) noexcept
-        : storage_(Storage::Borrowed), borrowed_(borrowed) {}
+        : storage_(borrowed) {}
     constexpr explicit ToolCallSpan(std::span<const OwnedToolCall> owned) noexcept
-        : storage_(Storage::Owned), owned_(owned) {}
+        : storage_(owned) {}
 
     [[nodiscard]] size_t size() const noexcept {
-        return storage_ == Storage::Owned ? owned_.size() : borrowed_.size();
+        return std::visit([](auto span) { return span.size(); }, storage_);
     }
 
     [[nodiscard]] bool empty() const noexcept {
@@ -150,15 +151,23 @@ class ToolCallSpan {
     }
 
     [[nodiscard]] ToolCallView operator[](size_t index) const noexcept {
-        return storage_ == Storage::Owned ? owned_[index].view() : borrowed_[index];
+        return std::visit(
+            [index](auto span) -> ToolCallView {
+                using Span = decltype(span);
+                if constexpr (std::same_as<Span, std::span<const OwnedToolCall>>) {
+                    return span[index].view();
+                } else {
+                    return span[index];
+                }
+            },
+            storage_);
     }
 
   private:
-    enum class Storage { Borrowed, Owned };
+    using Borrowed = std::span<const ToolCallView>;
+    using Owned = std::span<const OwnedToolCall>;
 
-    Storage storage_ = Storage::Borrowed;
-    std::span<const ToolCallView> borrowed_{};
-    std::span<const OwnedToolCall> owned_{};
+    std::variant<Borrowed, Owned> storage_{Borrowed{}};
 };
 
 /**
@@ -302,12 +311,12 @@ class ConversationView {
   public:
     constexpr ConversationView() noexcept = default;
     constexpr explicit ConversationView(std::span<const MessageView> borrowed) noexcept
-        : storage_(Storage::Borrowed), borrowed_(borrowed) {}
+        : storage_(borrowed) {}
     constexpr explicit ConversationView(std::span<const OwnedMessage> owned) noexcept
-        : storage_(Storage::Owned), owned_(owned) {}
+        : storage_(owned) {}
 
     [[nodiscard]] size_t size() const noexcept {
-        return storage_ == Storage::Owned ? owned_.size() : borrowed_.size();
+        return std::visit([](auto span) { return span.size(); }, storage_);
     }
 
     [[nodiscard]] bool empty() const noexcept {
@@ -315,15 +324,23 @@ class ConversationView {
     }
 
     [[nodiscard]] MessageView operator[](size_t index) const noexcept {
-        return storage_ == Storage::Owned ? owned_[index].view() : borrowed_[index];
+        return std::visit(
+            [index](auto span) -> MessageView {
+                using Span = decltype(span);
+                if constexpr (std::same_as<Span, std::span<const OwnedMessage>>) {
+                    return span[index].view();
+                } else {
+                    return span[index];
+                }
+            },
+            storage_);
     }
 
   private:
-    enum class Storage { Borrowed, Owned };
+    using Borrowed = std::span<const MessageView>;
+    using Owned = std::span<const OwnedMessage>;
 
-    Storage storage_ = Storage::Borrowed;
-    std::span<const MessageView> borrowed_{};
-    std::span<const OwnedMessage> owned_{};
+    std::variant<Borrowed, Owned> storage_{Borrowed{}};
 };
 
 /**
