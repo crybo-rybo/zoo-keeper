@@ -9,6 +9,7 @@
 #include "callback_dispatcher.hpp"
 #include "mailbox.hpp"
 #include "request_slots.hpp"
+#include "tool_executor.hpp"
 #include "zoo/agent.hpp"
 #include <atomic>
 #include <chrono>
@@ -124,6 +125,10 @@ class AgentRuntime {
     std::atomic<bool> running_{true};
     std::atomic<bool> tool_grammar_active_{false};
     CallbackDispatcher callback_dispatcher_;
+    // Declared after callback_dispatcher_: ~AgentRuntime() calls stop() which joins
+    // the inference thread before any member destructor runs, so ordering here is for
+    // grouping only — both worker threads are already stopped at that point.
+    ToolExecutor tool_executor_;
 };
 
 } // namespace zoo::internal::agent

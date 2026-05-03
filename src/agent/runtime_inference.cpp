@@ -265,7 +265,12 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
 
             ZOO_LOG("info", "invoking tool '%s' (iteration %d, native_tc=%d)",
                     tool_call.name.c_str(), iteration, use_native_tool_calling);
-            auto invoke_result = tool_registry_.invoke(tool_call.name, tool_call.arguments);
+            auto handler = tool_registry_.find_handler(tool_call.name);
+            Expected<nlohmann::json> invoke_result =
+                handler ? tool_executor_.submit(std::move(*handler), tool_call.arguments).get()
+                        : std::unexpected(
+                              Error{ErrorCode::ToolNotFound, "Tool not found: " + tool_call.name});
+            // TODO(tool-timeouts): preempt handlers exceeding a per-tool budget.
             std::string tool_result_str;
             std::optional<std::string> result_json;
             std::optional<Error> tool_error;

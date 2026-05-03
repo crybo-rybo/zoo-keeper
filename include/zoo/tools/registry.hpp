@@ -620,6 +620,20 @@ class ToolRegistry {
     }
 
     /**
+     * @brief Returns a copy of the handler for a registered tool, or nullopt if not found.
+     *
+     * Allows the caller to look up the handler on one thread and dispatch it
+     * to another (e.g. ToolExecutor) without holding any registry state.
+     */
+    [[nodiscard]] std::optional<ToolHandler> find_handler(const std::string& name) const {
+        auto it = index_by_name_.find(name);
+        if (it == index_by_name_.end()) {
+            return std::nullopt;
+        }
+        return tools_[it->second].handler;
+    }
+
+    /**
      * @brief Returns the OpenAI-style tool schema for one registered tool.
      */
     nlohmann::json get_tool_schema(const std::string& name) const {
