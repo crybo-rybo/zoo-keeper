@@ -616,8 +616,7 @@ class ToolRegistry {
         if (it == index_by_name_.end()) {
             return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
         }
-        ToolHandler handler = tools_[it->second].handler;
-        return handler(args);
+        return tools_[it->second].handler(args);
     }
 
     /**
