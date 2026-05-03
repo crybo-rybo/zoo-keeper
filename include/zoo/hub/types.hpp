@@ -17,25 +17,6 @@
 namespace zoo::hub {
 
 /**
- * @brief Hub-layer error codes reserved in the core ErrorCode numeric space.
- */
-enum class HubErrorCode {
-    GgufReadFailed = 700,         ///< Could not open or parse a GGUF file for inspection.
-    GgufMetadataNotFound = 701,   ///< An expected metadata key was missing from the GGUF file.
-    ModelNotFound = 702,          ///< No model matched the given name, alias, or path.
-    ModelAlreadyExists = 703,     ///< A model with the same path is already registered.
-    DownloadFailed = 704,         ///< HTTP download of a model file failed.
-    HuggingFaceApiError = 706,    ///< The HuggingFace API returned an error response.
-    InvalidModelIdentifier = 707, ///< Could not parse the HuggingFace model identifier string.
-    StoreCorrupted = 708,         ///< The model store catalog JSON is malformed.
-    FilesystemError = 709,        ///< A filesystem operation failed.
-};
-
-[[nodiscard]] constexpr ErrorCode to_error_code(HubErrorCode code) noexcept {
-    return static_cast<ErrorCode>(static_cast<int>(code));
-}
-
-/**
  * @brief Metadata extracted from a GGUF file without loading model weights.
  */
 struct ModelInfo {

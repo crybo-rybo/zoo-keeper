@@ -410,7 +410,17 @@ enum class ErrorCode {
         600, ///< A supplied output schema is malformed or uses unsupported constructs.
     ExtractionFailed = 601, ///< Structured extraction from model output failed.
 
-    // Values 700-799 are reserved for hub-layer errors; see zoo/hub/types.hpp.
+    // Hub layer errors (700-799). Only reachable when the hub layer is enabled
+    // via ZOO_BUILD_HUB=ON; always defined so callers can switch on them.
+    GgufReadFailed = 700,         ///< Could not open or parse a GGUF file for inspection.
+    GgufMetadataNotFound = 701,   ///< An expected metadata key was missing from the GGUF file.
+    ModelNotFound = 702,          ///< No model matched the given name, alias, or path.
+    ModelAlreadyExists = 703,     ///< A model with the same path is already registered.
+    DownloadFailed = 704,         ///< HTTP download of a model file failed.
+    HuggingFaceApiError = 706,    ///< The HuggingFace API returned an error response.
+    InvalidModelIdentifier = 707, ///< Could not parse the HuggingFace model identifier string.
+    StoreCorrupted = 708,         ///< The model store catalog JSON is malformed.
+    FilesystemError = 709,        ///< A filesystem operation failed.
 
     Unknown = 999 ///< Fallback code for uncategorized failures.
 };
