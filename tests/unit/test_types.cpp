@@ -89,7 +89,7 @@ TEST(ToolCallTest, ToolCallSpanSupportsBorrowedAndOwnedStorage) {
     EXPECT_EQ(owned_span[0].id, "call_2");
 }
 
-TEST(ConversationViewTest, IndexesBorrowedAndDirectOwnedStorage) {
+TEST(ConversationViewTest, SupportsBorrowedAndOwnedStorage) {
     const std::array<zoo::MessageView, 1> borrowed = {zoo::MessageView{zoo::Role::User, "hello"}};
     const zoo::ConversationView borrowed_view{std::span<const zoo::MessageView>(borrowed)};
 
