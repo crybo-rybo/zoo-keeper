@@ -17,6 +17,7 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_inference.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_lifecycle.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_extraction.cpp
+    ${PROJECT_SOURCE_DIR}/src/tools/registry.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_init.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_inference.cpp
