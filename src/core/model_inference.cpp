@@ -20,6 +20,92 @@ namespace zoo::core {
 
 namespace {
 
+struct DecodedToken {
+    llama_token token = 0;
+    std::string piece;
+    bool end_of_generation = false;
+};
+
+template <typename Impl> struct InferencePhase {
+    Impl& impl;
+    const CancellationCallback& should_cancel;
+
+    [[nodiscard]] Expected<int> prefill(const std::vector<int>& prompt_tokens) const {
+        const int n_batch = static_cast<int>(llama_n_batch(impl.ctx_.get()));
+        const int base_pos = llama_memory_seq_pos_max(llama_get_memory(impl.ctx_.get()), 0) + 1;
+
+        auto chunks = compute_prefill_chunks(static_cast<int>(prompt_tokens.size()), n_batch);
+        for (const auto& chunk : chunks) {
+            if (should_cancel && should_cancel()) {
+                return std::unexpected(
+                    Error{ErrorCode::RequestCancelled, "Request cancelled during prompt prefill"});
+            }
+
+            int n_ctx_used = base_pos + chunk.offset + chunk.count;
+            if (n_ctx_used > impl.context_size_) {
+                return std::unexpected(
+                    Error{ErrorCode::ContextWindowExceeded, "Prompt tokens exceed context size"});
+            }
+
+            llama_batch batch = llama_batch_init(chunk.count, 0, 1);
+            for (int i = 0; i < chunk.count; ++i) {
+                batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
+                batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
+                batch.n_seq_id[i] = 1;
+                batch.seq_id[i][0] = 0;
+                batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
+            }
+            batch.n_tokens = chunk.count;
+
+            int rc = llama_decode(impl.ctx_.get(), batch);
+            llama_batch_free(batch);
+            if (rc != 0) {
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to decode prefill batch"});
+            }
+        }
+
+        return base_pos + static_cast<int>(prompt_tokens.size());
+    }
+
+    [[nodiscard]] Expected<DecodedToken> decode() const {
+        if (should_cancel && should_cancel()) {
+            return std::unexpected(
+                Error{ErrorCode::RequestCancelled, "Request cancelled during generation"});
+        }
+
+        const llama_token token = llama_sampler_sample(impl.sampler_.get(), impl.ctx_.get(), -1);
+        if (llama_vocab_is_eog(impl.vocab_, token)) {
+            return DecodedToken{token, {}, true};
+        }
+
+        char buffer[256];
+        const int bytes = llama_token_to_piece(impl.vocab_, token, buffer, sizeof(buffer), 0, true);
+        if (bytes < 0) {
+            return std::unexpected(Error{ErrorCode::Unknown, "Failed to convert token"});
+        }
+
+        return DecodedToken{token, std::string(buffer, static_cast<size_t>(bytes)), false};
+    }
+
+    [[nodiscard]] Expected<void> finalize(llama_batch& batch, llama_token token,
+                                          int& current_pos) const {
+        batch.token[0] = token;
+        batch.pos[0] = static_cast<llama_pos>(current_pos);
+        batch.n_seq_id[0] = 1;
+        batch.seq_id[0][0] = 0;
+        batch.logits[0] = true;
+        batch.n_tokens = 1;
+
+        int rc = llama_decode(impl.ctx_.get(), batch);
+        if (rc != 0) {
+            return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
+        }
+        ++current_pos;
+        return {};
+    }
+};
+
 Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::string_view token) {
     try {
         return callback(token);
@@ -30,21 +116,6 @@ Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::
         return std::unexpected(
             Error{ErrorCode::InferenceFailed, "Token callback threw an unknown exception"});
     }
-}
-
-size_t find_stop_sequence(const std::string& generated_text,
-                          const std::vector<std::string>& stop_sequences) {
-    for (const auto& stop_sequence : stop_sequences) {
-        if (stop_sequence.empty()) {
-            continue;
-        }
-        if (generated_text.size() >= stop_sequence.size() &&
-            generated_text.compare(generated_text.size() - stop_sequence.size(),
-                                   stop_sequence.size(), stop_sequence) == 0) {
-            return stop_sequence.size();
-        }
-    }
-    return 0;
 }
 
 } // namespace
@@ -58,113 +129,56 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
     bool stopped_by_callback = false;
-    bool tool_stream_suppressed = false;
-    std::optional<ToolCallWordTriggerFilter> word_trigger_filter;
+    StopSequenceMatcher stop_matcher{std::span<const std::string>(stop_sequences)};
+    StreamFilter stream_filter;
     if (on_token && impl_->tool_state_ &&
         impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall) {
-        const auto& word_triggers = impl_->tool_state_->trigger_matcher.word_triggers();
-        if (!word_triggers.empty()) {
-            word_trigger_filter.emplace(std::span<const std::string>(word_triggers));
-        }
+        const auto& trigger_matcher = impl_->tool_state_->trigger_matcher;
+        stream_filter = StreamFilter(std::span<const std::string>(trigger_matcher.word_triggers()),
+                                     &trigger_matcher);
     }
 
-    const int n_batch = static_cast<int>(llama_n_batch(impl_->ctx_.get()));
-    const int base_pos = llama_memory_seq_pos_max(llama_get_memory(impl_->ctx_.get()), 0) + 1;
-
-    auto chunks = compute_prefill_chunks(static_cast<int>(prompt_tokens.size()), n_batch);
-
-    for (const auto& chunk : chunks) {
-        if (should_cancel && should_cancel()) {
-            return std::unexpected(
-                Error{ErrorCode::RequestCancelled, "Request cancelled during prompt prefill"});
-        }
-
-        int n_ctx_used = base_pos + chunk.offset + chunk.count;
-        if (n_ctx_used > impl_->context_size_) {
-            return std::unexpected(
-                Error{ErrorCode::ContextWindowExceeded, "Prompt tokens exceed context size"});
-        }
-
-        llama_batch batch = llama_batch_init(chunk.count, 0, 1);
-        for (int i = 0; i < chunk.count; ++i) {
-            batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
-            batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
-            batch.n_seq_id[i] = 1;
-            batch.seq_id[i][0] = 0;
-            batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
-        }
-        batch.n_tokens = chunk.count;
-
-        int rc = llama_decode(impl_->ctx_.get(), batch);
-        llama_batch_free(batch);
-        if (rc != 0) {
-            return std::unexpected(
-                Error{ErrorCode::InferenceFailed, "Failed to decode prefill batch"});
-        }
+    InferencePhase phase{*impl_, should_cancel};
+    auto current_pos_result = phase.prefill(prompt_tokens);
+    if (!current_pos_result) {
+        return std::unexpected(current_pos_result.error());
     }
 
-    int current_pos = base_pos + static_cast<int>(prompt_tokens.size());
-    llama_token new_token;
+    int current_pos = *current_pos_result;
     llama_batch ar_batch = llama_batch_init(1, 0, 1);
 
     while (true) {
-        if (should_cancel && should_cancel()) {
-            return std::unexpected(
-                Error{ErrorCode::RequestCancelled, "Request cancelled during generation"});
+        auto decoded = phase.decode();
+        if (!decoded) {
+            llama_batch_free(ar_batch);
+            return std::unexpected(decoded.error());
         }
-
-        new_token = llama_sampler_sample(impl_->sampler_.get(), impl_->ctx_.get(), -1);
-        if (llama_vocab_is_eog(impl_->vocab_, new_token)) {
+        if (decoded->end_of_generation) {
             break;
         }
 
-        char buff[256];
-        const int n = llama_token_to_piece(impl_->vocab_, new_token, buff, sizeof(buff), 0, true);
-        if (n < 0) {
-            return std::unexpected(Error{ErrorCode::Unknown, "Failed to convert token"});
-        }
-
-        generated_text.append(buff, static_cast<size_t>(n));
+        generated_text.append(decoded->piece);
         ++token_count;
 
         if (!stop_sequences.empty()) {
-            const size_t match_len = find_stop_sequence(generated_text, stop_sequences);
+            const size_t match_len = stop_matcher.match_suffix(generated_text);
             if (match_len > 0) {
                 generated_text.resize(generated_text.size() - match_len);
                 break;
             }
         }
 
-        if (on_token) {
-            if (!tool_stream_suppressed) {
-                std::string visible_chunk;
-                if (word_trigger_filter) {
-                    visible_chunk = word_trigger_filter->consume(
-                        std::string_view(buff, static_cast<size_t>(n)));
-                    tool_stream_suppressed = word_trigger_filter->suppressing();
-                } else {
-                    visible_chunk.assign(buff, static_cast<size_t>(n));
+        if (on_token && !stream_filter.suppressing()) {
+            std::string visible_chunk = stream_filter.consume(decoded->piece, generated_text);
+            if (!visible_chunk.empty()) {
+                auto action = invoke_token_callback(on_token, visible_chunk);
+                if (!action) {
+                    llama_batch_free(ar_batch);
+                    return std::unexpected(action.error());
                 }
-
-                // For regex-style triggers we can only detect once the full
-                // accumulated text matches, so suppress the current fragment
-                // before forwarding anything visible from it.
-                if (!tool_stream_suppressed && impl_->tool_state_ &&
-                    impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall &&
-                    impl_->tool_state_->trigger_matcher.is_detected(generated_text)) {
-                    tool_stream_suppressed = true;
-                    visible_chunk.clear();
-                }
-
-                if (!visible_chunk.empty()) {
-                    auto action = invoke_token_callback(on_token, visible_chunk);
-                    if (!action) {
-                        return std::unexpected(action.error());
-                    }
-                    if (*action == TokenAction::Stop) {
-                        stopped_by_callback = true;
-                        break;
-                    }
+                if (*action == TokenAction::Stop) {
+                    stopped_by_callback = true;
+                    break;
                 }
             }
         }
@@ -173,25 +187,16 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             break;
         }
 
-        ar_batch.token[0] = new_token;
-        ar_batch.pos[0] = static_cast<llama_pos>(current_pos);
-        ar_batch.n_seq_id[0] = 1;
-        ar_batch.seq_id[0][0] = 0;
-        ar_batch.logits[0] = true;
-        ar_batch.n_tokens = 1;
-
-        int rc = llama_decode(impl_->ctx_.get(), ar_batch);
-        if (rc != 0) {
+        if (auto result = phase.finalize(ar_batch, decoded->token, current_pos); !result) {
             llama_batch_free(ar_batch);
-            return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
+            return std::unexpected(result.error());
         }
-        ++current_pos;
     }
 
     llama_batch_free(ar_batch);
 
-    if (on_token && word_trigger_filter && !tool_stream_suppressed && !stopped_by_callback) {
-        std::string trailing = word_trigger_filter->finalize();
+    if (on_token && !stream_filter.suppressing() && !stopped_by_callback) {
+        std::string trailing = stream_filter.finalize();
         if (!trailing.empty()) {
             auto action = invoke_token_callback(on_token, trailing);
             if (!action) {
