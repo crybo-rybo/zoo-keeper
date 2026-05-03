@@ -92,7 +92,7 @@ class AgentRuntime {
     bool refresh_tool_calling_state();
     void enforce_history_limit();
     template <typename Result> RequestHandle<Result> make_immediate_error_handle(Error error);
-    template <typename Result> RequestHandle<Result> enqueue_request(RequestPayload payload);
+    template <typename Result> RequestHandle<Result> enqueue_request(RequestPayload&& payload);
 
     /// Generic sync-command helper: build a Command carrying a fresh promise<Expected<R>>,
     /// push it on the mailbox, optionally bound by a timeout, and return the resolved result.

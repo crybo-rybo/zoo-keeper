@@ -135,7 +135,7 @@ RequestHandle<Result> AgentRuntime::make_immediate_error_handle(Error error) {
 }
 
 template <typename Result>
-RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
+RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload&& payload) {
     if (!running_.load(std::memory_order_acquire)) {
         return make_immediate_error_handle<Result>(
             Error{ErrorCode::AgentNotRunning, "Agent is not running"});
@@ -164,7 +164,7 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
 
 template RequestHandle<TextResponse> AgentRuntime::make_immediate_error_handle(Error error);
 template RequestHandle<ExtractionResponse> AgentRuntime::make_immediate_error_handle(Error error);
-template RequestHandle<TextResponse> AgentRuntime::enqueue_request(RequestPayload payload);
-template RequestHandle<ExtractionResponse> AgentRuntime::enqueue_request(RequestPayload payload);
+template RequestHandle<TextResponse> AgentRuntime::enqueue_request(RequestPayload&& payload);
+template RequestHandle<ExtractionResponse> AgentRuntime::enqueue_request(RequestPayload&& payload);
 
 } // namespace zoo::internal::agent

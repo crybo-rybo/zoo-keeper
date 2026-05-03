@@ -65,7 +65,7 @@ class RequestSlots {
         }
     }
 
-    [[nodiscard]] Expected<RequestReservation> emplace(RequestPayload payload) {
+    [[nodiscard]] Expected<RequestReservation> emplace(RequestPayload&& payload) {
         uint32_t slot_index;
         RequestId request_id;
         {
