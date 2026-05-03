@@ -19,36 +19,36 @@ namespace zoo::hub::detail {
     std::error_code ec;
     const bool exists = std::filesystem::exists(path, ec);
     if (ec) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
+        return std::unexpected(Error{ErrorCode::DownloadFailed,
                                      "Cannot access downloaded model: " + path.string(),
                                      ec.message()});
     }
     if (!exists) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
-                                     "Downloaded model file is missing: " + path.string()});
+        return std::unexpected(
+            Error{ErrorCode::DownloadFailed, "Downloaded model file is missing: " + path.string()});
     }
 
     const bool is_regular = std::filesystem::is_regular_file(path, ec);
     if (ec) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
+        return std::unexpected(Error{ErrorCode::DownloadFailed,
                                      "Cannot inspect downloaded model: " + path.string(),
                                      ec.message()});
     }
     if (!is_regular) {
         return std::unexpected(
-            Error{to_error_code(HubErrorCode::DownloadFailed),
+            Error{ErrorCode::DownloadFailed,
                   "Downloaded model path is not a regular file: " + path.string()});
     }
 
     const auto actual_size = std::filesystem::file_size(path, ec);
     if (ec) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
+        return std::unexpected(Error{ErrorCode::DownloadFailed,
                                      "Cannot read downloaded model size: " + path.string(),
                                      ec.message()});
     }
     if (actual_size == 0) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
-                                     "Downloaded model file is empty: " + path.string()});
+        return std::unexpected(
+            Error{ErrorCode::DownloadFailed, "Downloaded model file is empty: " + path.string()});
     }
 
     return {};

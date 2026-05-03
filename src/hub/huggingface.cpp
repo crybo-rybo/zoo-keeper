@@ -49,8 +49,8 @@ HuggingFaceClient& HuggingFaceClient::operator=(HuggingFaceClient&&) noexcept = 
 Expected<HuggingFaceClient::ParsedIdentifier>
 HuggingFaceClient::parse_identifier(std::string_view identifier) {
     if (identifier.empty()) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::InvalidModelIdentifier),
-                                     "Model identifier cannot be empty"});
+        return std::unexpected(
+            Error{ErrorCode::InvalidModelIdentifier, "Model identifier cannot be empty"});
     }
 
     ParsedIdentifier result;
@@ -63,7 +63,7 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
         auto filename = identifier.substr(double_sep + 2);
         if (filename.empty()) {
             return std::unexpected(
-                Error{to_error_code(HubErrorCode::InvalidModelIdentifier),
+                Error{ErrorCode::InvalidModelIdentifier,
                       "Empty filename after '::' in: " + std::string(identifier)});
         }
         result.filename = std::string(filename);
@@ -75,7 +75,7 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
             }
         } catch (const std::invalid_argument&) {
             return std::unexpected(
-                Error{to_error_code(HubErrorCode::InvalidModelIdentifier),
+                Error{ErrorCode::InvalidModelIdentifier,
                       "Repository ID must be in 'owner/repo' or 'owner/repo:tag' format: " +
                           std::string(repo_part)});
         }
@@ -89,7 +89,7 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
             }
         } catch (const std::invalid_argument&) {
             return std::unexpected(
-                Error{to_error_code(HubErrorCode::InvalidModelIdentifier),
+                Error{ErrorCode::InvalidModelIdentifier,
                       "Repository ID must be in 'owner/repo' or 'owner/repo:tag' format: " +
                           std::string(identifier)});
         }
@@ -99,12 +99,12 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
     const auto slash = result.repo_id.find('/');
     if (slash == std::string::npos || slash == 0 || slash == result.repo_id.size() - 1) {
         return std::unexpected(
-            Error{to_error_code(HubErrorCode::InvalidModelIdentifier),
+            Error{ErrorCode::InvalidModelIdentifier,
                   "Repository ID must be in 'owner/repo' format: " + result.repo_id});
     }
     if (result.repo_id.find('/', slash + 1) != std::string::npos) {
         return std::unexpected(
-            Error{to_error_code(HubErrorCode::InvalidModelIdentifier),
+            Error{ErrorCode::InvalidModelIdentifier,
                   "Repository ID must contain exactly one '/': " + result.repo_id});
     }
 
@@ -134,7 +134,7 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
 
         auto download = common_download_model(model_params, impl_->download_opts());
         if (download.model_path.empty()) {
-            return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
+            return std::unexpected(Error{ErrorCode::DownloadFailed,
                                          "Failed to download model from: " + repo_id_with_tag});
         }
 
@@ -144,8 +144,8 @@ Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_
 
         return download.model_path;
     } catch (const std::exception& e) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
-                                     "Download error: " + std::string(e.what())});
+        return std::unexpected(
+            Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});
     }
 }
 
@@ -155,7 +155,7 @@ Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
     std::filesystem::create_directories(std::filesystem::path(destination_path).parent_path(), ec);
     if (ec) {
         return std::unexpected(
-            Error{to_error_code(HubErrorCode::FilesystemError),
+            Error{ErrorCode::FilesystemError,
                   "Failed to create download directory: " +
                       std::filesystem::path(destination_path).parent_path().string(),
                   ec.message()});
@@ -165,12 +165,11 @@ Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
         const int status =
             common_download_file_single(url, destination_path, impl_->download_opts());
         if (status < 0) {
-            return std::unexpected(
-                Error{to_error_code(HubErrorCode::DownloadFailed), "Download failed for: " + url});
+            return std::unexpected(Error{ErrorCode::DownloadFailed, "Download failed for: " + url});
         }
         if (status >= 400) {
             return std::unexpected(
-                Error{to_error_code(HubErrorCode::DownloadFailed),
+                Error{ErrorCode::DownloadFailed,
                       "Download returned HTTP " + std::to_string(status) + " for: " + url});
         }
 
@@ -180,8 +179,8 @@ Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
 
         return destination_path;
     } catch (const std::exception& e) {
-        return std::unexpected(Error{to_error_code(HubErrorCode::DownloadFailed),
-                                     "Download error: " + std::string(e.what())});
+        return std::unexpected(
+            Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});
     }
 }
 
