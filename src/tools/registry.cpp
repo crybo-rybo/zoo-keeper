@@ -241,9 +241,8 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
         parameters_by_name.emplace(param_name, std::move(parameter));
     }
 
-    // Build canonical parameter order: required params first (in the order
-    // listed in the "required" array), then optional params (in nlohmann::json
-    // object iteration order, which is alphabetical by default).
+    // required params first, then optional in nlohmann::json property order (alphabetical by
+    // default)
     std::vector<ToolParameter> parameters;
     parameters.reserve(parameters_by_name.size());
 
@@ -296,8 +295,7 @@ nlohmann::json ToolRegistry::build_schema_json(const ToolMetadata& metadata) {
 
 Expected<void> ToolRegistry::register_tool(const std::string& name, const std::string& description,
                                            nlohmann::json schema, ToolHandler handler) {
-    auto definition =
-        detail::make_tool_definition(name, description, schema, std::move(handler));
+    auto definition = detail::make_tool_definition(name, description, schema, std::move(handler));
     if (!definition) {
         return std::unexpected(definition.error());
     }
@@ -332,7 +330,7 @@ Expected<void> ToolRegistry::register_tools(std::vector<ToolDefinition> definiti
 }
 
 bool ToolRegistry::has_tool(const std::string& name) const {
-    return index_by_name_.find(name) != index_by_name_.end();
+    return index_by_name_.contains(name);
 }
 
 Expected<nlohmann::json> ToolRegistry::invoke(const std::string& name,
