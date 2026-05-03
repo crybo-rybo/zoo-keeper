@@ -31,14 +31,32 @@ enum class HubErrorCode {
     FilesystemError = 709,        ///< A filesystem operation failed.
 };
 
-// The 700-799 numeric range is reserved for hub-layer errors in `ErrorCode`
-// (see comment at zoo/core/types.hpp:413). Hub-specific names live in
-// `HubErrorCode` to keep core unaware of hub concepts; the cast below is the
-// intentional bridge. The static analyzer cannot see this reservation, so
-// suppress its enum-range check.
+/// Maps a hub-internal `HubErrorCode` to the corresponding `ErrorCode` in the
+/// 700-799 reserved range. Mapping is one-to-one and exhaustive — adding a
+/// new `HubErrorCode` value without a matching case here is a compile-time
+/// error under `-Wswitch`.
 [[nodiscard]] constexpr ErrorCode to_error_code(HubErrorCode code) noexcept {
-    return static_cast<ErrorCode>( // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
-        static_cast<int>(code));
+    switch (code) {
+    case HubErrorCode::GgufReadFailed:
+        return ErrorCode::GgufReadFailed;
+    case HubErrorCode::GgufMetadataNotFound:
+        return ErrorCode::GgufMetadataNotFound;
+    case HubErrorCode::ModelNotFound:
+        return ErrorCode::ModelNotFound;
+    case HubErrorCode::ModelAlreadyExists:
+        return ErrorCode::ModelAlreadyExists;
+    case HubErrorCode::DownloadFailed:
+        return ErrorCode::DownloadFailed;
+    case HubErrorCode::HuggingFaceApiError:
+        return ErrorCode::HuggingFaceApiError;
+    case HubErrorCode::InvalidModelIdentifier:
+        return ErrorCode::InvalidModelIdentifier;
+    case HubErrorCode::StoreCorrupted:
+        return ErrorCode::StoreCorrupted;
+    case HubErrorCode::FilesystemError:
+        return ErrorCode::FilesystemError;
+    }
+    return ErrorCode::Unknown;
 }
 
 /**
