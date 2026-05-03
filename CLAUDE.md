@@ -38,7 +38,7 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 |-------|-----------|------|
 | 4 | `zoo::hub` | **Optional.** GGUF inspection, HuggingFace downloading, local model store, auto-configuration. Requires `ZOO_BUILD_HUB=ON` |
 | 3 | `zoo::Agent` | Async orchestration: inference thread, request queue, streaming, agentic tool loop |
-| 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Header-only, zero llama.cpp dependency |
+| 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Zero llama.cpp dependency. Non-template implementation lives in `src/tools/registry.cpp` |
 | 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
 
 **Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `RequestHandle<TextResponse>`. All callbacks run on the inference thread. Model is protected by thread confinement to the inference thread.

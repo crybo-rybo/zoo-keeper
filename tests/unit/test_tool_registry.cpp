@@ -12,6 +12,7 @@
 
 using json = nlohmann::json;
 using namespace zoo::testing::tools;
+namespace detail = zoo::tools::detail;
 
 /// Shared fixture that provides a fresh tool registry for each test.
 class ToolRegistryTest : public ::testing::Test {
@@ -267,4 +268,365 @@ TEST_F(ToolRegistryTest, InvokeDoesNotBlockConcurrentReads) {
 
     release->set_value();
     invoker.join();
+}
+
+// ---------------------------------------------------------------------------
+// Tests for the detail free functions moved out of the public header.
+// All of these paths are exercised indirectly through ToolRegistry::register_tool
+// in the ToolRegistryTest suite above, but the branches below were only reachable
+// via specific combinations that the high-level tests did not cover.
+// ---------------------------------------------------------------------------
+
+// --- parse_tool_value_type -------------------------------------------------
+
+TEST(ParseToolValueTypeTest, AcceptsAllFourPrimitives) {
+    EXPECT_EQ(*detail::parse_tool_value_type("integer"), zoo::tools::ToolValueType::Integer);
+    EXPECT_EQ(*detail::parse_tool_value_type("number"), zoo::tools::ToolValueType::Number);
+    EXPECT_EQ(*detail::parse_tool_value_type("string"), zoo::tools::ToolValueType::String);
+    EXPECT_EQ(*detail::parse_tool_value_type("boolean"), zoo::tools::ToolValueType::Boolean);
+}
+
+TEST(ParseToolValueTypeTest, RejectsUnknownTypeString) {
+    auto result = detail::parse_tool_value_type("widget");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+    EXPECT_NE(result.error().message.find("widget"), std::string::npos);
+}
+
+TEST(ParseToolValueTypeTest, RejectsEmptyString) {
+    auto result = detail::parse_tool_value_type("");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+// --- json_matches_type -----------------------------------------------------
+
+TEST(JsonMatchesTypeTest, IntegerMatchesInteger) {
+    EXPECT_TRUE(detail::json_matches_type(json(42), zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, FloatDoesNotMatchInteger) {
+    // JSON floats are not integers
+    EXPECT_FALSE(detail::json_matches_type(json(3.14), zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, IntegerMatchesNumber) {
+    // integers are numbers in JSON
+    EXPECT_TRUE(detail::json_matches_type(json(1), zoo::tools::ToolValueType::Number));
+}
+
+TEST(JsonMatchesTypeTest, FloatMatchesNumber) {
+    EXPECT_TRUE(detail::json_matches_type(json(1.5), zoo::tools::ToolValueType::Number));
+}
+
+TEST(JsonMatchesTypeTest, StringMatchesString) {
+    EXPECT_TRUE(detail::json_matches_type(json("hello"), zoo::tools::ToolValueType::String));
+}
+
+TEST(JsonMatchesTypeTest, NonStringDoesNotMatchString) {
+    EXPECT_FALSE(detail::json_matches_type(json(0), zoo::tools::ToolValueType::String));
+}
+
+TEST(JsonMatchesTypeTest, BoolMatchesBoolean) {
+    EXPECT_TRUE(detail::json_matches_type(json(true), zoo::tools::ToolValueType::Boolean));
+    EXPECT_TRUE(detail::json_matches_type(json(false), zoo::tools::ToolValueType::Boolean));
+}
+
+TEST(JsonMatchesTypeTest, NonBoolDoesNotMatchBoolean) {
+    EXPECT_FALSE(detail::json_matches_type(json(1), zoo::tools::ToolValueType::Boolean));
+}
+
+// --- validate_enum_values --------------------------------------------------
+
+TEST(ValidateEnumValuesTest, AcceptsMatchingStringEnumValues) {
+    std::vector<json> values = {json("a"), json("b"), json("c")};
+    auto result = detail::validate_enum_values(values, zoo::tools::ToolValueType::String, "t", "p");
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST(ValidateEnumValuesTest, AcceptsMatchingBooleanEnumValues) {
+    std::vector<json> values = {json(true), json(false)};
+    auto result =
+        detail::validate_enum_values(values, zoo::tools::ToolValueType::Boolean, "t", "p");
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST(ValidateEnumValuesTest, AcceptsMatchingNumberEnumValues) {
+    std::vector<json> values = {json(1.0), json(2.5)};
+    auto result = detail::validate_enum_values(values, zoo::tools::ToolValueType::Number, "t", "p");
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST(ValidateEnumValuesTest, RejectsMismatchedEnumValueType) {
+    // Enum declares integer type but supplies a string value
+    std::vector<json> values = {json(1), json("two")};
+    auto result =
+        detail::validate_enum_values(values, zoo::tools::ToolValueType::Integer, "tool", "param");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+    EXPECT_NE(result.error().message.find("param"), std::string::npos);
+    EXPECT_NE(result.error().message.find("tool"), std::string::npos);
+}
+
+TEST(ValidateEnumValuesTest, AcceptsEmptyEnumList) {
+    std::vector<json> values;
+    auto result =
+        detail::validate_enum_values(values, zoo::tools::ToolValueType::Integer, "t", "p");
+    EXPECT_TRUE(result.has_value());
+}
+
+// --- normalize_manual_tool_metadata: schema-level validation ---------------
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonObjectSchema) {
+    auto result = detail::normalize_manual_tool_metadata("t", "d", json::array());
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsMissingTopLevelType) {
+    json schema = {{"properties", json::object()}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonStringTopLevelType) {
+    json schema = {{"type", 42}, {"properties", json::object()}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonObjectTopLevelType) {
+    json schema = {{"type", "array"}, {"properties", json::object()}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsMissingProperties) {
+    json schema = {{"type", "object"}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonObjectProperties) {
+    json schema = {{"type", "object"}, {"properties", json::array()}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsAdditionalPropertiesTrue) {
+    json schema = {
+        {"type", "object"}, {"properties", json::object()}, {"additionalProperties", true}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsAdditionalPropertiesNonBoolean) {
+    // "additionalProperties": {} is a common JSON Schema pattern but is unsupported here
+    json schema = {{"type", "object"},
+                   {"properties", json::object()},
+                   {"additionalProperties", json::object()}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, AcceptsAdditionalPropertiesFalse) {
+    json schema = {
+        {"type", "object"}, {"properties", json::object()}, {"additionalProperties", false}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonArrayRequired) {
+    json schema = {
+        {"type", "object"}, {"properties", json::object()}, {"required", json::object()}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonStringRequiredEntry) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"x", {{"type", "integer"}}}}},
+                   {"required", json::array({42})}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsDuplicateRequiredEntry) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"x", {{"type", "integer"}}}}},
+                   {"required", json::array({"x", "x"})}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+    EXPECT_NE(result.error().message.find("duplicate"), std::string::npos);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsRequiredEntryNotInProperties) {
+    json schema = {
+        {"type", "object"}, {"properties", json::object()}, {"required", json::array({"ghost"})}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+    EXPECT_NE(result.error().message.find("ghost"), std::string::npos);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsNonObjectPropertyValue) {
+    json schema = {{"type", "object"}, {"properties", {{"x", "not-an-object"}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsPropertyWithMissingType) {
+    json schema = {{"type", "object"}, {"properties", {{"x", {{"description", "no type"}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsPropertyWithNonStringType) {
+    json schema = {{"type", "object"}, {"properties", {{"x", {{"type", 99}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsPropertyWithNonStringDescription) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"x", {{"type", "string"}, {"description", 123}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsPropertyWithNonArrayEnum) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"x", {{"type", "string"}, {"enum", "not-array"}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, RejectsEnumValueTypeMismatch) {
+    // "x" is declared integer but the enum contains a string
+    json schema = {
+        {"type", "object"},
+        {"properties", {{"x", {{"type", "integer"}, {"enum", json::array({1, "two"})}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+}
+
+TEST(NormalizeManualToolMetadataTest, ParameterOrderIsRequiredThenOptional) {
+    // "b" is required, "a" comes first alphabetically — required should still win
+    json schema = {{"type", "object"},
+                   {"properties", {{"a", {{"type", "string"}}}, {"b", {{"type", "integer"}}}}},
+                   {"required", json::array({"b"})}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->parameters.size(), 2u);
+    EXPECT_EQ(result->parameters[0].name, "b");
+    EXPECT_TRUE(result->parameters[0].required);
+    EXPECT_EQ(result->parameters[1].name, "a");
+    EXPECT_FALSE(result->parameters[1].required);
+}
+
+TEST(NormalizeManualToolMetadataTest, SetsDescriptionOnParameter) {
+    json schema = {{"type", "object"},
+                   {"properties", {{"x", {{"type", "string"}, {"description", "the x value"}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->parameters.size(), 1u);
+    EXPECT_EQ(result->parameters[0].description, "the x value");
+}
+
+TEST(NormalizeManualToolMetadataTest, AcceptsNumberAndBooleanTypes) {
+    json schema = {
+        {"type", "object"},
+        {"properties", {{"ratio", {{"type", "number"}}}, {"flag", {{"type", "boolean"}}}}}};
+    auto result = detail::normalize_manual_tool_metadata("t", "d", schema);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->parameters.size(), 2u);
+    // nlohmann preserves insertion order which is alphabetical for object literals
+    EXPECT_EQ(result->parameters[0].type, zoo::tools::ToolValueType::Boolean);
+    EXPECT_EQ(result->parameters[1].type, zoo::tools::ToolValueType::Number);
+}
+
+// --- build_parameters_schema -----------------------------------------------
+
+TEST(BuildParametersSchemaTest, EmptyParameterListProducesEmptySchema) {
+    auto schema = detail::build_parameters_schema({});
+    EXPECT_EQ(schema["type"], "object");
+    EXPECT_TRUE(schema["properties"].empty());
+    EXPECT_TRUE(schema["required"].empty());
+    EXPECT_EQ(schema["additionalProperties"], false);
+}
+
+TEST(BuildParametersSchemaTest, DescriptionAppearsInPropertySchema) {
+    zoo::tools::ToolParameter p;
+    p.name = "q";
+    p.type = zoo::tools::ToolValueType::String;
+    p.required = true;
+    p.description = "the query";
+
+    auto schema = detail::build_parameters_schema({p});
+    EXPECT_EQ(schema["properties"]["q"]["description"], "the query");
+    EXPECT_EQ(schema["properties"]["q"]["type"], "string");
+    EXPECT_EQ(schema["required"], json::array({"q"}));
+}
+
+TEST(BuildParametersSchemaTest, NoDescriptionKeyWhenDescriptionIsEmpty) {
+    zoo::tools::ToolParameter p;
+    p.name = "n";
+    p.type = zoo::tools::ToolValueType::Integer;
+    p.required = false;
+
+    auto schema = detail::build_parameters_schema({p});
+    EXPECT_FALSE(schema["properties"]["n"].contains("description"));
+}
+
+TEST(BuildParametersSchemaTest, EnumAppearsInPropertySchema) {
+    zoo::tools::ToolParameter p;
+    p.name = "size";
+    p.type = zoo::tools::ToolValueType::String;
+    p.required = false;
+    p.enum_values = {json("sm"), json("md"), json("lg")};
+
+    auto schema = detail::build_parameters_schema({p});
+    EXPECT_EQ(schema["properties"]["size"]["enum"], json::array({"sm", "md", "lg"}));
+}
+
+TEST(BuildParametersSchemaTest, OptionalParamNotAddedToRequired) {
+    zoo::tools::ToolParameter p;
+    p.name = "opt";
+    p.type = zoo::tools::ToolValueType::Boolean;
+    p.required = false;
+
+    auto schema = detail::build_parameters_schema({p});
+    EXPECT_TRUE(schema["required"].empty());
+}
+
+// --- normalize_schema (thin wrapper) ---------------------------------------
+
+TEST(NormalizeSchemaTest, DelegatesToNormalizeManualToolMetadata) {
+    json schema = {{"type", "object"}, {"properties", {{"x", {{"type", "integer"}}}}}};
+    auto result = detail::normalize_schema(schema);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(result->size(), 1u);
+    EXPECT_EQ((*result)[0].name, "x");
+}
+
+TEST(NormalizeSchemaTest, PropagatesErrorFromNormalizeManualToolMetadata) {
+    auto result = detail::normalize_schema(json("not-an-object"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
 }

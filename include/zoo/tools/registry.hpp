@@ -1,6 +1,6 @@
 /**
  * @file registry.hpp
- * @brief Thread-safe tool registration, schema normalization, and invocation helpers.
+ * @brief Tool registration, schema normalization, and invocation helpers.
  */
 
 #pragma once
@@ -291,15 +291,14 @@ class ToolRegistry {
         requires detail::is_json_handler_like_v<Handler>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  const nlohmann::json& schema, Handler handler) {
-        return register_tool(name, description, nlohmann::json(schema),
-                             ToolHandler(std::move(handler)));
+        return register_tool(name, description, schema, ToolHandler(std::move(handler)));
     }
 
     /**
      * @brief Registers a tool using a prebuilt JSON Schema and handler.
      */
     Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 nlohmann::json schema, ToolHandler handler);
+                                 const nlohmann::json& schema, ToolHandler handler);
 
     /**
      * @brief Registers a normalized tool definition.

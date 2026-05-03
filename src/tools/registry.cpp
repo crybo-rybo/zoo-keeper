@@ -294,7 +294,7 @@ nlohmann::json ToolRegistry::build_schema_json(const ToolMetadata& metadata) {
 }
 
 Expected<void> ToolRegistry::register_tool(const std::string& name, const std::string& description,
-                                           nlohmann::json schema, ToolHandler handler) {
+                                           const nlohmann::json& schema, ToolHandler handler) {
     auto definition = detail::make_tool_definition(name, description, schema, std::move(handler));
     if (!definition) {
         return std::unexpected(definition.error());
