@@ -76,17 +76,17 @@ Expected<void> validate_catalog_entries(const std::vector<ModelEntry>& entries) 
         std::unordered_set<std::string> entry_aliases;
         for (const auto& alias : entry.aliases) {
             if (auto result = validate_alias_value(alias); !result) {
-                return std::unexpected(
-                    Error{ErrorCode::StoreCorrupted, "Catalog contains an empty alias"});
+                return std::unexpected(Error{to_error_code(HubErrorCode::StoreCorrupted),
+                                             "Catalog contains an empty alias"});
             }
             if (!entry_aliases.insert(alias).second) {
                 return std::unexpected(
-                    Error{ErrorCode::StoreCorrupted,
+                    Error{to_error_code(HubErrorCode::StoreCorrupted),
                           "Catalog contains duplicate aliases on entry: " + entry.id});
             }
             if (!aliases.insert(alias).second) {
-                return std::unexpected(
-                    Error{ErrorCode::StoreCorrupted, "Catalog contains duplicate alias: " + alias});
+                return std::unexpected(Error{to_error_code(HubErrorCode::StoreCorrupted),
+                                             "Catalog contains duplicate alias: " + alias});
             }
         }
     }
@@ -112,19 +112,19 @@ struct ModelStore::Impl {
 
         std::ifstream file(path);
         if (!file.is_open()) {
-            return std::unexpected(
-                Error{ErrorCode::FilesystemError, "Cannot open catalog: " + path});
+            return std::unexpected(Error{to_error_code(HubErrorCode::FilesystemError),
+                                         "Cannot open catalog: " + path});
         }
 
         try {
             auto j = nlohmann::json::parse(file);
             if (!j.is_object() || !j.contains("models") || !j["models"].is_array()) {
-                return std::unexpected(
-                    Error{ErrorCode::StoreCorrupted, "Catalog has invalid structure: " + path});
+                return std::unexpected(Error{to_error_code(HubErrorCode::StoreCorrupted),
+                                             "Catalog has invalid structure: " + path});
             }
             entries = j["models"].get<std::vector<ModelEntry>>();
         } catch (const nlohmann::json::exception& e) {
-            return std::unexpected(Error{ErrorCode::StoreCorrupted,
+            return std::unexpected(Error{to_error_code(HubErrorCode::StoreCorrupted),
                                          "Failed to parse catalog: " + std::string(e.what())});
         }
         if (auto result = validate_catalog_entries(entries); !result) {
@@ -142,8 +142,8 @@ struct ModelStore::Impl {
 
         std::ofstream file(path);
         if (!file.is_open()) {
-            return std::unexpected(
-                Error{ErrorCode::FilesystemError, "Cannot write catalog: " + path});
+            return std::unexpected(Error{to_error_code(HubErrorCode::FilesystemError),
+                                         "Cannot write catalog: " + path});
         }
         file << j.dump(2) << "\n";
         return {};
@@ -189,7 +189,7 @@ struct ModelStore::Impl {
         }
 
         return std::unexpected(
-            Error{ErrorCode::ModelNotFound, "No model found matching: " + query});
+            Error{to_error_code(HubErrorCode::ModelNotFound), "No model found matching: " + query});
     }
 };
 
@@ -213,8 +213,8 @@ Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries
         }
         for (const auto& alias : entries[i].aliases) {
             if (seen.contains(alias)) {
-                return std::unexpected(
-                    Error{ErrorCode::ModelAlreadyExists, "Alias already in use: " + alias});
+                return std::unexpected(Error{to_error_code(HubErrorCode::ModelAlreadyExists),
+                                             "Alias already in use: " + alias});
             }
         }
     }
@@ -235,7 +235,7 @@ Expected<std::unique_ptr<ModelStore>> ModelStore::open(ModelStoreConfig config) 
     std::error_code ec;
     std::filesystem::create_directories(config.store_directory, ec);
     if (ec) {
-        return std::unexpected(Error{ErrorCode::FilesystemError,
+        return std::unexpected(Error{to_error_code(HubErrorCode::FilesystemError),
                                      "Cannot create store directory: " + config.store_directory,
                                      ec.message()});
     }
@@ -266,8 +266,8 @@ Expected<ModelEntry> ModelStore::add(const std::string& file_path,
     // Check for duplicates.
     for (const auto& entry : impl_->entries) {
         if (entry.file_path == abs_path) {
-            return std::unexpected(
-                Error{ErrorCode::ModelAlreadyExists, "Model already registered: " + abs_path});
+            return std::unexpected(Error{to_error_code(HubErrorCode::ModelAlreadyExists),
+                                         "Model already registered: " + abs_path});
         }
     }
 

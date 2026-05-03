@@ -126,7 +126,8 @@ void collect_all_metadata(const gguf_context* ctx, std::map<std::string, std::st
 
 Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     if (!std::filesystem::exists(file_path)) {
-        return std::unexpected(Error{ErrorCode::GgufReadFailed, "File not found: " + file_path});
+        return std::unexpected(
+            Error{to_error_code(HubErrorCode::GgufReadFailed), "File not found: " + file_path});
     }
 
     // Phase 1: Raw GGUF read for KV metadata.
@@ -136,8 +137,8 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
 
     auto* gguf_ctx = gguf_init_from_file(file_path.c_str(), gguf_params);
     if (!gguf_ctx) {
-        return std::unexpected(
-            Error{ErrorCode::GgufReadFailed, "Failed to parse GGUF file: " + file_path});
+        return std::unexpected(Error{to_error_code(HubErrorCode::GgufReadFailed),
+                                     "Failed to parse GGUF file: " + file_path});
     }
 
     ModelInfo info;

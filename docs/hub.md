@@ -134,19 +134,21 @@ path match.
 
 ## Error Codes
 
-Hub error codes occupy the 700-799 range.
+Hub error codes occupy the 700-799 range. Symbolic names live in
+`zoo::hub::HubErrorCode`; returned `zoo::Error` values carry the corresponding
+core numeric code via `zoo::hub::to_error_code(...)`.
 
 | Code | Name | Description |
 |------|------|-------------|
-| 700 | `GgufReadFailed` | Could not open or parse a GGUF file |
-| 701 | `GgufMetadataNotFound` | An expected metadata key was missing |
-| 702 | `ModelNotFound` | No model matched the given name, alias, or path |
-| 703 | `ModelAlreadyExists` | A model with the same path is already registered |
-| 704 | `DownloadFailed` | HTTP download failed |
-| 706 | `HuggingFaceApiError` | The HuggingFace API returned an error |
-| 707 | `InvalidModelIdentifier` | Could not parse the identifier string |
-| 708 | `StoreCorrupted` | The catalog JSON is malformed |
-| 709 | `FilesystemError` | A filesystem operation failed |
+| 700 | `HubErrorCode::GgufReadFailed` | Could not open or parse a GGUF file |
+| 701 | `HubErrorCode::GgufMetadataNotFound` | An expected metadata key was missing |
+| 702 | `HubErrorCode::ModelNotFound` | No model matched the given name, alias, or path |
+| 703 | `HubErrorCode::ModelAlreadyExists` | A model with the same path is already registered |
+| 704 | `HubErrorCode::DownloadFailed` | HTTP download failed |
+| 706 | `HubErrorCode::HuggingFaceApiError` | The HuggingFace API returned an error |
+| 707 | `HubErrorCode::InvalidModelIdentifier` | Could not parse the identifier string |
+| 708 | `HubErrorCode::StoreCorrupted` | The catalog JSON is malformed |
+| 709 | `HubErrorCode::FilesystemError` | A filesystem operation failed |
 
 ## See Also
 
