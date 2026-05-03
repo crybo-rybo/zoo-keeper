@@ -63,9 +63,11 @@ preset enables the live-model test label set.
 | `ZOO_BUILD_INTEGRATION_TESTS` | Build Model/Agent integration tests | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
 | `ZOO_BUILD_BENCHMARKS` | Build the repo-local benchmark harness | OFF |
+| `ZOO_BUILD_HUB` | Build optional GGUF inspection, HuggingFace, and model-store APIs | OFF |
 | `ZOO_BUILD_DOCS` | Configure the `zoo_docs` Doxygen target | OFF |
 | `ZOO_ENABLE_COVERAGE` | Coverage instrumentation | OFF |
 | `ZOO_ENABLE_SANITIZERS` | ASan + UBSan | OFF |
+| `ZOO_ENABLE_INSTALL` | Generate install and package metadata | ON top-level, OFF as subproject |
 | `ZOO_ENABLE_LOGGING` | Emit runtime diagnostic logs to stderr | OFF |
 | `ZOO_WARNINGS_AS_ERRORS` | Treat warnings in zoo-owned targets as errors | OFF |
 

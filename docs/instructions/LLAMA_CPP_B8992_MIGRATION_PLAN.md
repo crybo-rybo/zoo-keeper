@@ -14,7 +14,7 @@
 
 ## Implementation Checklist
 
-1. Update `extern/llama.cpp` and `ZOO_LLAMA_TAG` to b8992.
+1. Update `ZOO_LLAMA_TAG` to b8992 and refresh the FetchContent cache.
 2. Rename build/package references from `common`/`libcommon.a` to `llama-common`/`libllama-common.a`, including `libllama-common-base.a`.
 3. Add a temporary Clang-only CMake workaround for b8992 `common/ngram-mod.cpp` missing `<algorithm>`.
 4. Replace legacy tool parser state with `common_chat_parser_params`.
@@ -24,7 +24,7 @@
 8. Remove manual Hub HEAD size probing and duplicate Authorization header plumbing.
 9. Let llama.cpp own HuggingFace repo files in its Hugging Face-style cache.
 10. Preserve `CachedModelInfo` source compatibility while documenting `size_bytes == 0`.
-11. Update migration docs, Hub docs, CMake docs, and submodule-update instructions.
+11. Update migration docs, Hub docs, CMake docs, and llama-update instructions.
 12. Verify default, Hub, examples, unit, and packaging-consumer builds.
 
 ## Test Gates
@@ -39,6 +39,6 @@
 
 ## Notes
 
-- Do not modify files inside `extern/llama.cpp`; keep compatibility patches in Zoo-Keeper CMake.
+- Do not patch fetched llama.cpp sources; keep compatibility patches in Zoo-Keeper CMake.
 - The Hugging Face cache path is now derived by llama.cpp and may be a snapshot path.
 - `ModelStore::pull()` should record the best available source URL, but catalog correctness must not depend on being able to derive one.
