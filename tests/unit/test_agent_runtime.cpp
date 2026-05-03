@@ -679,6 +679,106 @@ TEST(AgentRuntimeTest, StreamingCallbackRunsOffInferenceThread) {
     EXPECT_NE(callback_thread_id, inference_thread_id);
 }
 
+TEST(AgentRuntimeTest, ToolHandlerRunsOffInferenceThread) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    std::thread::id inference_thread_id;
+    std::thread::id handler_thread_id;
+
+    auto definition = zoo::tools::detail::make_tool_definition(
+        "capture_id", "Captures the handler thread id", std::vector<std::string>{"value"},
+        [&handler_thread_id](int) -> int {
+            handler_thread_id = std::this_thread::get_id();
+            return 0;
+        });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation(
+        [&inference_thread_id](TokenCallback, const CancellationCallback&) {
+            inference_thread_id = std::this_thread::get_id();
+            return Expected<GenerationResult>(tool_call_generation("capture_id", {{"value", 1}}));
+        });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    auto result = runtime.chat("go").await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    EXPECT_NE(inference_thread_id, std::thread::id{});
+    EXPECT_NE(handler_thread_id, std::thread::id{});
+    EXPECT_NE(handler_thread_id, inference_thread_id);
+    EXPECT_NE(handler_thread_id, std::this_thread::get_id());
+}
+
+TEST(AgentRuntimeTest, ToolHandlerExceptionsBecomeExecutionFailedErrors) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    // Register a raw handler that throws (bypasses the make_tool_definition wrapper).
+    // Use a schema with one parameter so validation passes and the handler is reached.
+    nlohmann::json schema = {{"type", "object"},
+                             {"properties", nlohmann::json{{"x", {{"type", "integer"}}}}},
+                             {"required", nlohmann::json::array({"x"})},
+                             {"additionalProperties", false}};
+    zoo::tools::ToolHandler throwing_handler =
+        [](const nlohmann::json&) -> Expected<nlohmann::json> {
+        throw std::runtime_error("intentional error");
+    };
+    auto definition = zoo::tools::detail::make_tool_definition("thrower", "throws on every call",
+                                                               schema, std::move(throwing_handler));
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("thrower", {{"x", 42}}));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"recovered", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto result = runtime.chat("go", options).await_result();
+
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    ASSERT_TRUE(result->tool_trace.has_value());
+    ASSERT_EQ(result->tool_trace->invocations.size(), 1u);
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::ExecutionFailed);
+}
+
+TEST(AgentRuntimeTest, ToolExecutionCompletesCleanlyBeforeRuntimeDestruction) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    auto runtime = std::make_unique<AgentRuntime>(make_model_config(), make_agent_config(),
+                                                  GenerationOptions{}, std::move(backend));
+
+    auto definition = zoo::tools::detail::make_tool_definition(
+        "noop", "does nothing", std::vector<std::string>{"value"}, [](int) -> int { return 0; });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime->register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("noop", {{"value", 1}}));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    auto result = runtime->chat("go").await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    // Destructor must not hang — inference thread and ToolExecutor worker both exit cleanly.
+    auto destroy_future = std::async(std::launch::async, [&] { runtime.reset(); });
+    EXPECT_EQ(destroy_future.wait_for(3s), std::future_status::ready);
+}
+
 TEST(ScopeExitTest, MoveConstructionTransfersSingleExecution) {
     int calls = 0;
 
