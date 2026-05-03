@@ -89,21 +89,20 @@ TEST(ToolCallTest, ToolCallSpanSupportsBorrowedAndOwnedStorage) {
     EXPECT_EQ(owned_span[0].id, "call_2");
 }
 
-TEST(ConversationViewTest, SupportsBorrowedAndOwnedStorage) {
-    const std::array<zoo::MessageView, 1> borrowed = {
-        zoo::MessageView{zoo::Role::User, "hello"}};
+TEST(ConversationViewTest, IndexesBorrowedAndDirectOwnedStorage) {
+    const std::array<zoo::MessageView, 1> borrowed = {zoo::MessageView{zoo::Role::User, "hello"}};
     const zoo::ConversationView borrowed_view{std::span<const zoo::MessageView>(borrowed)};
 
     EXPECT_EQ(borrowed_view.size(), 1u);
-    EXPECT_EQ(borrowed_view[0].role, zoo::Role::User);
-    EXPECT_EQ(borrowed_view[0].content, "hello");
+    EXPECT_EQ(borrowed_view[0].role(), zoo::Role::User);
+    EXPECT_EQ(borrowed_view[0].content(), "hello");
 
     const std::array<zoo::OwnedMessage, 1> owned = {zoo::OwnedMessage::assistant("reply")};
     const zoo::ConversationView owned_view{std::span<const zoo::OwnedMessage>(owned)};
 
     EXPECT_EQ(owned_view.size(), 1u);
-    EXPECT_EQ(owned_view[0].role, zoo::Role::Assistant);
-    EXPECT_EQ(owned_view[0].content, "reply");
+    EXPECT_EQ(owned_view[0].role(), zoo::Role::Assistant);
+    EXPECT_EQ(owned_view[0].content(), "reply");
 }
 
 TEST(MessageTest, FactoryMethodsCreateOwnedMessages) {

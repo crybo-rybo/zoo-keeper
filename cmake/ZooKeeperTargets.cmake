@@ -25,6 +25,7 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/core/model_sampling.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_tool_calling.cpp
     ${PROJECT_SOURCE_DIR}/src/core/stream_filter.cpp
+    ${PROJECT_SOURCE_DIR}/src/tools/registry.cpp
     ${PROJECT_SOURCE_DIR}/src/log_callback.cpp
 )
 target_include_directories(zoo PUBLIC

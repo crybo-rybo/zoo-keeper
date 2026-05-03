@@ -51,6 +51,11 @@ struct ActiveRequest {
  * @brief Fixed-capacity request state table.
  */
 class RequestSlots {
+    struct ReleasedSlot {
+        RequestId request_id = 0;
+        uint32_t index = 0;
+    };
+
   public:
     explicit RequestSlots(size_t capacity) : slots_() {
         slots_.reserve(capacity);
@@ -148,44 +153,54 @@ class RequestSlots {
     }
 
     void resolve_error(uint32_t slot_index, uint32_t generation, Error error) {
+        std::optional<ReleasedSlot> released;
         if (slot_index >= slots_.size()) {
             return;
         }
 
-        Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
-        if (!slot.occupied || slot.generation != generation) {
-            return;
-        }
-
-        if (slot.payload.result_kind == ResultKind::Extraction) {
-            resolve_locked(slot, Expected<ExtractionResponse>(std::unexpected(std::move(error))));
-        } else {
-            resolve_locked(slot, Expected<TextResponse>(std::unexpected(std::move(error))));
-        }
-    }
-
-    void fail_all(const Error& error) {
-        std::lock_guard<std::mutex> table_lock(mutex_);
-        for (auto& slot_ptr : slots_) {
-            Slot& slot = *slot_ptr;
-            std::lock_guard<std::mutex> slot_lock(slot.mutex);
-            if (!slot.occupied) {
-                continue;
-            }
-
-            if (slot.orphaned) {
-                reset_locked_with_table(slot);
-                continue;
+        {
+            Slot& slot = *slots_[slot_index];
+            std::lock_guard<std::mutex> lock(slot.mutex);
+            if (!slot.occupied || slot.generation != generation) {
+                return;
             }
 
             if (slot.payload.result_kind == ResultKind::Extraction) {
-                slot.result = Expected<ExtractionResponse>(std::unexpected(error));
+                released = resolve_locked(
+                    slot, Expected<ExtractionResponse>(std::unexpected(std::move(error))));
             } else {
-                slot.result = Expected<TextResponse>(std::unexpected(error));
+                released =
+                    resolve_locked(slot, Expected<TextResponse>(std::unexpected(std::move(error))));
             }
-            slot.ready = true;
-            slot.cv.notify_all();
+        }
+
+        return_slot_to_free_list(std::move(released));
+    }
+
+    void fail_all(const Error& error) {
+        for (auto& slot_ptr : slots_) {
+            std::optional<ReleasedSlot> released;
+            Slot& slot = *slot_ptr;
+            {
+                std::lock_guard<std::mutex> slot_lock(slot.mutex);
+                if (!slot.occupied) {
+                    continue;
+                }
+
+                if (slot.orphaned) {
+                    released = clear_slot_for_reuse_locked(slot);
+                } else if (slot.payload.result_kind == ResultKind::Extraction) {
+                    slot.result = Expected<ExtractionResponse>(std::unexpected(error));
+                    slot.ready = true;
+                    slot.cv.notify_all();
+                } else {
+                    slot.result = Expected<TextResponse>(std::unexpected(error));
+                    slot.ready = true;
+                    slot.cv.notify_all();
+                }
+            }
+
+            return_slot_to_free_list(std::move(released));
         }
     }
 
@@ -221,52 +236,63 @@ class RequestSlots {
                 Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
         }
 
-        Slot& slot = *slots_[slot_index];
-        std::unique_lock<std::mutex> lock(slot.mutex);
+        std::optional<Expected<Result>> result;
+        std::optional<ReleasedSlot> released;
 
-        auto pred = [&slot, generation] {
-            return (!slot.occupied || slot.generation != generation) || slot.ready;
-        };
+        {
+            Slot& slot = *slots_[slot_index];
+            std::unique_lock<std::mutex> lock(slot.mutex);
 
-        if (timeout) {
-            if (!slot.cv.wait_for(lock, *timeout, pred)) {
-                return std::unexpected(
-                    Error{ErrorCode::RequestTimeout, "Timed out waiting for request result"});
+            auto pred = [&slot, generation] {
+                return (!slot.occupied || slot.generation != generation) || slot.ready;
+            };
+
+            if (timeout) {
+                if (!slot.cv.wait_for(lock, *timeout, pred)) {
+                    return std::unexpected(
+                        Error{ErrorCode::RequestTimeout, "Timed out waiting for request result"});
+                }
+            } else {
+                slot.cv.wait(lock, pred);
             }
-        } else {
-            slot.cv.wait(lock, pred);
+
+            if (completed != nullptr) {
+                *completed = true;
+            }
+            if (!slot.occupied || slot.generation != generation) {
+                return std::unexpected(
+                    Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
+            }
+
+            result = std::move(std::get<Expected<Result>>(slot.result));
+            released = clear_slot_for_reuse_locked(slot);
         }
 
-        if (completed != nullptr) {
-            *completed = true;
-        }
-        if (!slot.occupied || slot.generation != generation) {
-            return std::unexpected(
-                Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
-        }
-
-        auto result = std::move(std::get<Expected<Result>>(slot.result));
-        reset_locked(slot);
-        return result;
+        return_slot_to_free_list(std::move(released));
+        return std::move(*result);
     }
 
     void release(uint32_t slot_index, uint32_t generation) {
+        std::optional<ReleasedSlot> released;
         if (slot_index >= slots_.size()) {
             return;
         }
 
-        Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
-        if (!slot.occupied || slot.generation != generation) {
-            return;
+        {
+            Slot& slot = *slots_[slot_index];
+            std::lock_guard<std::mutex> lock(slot.mutex);
+            if (!slot.occupied || slot.generation != generation) {
+                return;
+            }
+
+            if (slot.ready) {
+                released = clear_slot_for_reuse_locked(slot);
+            } else {
+                slot.orphaned = true;
+            }
         }
 
-        if (slot.ready) {
-            reset_locked(slot);
-            return;
-        }
-
-        slot.orphaned = true;
+        return_slot_to_free_list(std::move(released));
     }
 
   private:
@@ -288,31 +314,38 @@ class RequestSlots {
 
     template <typename Result>
     void resolve(uint32_t slot_index, uint32_t generation, Expected<Result> result) {
+        std::optional<ReleasedSlot> released;
         if (slot_index >= slots_.size()) {
             return;
         }
 
-        Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
-        if (!slot.occupied || slot.generation != generation) {
-            return;
+        {
+            Slot& slot = *slots_[slot_index];
+            std::lock_guard<std::mutex> lock(slot.mutex);
+            if (!slot.occupied || slot.generation != generation) {
+                return;
+            }
+
+            released = resolve_locked(slot, std::move(result));
         }
 
-        resolve_locked(slot, std::move(result));
+        return_slot_to_free_list(std::move(released));
     }
 
-    template <typename Result> void resolve_locked(Slot& slot, Expected<Result> result) {
+    template <typename Result>
+    [[nodiscard]] std::optional<ReleasedSlot> resolve_locked(Slot& slot, Expected<Result> result) {
         if (slot.orphaned) {
-            reset_locked(slot);
-            return;
+            return clear_slot_for_reuse_locked(slot);
         }
 
         slot.result = std::move(result);
         slot.ready = true;
         slot.cv.notify_all();
+        return std::nullopt;
     }
 
-    void clear_slot(Slot& slot) {
+    [[nodiscard]] ReleasedSlot clear_slot_for_reuse_locked(Slot& slot) {
+        ReleasedSlot released{slot.request_id, slot.index};
         slot.occupied = false;
         slot.orphaned = false;
         slot.ready = false;
@@ -324,21 +357,16 @@ class RequestSlots {
         if (slot.generation == 0) {
             slot.generation = 1;
         }
+        return released;
     }
 
-    /// Reset a slot and return it to the free list (caller does NOT hold mutex_).
-    void reset_locked(Slot& slot) {
+    void return_slot_to_free_list(std::optional<ReleasedSlot> released) {
+        if (!released) {
+            return;
+        }
         std::lock_guard<std::mutex> table_lock(mutex_);
-        request_index_.erase(slot.request_id);
-        clear_slot(slot);
-        free_list_.push_back(slot.index);
-    }
-
-    /// Reset a slot and return it to the free list (caller already holds mutex_).
-    void reset_locked_with_table(Slot& slot) {
-        request_index_.erase(slot.request_id);
-        clear_slot(slot);
-        free_list_.push_back(slot.index);
+        request_index_.erase(released->request_id);
+        free_list_.push_back(released->index);
     }
 
     mutable std::mutex mutex_;

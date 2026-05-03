@@ -8,6 +8,8 @@
 
 #include <chrono>
 #include <future>
+#include <mutex>
+#include <optional>
 #include <thread>
 
 namespace zoo::internal::agent::test_support {
@@ -16,6 +18,18 @@ class RequestSlotsTestPeer {
   public:
     static std::unique_lock<std::mutex> lock_slot(RequestSlots& slots, uint32_t slot_index) {
         return std::unique_lock<std::mutex>(slots.slots_.at(slot_index)->mutex);
+    }
+
+    static std::unique_lock<std::mutex> lock_table(RequestSlots& slots) {
+        return std::unique_lock<std::mutex>(slots.mutex_);
+    }
+
+    static std::optional<bool> try_read_slot_occupied(RequestSlots& slots, uint32_t slot_index) {
+        std::unique_lock<std::mutex> lock(slots.slots_.at(slot_index)->mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            return std::nullopt;
+        }
+        return slots.slots_.at(slot_index)->occupied;
     }
 };
 
@@ -45,6 +59,19 @@ RequestPayload make_text_request(std::string text) {
     payload.options = GenerationOptions{};
     payload.result_kind = ResultKind::Text;
     return payload;
+}
+
+bool wait_until_slot_unoccupied(RequestSlots& slots, uint32_t slot_index) {
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        auto occupied =
+            zoo::internal::agent::test_support::RequestSlotsTestPeer::try_read_slot_occupied(
+                slots, slot_index);
+        if (occupied.has_value() && !*occupied) {
+            return true;
+        }
+        std::this_thread::sleep_for(5ms);
+    }
+    return false;
 }
 
 } // namespace
@@ -126,6 +153,69 @@ TEST(RequestSlotsTest, FailAllResolvesOutstandingRequests) {
     ASSERT_FALSE(r2.has_value());
     EXPECT_EQ(r1.error().code, ErrorCode::AgentNotRunning);
     EXPECT_EQ(r2.error().code, ErrorCode::AgentNotRunning);
+}
+
+TEST(RequestSlotsTest, FailAllResolvesOutstandingAndFreesOrphanedRequests) {
+    RequestSlots slots(2);
+
+    auto active = slots.emplace(make_text_request("active"));
+    auto orphan = slots.emplace(make_text_request("orphan"));
+    ASSERT_TRUE(active.has_value());
+    ASSERT_TRUE(orphan.has_value());
+
+    slots.release(orphan->slot, orphan->generation);
+    slots.fail_all(Error{ErrorCode::AgentNotRunning, "shutdown"});
+
+    EXPECT_EQ(slots.size(), 1u);
+
+    auto result = slots.await_result<TextResponse>(active->slot, active->generation);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::AgentNotRunning);
+    EXPECT_EQ(slots.size(), 0u);
+}
+
+TEST(RequestSlotsTest, AwaitResultDoesNotHoldSlotLockWhileReturningSlotToTable) {
+    RequestSlots slots(1);
+
+    auto reservation = slots.emplace(make_text_request("ready"));
+    ASSERT_TRUE(reservation.has_value());
+    slots.resolve_text(reservation->slot, reservation->generation,
+                       Expected<TextResponse>(TextResponse{.text = "done"}));
+
+    auto table_lock = zoo::internal::agent::test_support::RequestSlotsTestPeer::lock_table(slots);
+    auto await_future = std::async(std::launch::async, [&] {
+        return slots.await_result<TextResponse>(reservation->slot, reservation->generation);
+    });
+
+    EXPECT_TRUE(wait_until_slot_unoccupied(slots, reservation->slot));
+    EXPECT_EQ(await_future.wait_for(0ms), std::future_status::timeout);
+
+    table_lock.unlock();
+    auto result = await_future.get();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "done");
+    EXPECT_EQ(slots.size(), 0u);
+}
+
+TEST(RequestSlotsTest, OrphanedResolveDoesNotHoldSlotLockWhileReturningSlotToTable) {
+    RequestSlots slots(1);
+
+    auto reservation = slots.emplace(make_text_request("orphan"));
+    ASSERT_TRUE(reservation.has_value());
+    slots.release(reservation->slot, reservation->generation);
+
+    auto table_lock = zoo::internal::agent::test_support::RequestSlotsTestPeer::lock_table(slots);
+    auto resolve_future = std::async(std::launch::async, [&] {
+        slots.resolve_text(reservation->slot, reservation->generation,
+                           Expected<TextResponse>(TextResponse{.text = "done"}));
+    });
+
+    EXPECT_TRUE(wait_until_slot_unoccupied(slots, reservation->slot));
+    EXPECT_EQ(resolve_future.wait_for(0ms), std::future_status::timeout);
+
+    table_lock.unlock();
+    resolve_future.get();
+    EXPECT_EQ(slots.size(), 0u);
 }
 
 TEST(RequestSlotsTest, CancelDoesNotBlockNewReservationsWhileWaitingOnSlotLock) {
