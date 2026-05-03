@@ -41,32 +41,55 @@ struct Model::Impl {
         Schema,
     };
 
+    // Loaded model state: set once during initialize() and immutable thereafter.
+    // Member declaration order matters for destruction: chat_templates is
+    // destroyed before llama_model (templates were initialized from the model).
+    struct LoadedModel {
+        ModelConfig model_config;
+        GenerationOptions default_generation_options;
+
+        Model::LlamaModelHandle llama_model;
+        Model::ChatTemplatesHandle chat_templates;
+        const llama_vocab* vocab = nullptr;
+        int context_size = 0;
+
+        LoadedModel(ModelConfig cfg, GenerationOptions defaults)
+            : model_config(std::move(cfg)), default_generation_options(std::move(defaults)) {}
+    };
+
+    // Per-conversation state: mutates during chat/extraction.
+    // Member declaration order matters for destruction: sampler is destroyed
+    // before ctx (sampler chain may reference vocab through grammar samplers
+    // and is built from the ctx).
+    struct Session {
+        Model::LlamaContextHandle ctx;
+        Model::LlamaSamplerHandle sampler;
+
+        std::string tool_grammar_str;
+        GrammarMode grammar_mode = GrammarMode::None;
+        std::unique_ptr<ToolCallingState> tool_state;
+
+        PromptState prompt_state;
+
+        std::vector<Message> messages;
+        int estimated_tokens = 0;
+        std::vector<int> token_buffer;
+        SamplingParams active_sampling;
+
+        explicit Session(SamplingParams initial_sampling)
+            : active_sampling(std::move(initial_sampling)) {}
+    };
+
     explicit Impl(ModelConfig model_config, GenerationOptions default_generation)
-        : model_config_(std::move(model_config)),
-          default_generation_options_(std::move(default_generation)),
-          active_sampling_(default_generation_options_.sampling) {}
+        : loaded_(std::move(model_config), std::move(default_generation)),
+          session_(loaded_.default_generation_options.sampling) {}
 
-    ModelConfig model_config_;
-    GenerationOptions default_generation_options_;
+    // Destruction order: session_ first (samplers/ctx), then loaded_ (chat
+    // templates, then llama_model). This invariant must hold — see comments
+    // on each struct above.
+    LoadedModel loaded_;
+    Session session_;
 
-    LlamaModelHandle llama_model_;
-    LlamaContextHandle ctx_;
-    LlamaSamplerHandle sampler_;
-    const llama_vocab* vocab_ = nullptr;
-
-    int context_size_ = 0;
-    ChatTemplatesHandle chat_templates_;
-
-    std::string tool_grammar_str_;
-    GrammarMode grammar_mode_ = GrammarMode::None;
-    std::unique_ptr<ToolCallingState> tool_state_;
-
-    PromptState prompt_state_;
-
-    std::vector<Message> messages_;
-    int estimated_tokens_ = 0;
-    std::vector<int> token_buffer_;
-    SamplingParams active_sampling_;
     static constexpr int kTemplateOverheadPerMessage = 8;
 };
 

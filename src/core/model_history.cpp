@@ -16,72 +16,72 @@ namespace zoo::core {
 void Model::set_system_prompt(std::string_view prompt) {
     Message sys_msg = Message::system(std::string(prompt));
 
-    if (!impl_->messages_.empty() && impl_->messages_[0].role == Role::System) {
-        impl_->estimated_tokens_ -= estimate_message_tokens(impl_->messages_[0]);
-        impl_->messages_[0] = std::move(sys_msg);
+    if (!impl_->session_.messages.empty() && impl_->session_.messages[0].role == Role::System) {
+        impl_->session_.estimated_tokens -= estimate_message_tokens(impl_->session_.messages[0]);
+        impl_->session_.messages[0] = std::move(sys_msg);
     } else {
-        impl_->messages_.insert(impl_->messages_.begin(), std::move(sys_msg));
+        impl_->session_.messages.insert(impl_->session_.messages.begin(), std::move(sys_msg));
     }
 
-    impl_->estimated_tokens_ += estimate_message_tokens(impl_->messages_[0]);
+    impl_->session_.estimated_tokens += estimate_message_tokens(impl_->session_.messages[0]);
     note_history_rewrite();
 }
 
 Expected<void> Model::add_message(MessageView message) {
-    auto err = validate_role_sequence(impl_->messages_, message.role());
+    auto err = validate_role_sequence(impl_->session_.messages, message.role());
     if (!err) {
         return std::unexpected(err.error());
     }
 
-    impl_->messages_.push_back(Message::from_view(message));
-    impl_->estimated_tokens_ += estimate_message_tokens(impl_->messages_.back());
+    impl_->session_.messages.push_back(Message::from_view(message));
+    impl_->session_.estimated_tokens += estimate_message_tokens(impl_->session_.messages.back());
     note_history_append();
     trim_history_to_fit();
     return {};
 }
 
 HistorySnapshot Model::get_history() const {
-    return HistorySnapshot{impl_->messages_};
+    return HistorySnapshot{impl_->session_.messages};
 }
 
 void Model::clear_history() {
-    impl_->messages_.clear();
-    impl_->estimated_tokens_ = 0;
+    impl_->session_.messages.clear();
+    impl_->session_.estimated_tokens = 0;
     note_history_reset();
 }
 
 void Model::replace_history(HistorySnapshot snapshot) {
-    impl_->messages_ = std::move(snapshot.messages);
-    impl_->estimated_tokens_ = 0;
-    for (const auto& m : impl_->messages_) {
-        impl_->estimated_tokens_ += estimate_message_tokens(m);
+    impl_->session_.messages = std::move(snapshot.messages);
+    impl_->session_.estimated_tokens = 0;
+    for (const auto& m : impl_->session_.messages) {
+        impl_->session_.estimated_tokens += estimate_message_tokens(m);
     }
     note_history_rewrite();
 }
 
 HistorySnapshot Model::swap_history(HistorySnapshot snapshot) {
-    HistorySnapshot previous{std::move(impl_->messages_)};
+    HistorySnapshot previous{std::move(impl_->session_.messages)};
     replace_history(std::move(snapshot));
     return previous;
 }
 
 int Model::context_size() const noexcept {
-    return impl_->model_config_.context_size;
+    return impl_->loaded_.model_config.context_size;
 }
 
 int Model::estimated_tokens() const noexcept {
-    return impl_->estimated_tokens_;
+    return impl_->session_.estimated_tokens;
 }
 
 bool Model::is_context_exceeded() const noexcept {
-    return impl_->estimated_tokens_ > impl_->model_config_.context_size;
+    return impl_->session_.estimated_tokens > impl_->loaded_.model_config.context_size;
 }
 
 int Model::estimate_tokens(std::string_view text) const {
-    if (impl_->vocab_) {
+    if (impl_->loaded_.vocab) {
         static_assert(sizeof(int) == sizeof(llama_token));
-        const int32_t raw =
-            llama_tokenize(impl_->vocab_, text.data(), text.length(), nullptr, 0, false, true);
+        const int32_t raw = llama_tokenize(impl_->loaded_.vocab, text.data(), text.length(),
+                                           nullptr, 0, false, true);
         const int n = (raw < 0) ? -raw : raw;
         if (n > 0) {
             return n;
@@ -105,19 +105,22 @@ int Model::estimate_message_tokens(const Message& message) const {
 
 void Model::trim_history(size_t max_non_system_messages) {
     const size_t system_offset =
-        (!impl_->messages_.empty() && impl_->messages_.front().role == Role::System) ? 1u : 0u;
+        (!impl_->session_.messages.empty() && impl_->session_.messages.front().role == Role::System)
+            ? 1u
+            : 0u;
 
-    if (impl_->messages_.size() <= system_offset + max_non_system_messages) {
+    if (impl_->session_.messages.size() <= system_offset + max_non_system_messages) {
         return;
     }
 
-    size_t erase_end = impl_->messages_.size() - max_non_system_messages;
+    size_t erase_end = impl_->session_.messages.size() - max_non_system_messages;
     if (erase_end < system_offset) {
         erase_end = system_offset;
     }
 
     // Align to a user-message boundary so we don't start mid-exchange.
-    while (erase_end < impl_->messages_.size() && impl_->messages_[erase_end].role != Role::User) {
+    while (erase_end < impl_->session_.messages.size() &&
+           impl_->session_.messages[erase_end].role != Role::User) {
         ++erase_end;
     }
 
@@ -126,14 +129,16 @@ void Model::trim_history(size_t max_non_system_messages) {
     }
 
     for (size_t index = system_offset; index < erase_end; ++index) {
-        impl_->estimated_tokens_ -= estimate_message_tokens(impl_->messages_[index]);
+        impl_->session_.estimated_tokens -=
+            estimate_message_tokens(impl_->session_.messages[index]);
     }
-    if (impl_->estimated_tokens_ < 0) {
-        impl_->estimated_tokens_ = 0;
+    if (impl_->session_.estimated_tokens < 0) {
+        impl_->session_.estimated_tokens = 0;
     }
 
-    impl_->messages_.erase(impl_->messages_.begin() + static_cast<std::ptrdiff_t>(system_offset),
-                           impl_->messages_.begin() + static_cast<std::ptrdiff_t>(erase_end));
+    impl_->session_.messages.erase(
+        impl_->session_.messages.begin() + static_cast<std::ptrdiff_t>(system_offset),
+        impl_->session_.messages.begin() + static_cast<std::ptrdiff_t>(erase_end));
     note_history_rewrite();
 }
 
@@ -143,16 +148,16 @@ void Model::trim_history_to_fit() {
 }
 
 void Model::rollback_last_message() noexcept {
-    if (impl_->messages_.empty()) {
+    if (impl_->session_.messages.empty()) {
         return;
     }
 
-    impl_->estimated_tokens_ -= estimate_message_tokens(impl_->messages_.back());
-    if (impl_->estimated_tokens_ < 0) {
-        impl_->estimated_tokens_ = 0;
+    impl_->session_.estimated_tokens -= estimate_message_tokens(impl_->session_.messages.back());
+    if (impl_->session_.estimated_tokens < 0) {
+        impl_->session_.estimated_tokens = 0;
     }
 
-    impl_->messages_.pop_back();
+    impl_->session_.messages.pop_back();
     note_history_rewrite();
 }
 

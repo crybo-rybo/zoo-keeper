@@ -26,13 +26,20 @@ struct DecodedToken {
     bool end_of_generation = false;
 };
 
-template <typename Impl> struct InferencePhase {
-    Impl& impl;
+struct InferenceCtx {
+    llama_context* ctx;
+    llama_sampler* sampler;
+    const llama_vocab* vocab;
+    int context_size;
+};
+
+struct InferencePhase {
+    InferenceCtx phase_ctx;
     const CancellationCallback& should_cancel;
 
     [[nodiscard]] Expected<int> prefill(const std::vector<int>& prompt_tokens) const {
-        const int n_batch = static_cast<int>(llama_n_batch(impl.ctx_.get()));
-        const int base_pos = llama_memory_seq_pos_max(llama_get_memory(impl.ctx_.get()), 0) + 1;
+        const int n_batch = static_cast<int>(llama_n_batch(phase_ctx.ctx));
+        const int base_pos = llama_memory_seq_pos_max(llama_get_memory(phase_ctx.ctx), 0) + 1;
 
         auto chunks = compute_prefill_chunks(static_cast<int>(prompt_tokens.size()), n_batch);
         for (const auto& chunk : chunks) {
@@ -42,7 +49,7 @@ template <typename Impl> struct InferencePhase {
             }
 
             int n_ctx_used = base_pos + chunk.offset + chunk.count;
-            if (n_ctx_used > impl.context_size_) {
+            if (n_ctx_used > phase_ctx.context_size) {
                 return std::unexpected(
                     Error{ErrorCode::ContextWindowExceeded, "Prompt tokens exceed context size"});
             }
@@ -57,7 +64,7 @@ template <typename Impl> struct InferencePhase {
             }
             batch.n_tokens = chunk.count;
 
-            int rc = llama_decode(impl.ctx_.get(), batch);
+            int rc = llama_decode(phase_ctx.ctx, batch);
             llama_batch_free(batch);
             if (rc != 0) {
                 return std::unexpected(
@@ -74,13 +81,14 @@ template <typename Impl> struct InferencePhase {
                 Error{ErrorCode::RequestCancelled, "Request cancelled during generation"});
         }
 
-        const llama_token token = llama_sampler_sample(impl.sampler_.get(), impl.ctx_.get(), -1);
-        if (llama_vocab_is_eog(impl.vocab_, token)) {
+        const llama_token token = llama_sampler_sample(phase_ctx.sampler, phase_ctx.ctx, -1);
+        if (llama_vocab_is_eog(phase_ctx.vocab, token)) {
             return DecodedToken{token, {}, true};
         }
 
         char buffer[256];
-        const int bytes = llama_token_to_piece(impl.vocab_, token, buffer, sizeof(buffer), 0, true);
+        const int bytes =
+            llama_token_to_piece(phase_ctx.vocab, token, buffer, sizeof(buffer), 0, true);
         if (bytes < 0) {
             return std::unexpected(Error{ErrorCode::Unknown, "Failed to convert token"});
         }
@@ -97,7 +105,7 @@ template <typename Impl> struct InferencePhase {
         batch.logits[0] = true;
         batch.n_tokens = 1;
 
-        int rc = llama_decode(impl.ctx_.get(), batch);
+        int rc = llama_decode(phase_ctx.ctx, batch);
         if (rc != 0) {
             return std::unexpected(Error{ErrorCode::InferenceFailed, "Failed to decode token"});
         }
@@ -125,20 +133,22 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
                                            TokenCallback on_token,
                                            CancellationCallback should_cancel) {
     std::string generated_text;
-    const int effective_max = (max_tokens > 0) ? max_tokens : impl_->context_size_;
+    const int effective_max = (max_tokens > 0) ? max_tokens : impl_->loaded_.context_size;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
     bool stopped_by_callback = false;
     StopSequenceMatcher stop_matcher{std::span<const std::string>(stop_sequences)};
     StreamFilter stream_filter;
-    if (on_token && impl_->tool_state_ &&
-        impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall) {
-        const auto& trigger_matcher = impl_->tool_state_->trigger_matcher;
+    if (on_token && impl_->session_.tool_state &&
+        impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall) {
+        const auto& trigger_matcher = impl_->session_.tool_state->trigger_matcher;
         stream_filter = StreamFilter(std::span<const std::string>(trigger_matcher.word_triggers()),
                                      &trigger_matcher);
     }
 
-    InferencePhase phase{*impl_, should_cancel};
+    InferencePhase phase{InferenceCtx{impl_->session_.ctx.get(), impl_->session_.sampler.get(),
+                                      impl_->loaded_.vocab, impl_->loaded_.context_size},
+                         should_cancel};
     auto current_pos_result = phase.prefill(prompt_tokens);
     if (!current_pos_result) {
         return std::unexpected(current_pos_result.error());
@@ -183,7 +193,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             }
         }
 
-        if (token_count >= effective_max || current_pos >= impl_->context_size_) {
+        if (token_count >= effective_max || current_pos >= impl_->loaded_.context_size) {
             break;
         }
 
@@ -231,7 +241,7 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
     bool first_token_received = false;
     int completion_tokens = 0;
 
-    impl_->active_sampling_ = effective_options.sampling;
+    impl_->session_.active_sampling = effective_options.sampling;
 
     auto wrapped_callback = [&](std::string_view token) -> TokenAction {
         if (!first_token_received) {
@@ -251,24 +261,9 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
         return std::unexpected(prompt_result.error());
     }
 
-    if (impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall) {
-        if (impl_->tool_grammar_str_.empty()) {
-            impl_->sampler_ = create_sampler_chain();
-            if (!impl_->sampler_) {
-                rollback_last_message();
-                return std::unexpected(
-                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
-            }
-        } else if (!rebuild_sampler_with_tool_grammar()) {
-            rollback_last_message();
-            return std::unexpected(
-                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
-        }
-    } else if (impl_->grammar_mode_ == Impl::GrammarMode::Schema &&
-               !rebuild_sampler_with_schema_grammar()) {
+    if (auto rebuild = ensure_grammar_sampler_for_pass(); !rebuild) {
         rollback_last_message();
-        return std::unexpected(
-            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
+        return std::unexpected(rebuild.error());
     }
 
     auto tokens_result = tokenize(*prompt_result);
@@ -279,13 +274,7 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
-    // Merge config stop sequences with tool-calling additional stops.
-    auto all_stops = effective_options.stop_sequences;
-    if (impl_->tool_state_) {
-        for (const auto& s : impl_->tool_state_->additional_stops) {
-            all_stops.push_back(s);
-        }
-    }
+    auto all_stops = merge_stop_sequences(effective_options.stop_sequences);
 
     auto generate_result = run_inference(*tokens_result, effective_options.max_tokens, all_stops,
                                          TokenCallback(wrapped_callback), should_cancel);
@@ -299,26 +288,27 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
 
     // When native tool calling is active, parse the output to extract
     // structured tool calls for proper history round-tripping.
-    if (impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall && impl_->tool_state_) {
+    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall &&
+        impl_->session_.tool_state) {
         auto parsed = parse_tool_response(generated_text);
         if (!parsed.tool_calls.empty()) {
-            impl_->messages_.push_back(Message::assistant_with_tool_calls(
+            impl_->session_.messages.push_back(Message::assistant_with_tool_calls(
                 std::move(parsed.content), std::move(parsed.tool_calls)));
         } else {
-            impl_->messages_.push_back(Message::assistant(std::move(parsed.content)));
+            impl_->session_.messages.push_back(Message::assistant(std::move(parsed.content)));
         }
     } else {
-        impl_->messages_.push_back(Message::assistant(std::move(generated_text)));
+        impl_->session_.messages.push_back(Message::assistant(std::move(generated_text)));
     }
 
-    impl_->estimated_tokens_ += estimate_message_tokens(impl_->messages_.back());
+    impl_->session_.estimated_tokens += estimate_message_tokens(impl_->session_.messages.back());
     note_history_append();
     finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
 
     TextResponse response;
-    response.text = impl_->messages_.back().content;
+    response.text = impl_->session_.messages.back().content;
     response.usage.prompt_tokens = prompt_tokens;
     response.usage.completion_tokens = completion_tokens;
     response.usage.total_tokens = prompt_tokens + completion_tokens;
@@ -348,28 +338,15 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
         return std::unexpected(validation.error());
     }
 
-    impl_->active_sampling_ = effective_options.sampling;
+    impl_->session_.active_sampling = effective_options.sampling;
 
     auto prompt_result = render_prompt_delta();
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
     }
 
-    if (impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall) {
-        if (impl_->tool_grammar_str_.empty()) {
-            impl_->sampler_ = create_sampler_chain();
-            if (!impl_->sampler_) {
-                return std::unexpected(
-                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
-            }
-        } else if (!rebuild_sampler_with_tool_grammar()) {
-            return std::unexpected(
-                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
-        }
-    } else if (impl_->grammar_mode_ == Impl::GrammarMode::Schema &&
-               !rebuild_sampler_with_schema_grammar()) {
-        return std::unexpected(
-            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
+    if (auto rebuild = ensure_grammar_sampler_for_pass(); !rebuild) {
+        return std::unexpected(rebuild.error());
     }
 
     auto tokens_result = tokenize(*prompt_result);
@@ -379,13 +356,7 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
-    // Merge config stop sequences with tool-calling additional stops.
-    auto all_stops = effective_options.stop_sequences;
-    if (impl_->tool_state_) {
-        for (const auto& s : impl_->tool_state_->additional_stops) {
-            all_stops.push_back(s);
-        }
-    }
+    auto all_stops = merge_stop_sequences(effective_options.stop_sequences);
 
     auto text_result = run_inference(*tokens_result, effective_options.max_tokens, all_stops,
                                      on_token, should_cancel);
@@ -399,7 +370,7 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
     bool tool_detected = false;
     std::string parsed_content;
     std::vector<ToolCallInfo> parsed_tool_calls;
-    if (impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall) {
+    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall) {
         auto parsed = parse_tool_response(*text_result);
         tool_detected = !parsed.tool_calls.empty();
         parsed_content = std::move(parsed.content);
@@ -410,9 +381,37 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
                             std::move(parsed_content), std::move(parsed_tool_calls)};
 }
 
+Expected<void> Model::ensure_grammar_sampler_for_pass() {
+    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall) {
+        if (impl_->session_.tool_grammar_str.empty()) {
+            impl_->session_.sampler = create_sampler_chain();
+            if (!impl_->session_.sampler) {
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
+            }
+        } else if (!rebuild_sampler_with_tool_grammar()) {
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
+        }
+    } else if (impl_->session_.grammar_mode == Impl::GrammarMode::Schema &&
+               !rebuild_sampler_with_schema_grammar()) {
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
+    }
+    return {};
+}
+
+std::vector<std::string> Model::merge_stop_sequences(std::vector<std::string> base) const {
+    if (impl_->session_.tool_state) {
+        const auto& extras = impl_->session_.tool_state->additional_stops;
+        base.insert(base.end(), extras.begin(), extras.end());
+    }
+    return base;
+}
+
 GenerationOptions Model::resolve_generation_options(const GenerationOptions& overrides) const {
     if (overrides.is_default()) {
-        return impl_->default_generation_options_;
+        return impl_->loaded_.default_generation_options;
     }
     return overrides;
 }
