@@ -153,20 +153,31 @@ class RequestSlots {
         }
 
         Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
-        if (!slot.occupied || slot.generation != generation) {
-            return;
-        }
+        std::optional<PendingFree> pending;
+        {
+            std::lock_guard<std::mutex> lock(slot.mutex);
+            if (!slot.occupied || slot.generation != generation) {
+                return;
+            }
 
-        if (slot.payload.result_kind == ResultKind::Extraction) {
-            resolve_locked(slot, Expected<ExtractionResponse>(std::unexpected(std::move(error))));
-        } else {
-            resolve_locked(slot, Expected<TextResponse>(std::unexpected(std::move(error))));
+            if (slot.payload.result_kind == ResultKind::Extraction) {
+                pending = resolve_locked(
+                    slot, Expected<ExtractionResponse>(std::unexpected(std::move(error))));
+            } else {
+                pending =
+                    resolve_locked(slot, Expected<TextResponse>(std::unexpected(std::move(error))));
+            }
+        }
+        if (pending) {
+            return_to_free_list(*pending);
         }
     }
 
+    // Lock-order invariant: never hold the table mutex (`mutex_`) while holding any slot mutex.
+    // We iterate slots without the table lock (slot pointers are stable for the lifetime of
+    // RequestSlots) and defer all free-list bookkeeping to a final batched table-lock section.
     void fail_all(const Error& error) {
-        std::lock_guard<std::mutex> table_lock(mutex_);
+        std::vector<PendingFree> orphan_cleanups;
         for (auto& slot_ptr : slots_) {
             Slot& slot = *slot_ptr;
             std::lock_guard<std::mutex> slot_lock(slot.mutex);
@@ -175,7 +186,7 @@ class RequestSlots {
             }
 
             if (slot.orphaned) {
-                reset_locked_with_table(slot);
+                orphan_cleanups.push_back(clear_slot_locked(slot));
                 continue;
             }
 
@@ -186,6 +197,14 @@ class RequestSlots {
             }
             slot.ready = true;
             slot.cv.notify_all();
+        }
+
+        if (!orphan_cleanups.empty()) {
+            std::lock_guard<std::mutex> table_lock(mutex_);
+            for (const auto& op : orphan_cleanups) {
+                request_index_.erase(op.rid);
+                free_list_.push_back(op.idx);
+            }
         }
     }
 
@@ -246,7 +265,9 @@ class RequestSlots {
         }
 
         auto result = std::move(std::get<Expected<Result>>(slot.result));
-        reset_locked(slot);
+        PendingFree op = clear_slot_locked(slot);
+        lock.unlock();
+        return_to_free_list(op);
         return result;
     }
 
@@ -256,13 +277,15 @@ class RequestSlots {
         }
 
         Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
+        std::unique_lock<std::mutex> lock(slot.mutex);
         if (!slot.occupied || slot.generation != generation) {
             return;
         }
 
         if (slot.ready) {
-            reset_locked(slot);
+            PendingFree op = clear_slot_locked(slot);
+            lock.unlock();
+            return_to_free_list(op);
             return;
         }
 
@@ -286,6 +309,13 @@ class RequestSlots {
         std::variant<std::monostate, Expected<TextResponse>, Expected<ExtractionResponse>> result;
     };
 
+    /// Cleanup token returned by `clear_slot_locked()`. Pass to `return_to_free_list()` after
+    /// the slot mutex has been released, never while still holding it.
+    struct PendingFree {
+        RequestId rid = 0;
+        uint32_t idx = 0;
+    };
+
     template <typename Result>
     void resolve(uint32_t slot_index, uint32_t generation, Expected<Result> result) {
         if (slot_index >= slots_.size()) {
@@ -293,23 +323,31 @@ class RequestSlots {
         }
 
         Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
-        if (!slot.occupied || slot.generation != generation) {
-            return;
+        std::optional<PendingFree> pending;
+        {
+            std::lock_guard<std::mutex> lock(slot.mutex);
+            if (!slot.occupied || slot.generation != generation) {
+                return;
+            }
+            pending = resolve_locked(slot, std::move(result));
         }
-
-        resolve_locked(slot, std::move(result));
+        if (pending) {
+            return_to_free_list(*pending);
+        }
     }
 
-    template <typename Result> void resolve_locked(Slot& slot, Expected<Result> result) {
+    /// Caller must hold `slot.mutex`. If the slot was orphaned, the caller is responsible for
+    /// passing the returned token to `return_to_free_list()` after dropping the slot mutex.
+    template <typename Result>
+    [[nodiscard]] std::optional<PendingFree> resolve_locked(Slot& slot, Expected<Result> result) {
         if (slot.orphaned) {
-            reset_locked(slot);
-            return;
+            return clear_slot_locked(slot);
         }
 
         slot.result = std::move(result);
         slot.ready = true;
         slot.cv.notify_all();
+        return std::nullopt;
     }
 
     void clear_slot(Slot& slot) {
@@ -326,19 +364,20 @@ class RequestSlots {
         }
     }
 
-    /// Reset a slot and return it to the free list (caller does NOT hold mutex_).
-    void reset_locked(Slot& slot) {
-        std::lock_guard<std::mutex> table_lock(mutex_);
-        request_index_.erase(slot.request_id);
+    /// Caller must hold `slot.mutex`. Captures the cleanup token, clears slot-owned state.
+    /// Free-list bookkeeping is deferred to `return_to_free_list()` so the table mutex is
+    /// never acquired while a slot mutex is held.
+    [[nodiscard]] PendingFree clear_slot_locked(Slot& slot) {
+        PendingFree op{slot.request_id, slot.index};
         clear_slot(slot);
-        free_list_.push_back(slot.index);
+        return op;
     }
 
-    /// Reset a slot and return it to the free list (caller already holds mutex_).
-    void reset_locked_with_table(Slot& slot) {
-        request_index_.erase(slot.request_id);
-        clear_slot(slot);
-        free_list_.push_back(slot.index);
+    /// Caller must NOT hold any slot mutex.
+    void return_to_free_list(PendingFree op) {
+        std::lock_guard<std::mutex> table_lock(mutex_);
+        request_index_.erase(op.rid);
+        free_list_.push_back(op.idx);
     }
 
     mutable std::mutex mutex_;
