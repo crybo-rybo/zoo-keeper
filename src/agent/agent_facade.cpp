@@ -70,17 +70,10 @@ RequestHandle<TextResponse> Agent::complete(ConversationView messages,
     return impl_->runtime.complete(messages, options, std::move(callback));
 }
 
-RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
-                                                 std::string_view user_message,
-                                                 const GenerationOptions& options,
-                                                 AsyncTextCallback callback) {
-    return impl_->runtime.extract(output_schema, user_message, options, std::move(callback));
-}
-
-RequestHandle<ExtractionResponse> Agent::extract(const nlohmann::json& output_schema,
-                                                 MessageView message,
-                                                 const GenerationOptions& options,
-                                                 AsyncTextCallback callback) {
+RequestHandle<ExtractionResponse> Agent::extract_stateful(const nlohmann::json& output_schema,
+                                                          MessageView message,
+                                                          const GenerationOptions& options,
+                                                          AsyncTextCallback callback) {
     return impl_->runtime.extract(output_schema, message, options, std::move(callback));
 }
 
@@ -136,42 +129,26 @@ Expected<void> Agent::clear_history(std::chrono::nanoseconds timeout) {
     return impl_->runtime.clear_history(timeout);
 }
 
-Expected<void> Agent::register_tool(tools::ToolDefinition definition) {
-    return impl_->runtime.register_tool(std::move(definition));
-}
-
 Expected<void> Agent::register_tool(tools::ToolDefinition definition,
-                                    std::chrono::nanoseconds timeout) {
+                                    std::optional<std::chrono::nanoseconds> timeout) {
     return impl_->runtime.register_tool(std::move(definition), timeout);
 }
 
-Expected<void> Agent::register_tool(const std::string& name, const std::string& description,
-                                    nlohmann::json schema, tools::ToolHandler handler) {
-    auto definition =
-        tools::detail::make_tool_definition(name, description, schema, std::move(handler));
-    if (!definition) {
-        return std::unexpected(definition.error());
-    }
-    return register_tool(std::move(*definition));
-}
-
-Expected<void> Agent::register_tool(const std::string& name, const std::string& description,
+Expected<void> Agent::register_tool(std::string_view name, std::string_view description,
                                     nlohmann::json schema, tools::ToolHandler handler,
-                                    std::chrono::nanoseconds timeout) {
-    auto definition =
-        tools::detail::make_tool_definition(name, description, schema, std::move(handler));
+                                    std::optional<std::chrono::nanoseconds> timeout) {
+    std::string tool_name{name};
+    std::string tool_description{description};
+    auto definition = tools::detail::make_tool_definition(tool_name, tool_description, schema,
+                                                          std::move(handler));
     if (!definition) {
         return std::unexpected(definition.error());
     }
     return register_tool(std::move(*definition), timeout);
 }
 
-Expected<void> Agent::register_tools(std::vector<tools::ToolDefinition> definitions) {
-    return impl_->runtime.register_tools(std::move(definitions));
-}
-
 Expected<void> Agent::register_tools(std::vector<tools::ToolDefinition> definitions,
-                                     std::chrono::nanoseconds timeout) {
+                                     std::optional<std::chrono::nanoseconds> timeout) {
     return impl_->runtime.register_tools(std::move(definitions), timeout);
 }
 

@@ -122,12 +122,8 @@ Expected<void> AgentRuntime::register_tool_impl(tools::ToolDefinition definition
         timeout, "register_tool");
 }
 
-Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
-    return register_tool_impl(std::move(definition), std::nullopt);
-}
-
 Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition,
-                                           std::chrono::nanoseconds timeout) {
+                                           std::optional<std::chrono::nanoseconds> timeout) {
     return register_tool_impl(std::move(definition), timeout);
 }
 
@@ -145,12 +141,8 @@ Expected<void> AgentRuntime::register_tools_impl(std::vector<tools::ToolDefiniti
         timeout, "register_tools");
 }
 
-Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions) {
-    return register_tools_impl(std::move(definitions), std::nullopt);
-}
-
 Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions,
-                                            std::chrono::nanoseconds timeout) {
+                                            std::optional<std::chrono::nanoseconds> timeout) {
     return register_tools_impl(std::move(definitions), timeout);
 }
 
