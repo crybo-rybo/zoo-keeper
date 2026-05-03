@@ -23,8 +23,8 @@ std::filesystem::path project_source_dir() {
     return std::filesystem::path{ZOO_PROJECT_SOURCE_DIR};
 }
 
-std::filesystem::path vendored_fixture_model_path() {
-    return project_source_dir() / "extern/llama.cpp/models/ggml-vocab-gpt-2.gguf";
+std::filesystem::path fixture_vocab_model_path() {
+    return project_source_dir() / "tests/fixtures/ggml-vocab-gpt-2.gguf";
 }
 
 std::optional<std::filesystem::path> live_model_path() {
@@ -88,7 +88,7 @@ class LiveModelIntegrationTest : public ::testing::Test {
 } // namespace
 
 TEST(ModelIntegrationTest, LoadRejectsIncompleteVendoredFixture) {
-    const auto model_path = vendored_fixture_model_path();
+    const auto model_path = fixture_vocab_model_path();
     ASSERT_TRUE(std::filesystem::exists(model_path))
         << "Expected vendored llama.cpp vocabulary fixture at " << model_path.string();
 
@@ -99,7 +99,7 @@ TEST(ModelIntegrationTest, LoadRejectsIncompleteVendoredFixture) {
 }
 
 TEST(AgentIntegrationTest, CreatePropagatesModelLoadFailures) {
-    const auto model_path = vendored_fixture_model_path();
+    const auto model_path = fixture_vocab_model_path();
     ASSERT_TRUE(std::filesystem::exists(model_path))
         << "Expected vendored llama.cpp vocabulary fixture at " << model_path.string();
 

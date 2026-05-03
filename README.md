@@ -125,16 +125,18 @@ Each layer depends only on the layers below it. Consumers can stop at whichever 
 ### Build
 
 ```bash
-git clone --recurse-submodules https://github.com/crybo-rybo/zoo-keeper.git
+git clone https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
 scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 ```
+
+llama.cpp is fetched automatically at CMake configure time — no submodules
+or extra setup required.
 
 ### Integrate via CMake
 
 ```cmake
 include(FetchContent)
-set(ZOO_FETCH_LLAMA ON CACHE BOOL "" FORCE) # needed when zoo-keeper has no vendored llama.cpp checkout
 FetchContent_Declare(zoo-keeper
     GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
     GIT_TAG        main
@@ -146,7 +148,7 @@ target_link_libraries(my_app PRIVATE ZooKeeper::zoo)
 ```
 
 If your parent project already defines both `llama` and `llama-common` CMake
-targets, Zoo-Keeper reuses them and you can leave `ZOO_FETCH_LLAMA` off.
+targets, Zoo-Keeper reuses them automatically and skips its own fetch.
 
 ### Run your first agent
 

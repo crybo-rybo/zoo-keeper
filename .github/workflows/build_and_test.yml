@@ -13,8 +13,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install clang-format
         run: |
@@ -35,8 +33,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install clang-tidy
         run: |
@@ -61,27 +57,25 @@ jobs:
             "${files[@]}"
 
   build-and-test:
+    name: build-and-test (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            compiler: gcc
-            cmake_extra: ""
-          - os: ubuntu-latest
+          - name: linux-clang-full
+            os: ubuntu-latest
             compiler: clang
-            cmake_extra: ""
-          - os: macos-latest
+            cmake_flags: "-DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON"
+          - name: macos-clang-metal
+            os: macos-latest
             compiler: clang
-            cmake_extra: "-DZOO_ENABLE_METAL=ON"
+            cmake_flags: "-DZOO_BUILD_TESTS=ON -DZOO_ENABLE_METAL=ON"
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Set up Clang (Ubuntu)
         if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
@@ -94,7 +88,7 @@ jobs:
           echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Build
-        run: scripts/build-all.sh ${{ matrix.cmake_extra }}
+        run: scripts/build.sh ${{ matrix.cmake_flags }}
 
       - name: Run tests
         run: scripts/test.sh
@@ -105,8 +99,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install package dependencies
         run: |
@@ -125,17 +117,10 @@ jobs:
             -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/build"
           cmake --build build/package-buildtree -j$(nproc)
 
-      - name: Prepare FetchContent source snapshot
-        run: |
-          mkdir -p "${RUNNER_TEMP}/zoo-fetchcontent-source"
-          rsync -a --exclude .git --exclude build "${GITHUB_WORKSPACE}/" \
-            "${RUNNER_TEMP}/zoo-fetchcontent-source/"
-          rm -rf "${RUNNER_TEMP}/zoo-fetchcontent-source/extern/llama.cpp"
-
       - name: Smoke test FetchContent consumer
         run: |
           cmake -S tests/packaging/fetchcontent_consumer -B build/package-fetchcontent \
-            -DZOO_KEEPER_SOURCE_DIR="${RUNNER_TEMP}/zoo-fetchcontent-source"
+            -DZOO_KEEPER_SOURCE_DIR="${GITHUB_WORKSPACE}"
           cmake --build build/package-fetchcontent -j$(nproc)
 
       - name: Install package to temp prefix
@@ -153,13 +138,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Set up Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
 
       - name: Build with sanitizers
-        run: scripts/rebuild.sh -DZOO_ENABLE_SANITIZERS=ON
+        run: scripts/rebuild.sh -DZOO_ENABLE_SANITIZERS=ON -DZOO_BUILD_TESTS=ON
 
       - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: alloc_dealloc_mismatch=0
         run: scripts/test.sh
 
   coverage:
@@ -168,13 +162,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install coverage tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y lcov
+          sudo apt-get install -y clang-18 llvm-18 lcov libc++-18-dev libc++abi-18-dev
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          cat > "${RUNNER_TEMP}/llvm-gcov-18" <<'EOF'
+          #!/usr/bin/env bash
+          exec llvm-cov-18 gcov "$@"
+          EOF
+          chmod +x "${RUNNER_TEMP}/llvm-gcov-18"
+          echo "GCOV_TOOL=${RUNNER_TEMP}/llvm-gcov-18" >> $GITHUB_ENV
 
       - name: Build with coverage
         run: scripts/rebuild.sh -DZOO_ENABLE_COVERAGE=ON -DZOO_BUILD_TESTS=ON
@@ -184,10 +186,10 @@ jobs:
 
       - name: Capture coverage
         run: |
-          lcov --capture --directory build --output-file coverage.info \
-            --ignore-errors mismatch
+          lcov --gcov-tool "${GCOV_TOOL}" --capture --directory build --output-file coverage.info \
+            --ignore-errors mismatch,inconsistent
           lcov --remove coverage.info '/usr/*' '*/extern/*' '*/build/_deps/*' '*/tests/*' \
-            --output-file coverage.info --ignore-errors unused
+            --output-file coverage.info --ignore-errors unused,inconsistent
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4

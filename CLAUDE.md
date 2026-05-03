@@ -32,7 +32,7 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 
 ## Architecture
 
-C++23 library on llama.cpp (submodule at `extern/llama.cpp`). Four layers — each depends only on layers below it:
+C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, pinned by `ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`). Four layers — each depends only on layers below it:
 
 | Layer | Namespace | Role |
 |-------|-----------|------|
@@ -84,7 +84,7 @@ scripts/test.sh      # All tests must pass
 ### Ask first
 - Adding new dependencies or modifying CMakeLists.txt build structure
 - Changes to public API headers (`include/zoo/*.hpp`, `include/zoo/core/*.hpp`, `include/zoo/tools/*.hpp`)
-- Updating the llama.cpp submodule (`extern/llama.cpp`)
+- Updating the pinned llama.cpp version (`ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`)
 
 ### Never
 - Include `llama.h` in any public header (forward-declare llama types)

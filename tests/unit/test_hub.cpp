@@ -30,8 +30,8 @@ std::filesystem::path project_source_dir() {
 #endif
 }
 
-std::filesystem::path vendored_fixture_model_path() {
-    return project_source_dir() / "extern/llama.cpp/models/ggml-vocab-gpt-2.gguf";
+std::filesystem::path fixture_vocab_model_path() {
+    return project_source_dir() / "tests/fixtures/ggml-vocab-gpt-2.gguf";
 }
 
 class TempDir {
@@ -510,7 +510,7 @@ TEST(ModelStoreCatalogTest, AddAliasRejectsEmptyAlias) {
 }
 
 TEST(ModelStoreCatalogTest, AddRejectsDuplicateAndEmptyAliases) {
-    const auto fixture_path = vendored_fixture_model_path();
+    const auto fixture_path = fixture_vocab_model_path();
     ASSERT_TRUE(std::filesystem::exists(fixture_path)) << fixture_path.string();
 
     TempDir temp_dir;
@@ -540,7 +540,7 @@ TEST(ModelStoreCatalogTest, AddRejectsDuplicateAndEmptyAliases) {
 // ---- Inspector regression coverage ----
 
 TEST(GgufInspectorTest, RestoresGlobalLoggerAfterInspect) {
-    const auto model_path = vendored_fixture_model_path();
+    const auto model_path = fixture_vocab_model_path();
     ASSERT_TRUE(std::filesystem::exists(model_path)) << model_path.string();
 
     void* const sentinel_user_data = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));

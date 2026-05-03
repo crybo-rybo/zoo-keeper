@@ -9,10 +9,7 @@ Platforms: Linux and macOS only.
 ## Commands
 
 ```bash
-# First-time setup
-scripts/bootstrap.sh
-
-# Build (with tests)
+# Build (with tests) — llama.cpp is fetched automatically on first configure
 scripts/build.sh                      # or: scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 
 # Run all tests
@@ -48,8 +45,7 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 - `tests/unit/` — GoogleTest suite; `tests/fixtures/` — reusable data
 - `examples/` — demo executables and sample config
 - `docs/` — architecture, guides, ADRs
-- `cmake/` — build helpers
-- `extern/llama.cpp/` — vendored submodule
+- `cmake/` — build helpers (llama.cpp is fetched into `build/_deps/` at configure time)
 
 ## Architecture (four layers)
 
@@ -84,7 +80,7 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 ### Ask first
 - Adding new dependencies or modifying `CMakeLists.txt` build structure
 - Changes to public API headers (`include/zoo/*.hpp`, `include/zoo/core/*.hpp`, `include/zoo/tools/*.hpp`)
-- Updating the llama.cpp submodule (`extern/llama.cpp`)
+- Updating the pinned llama.cpp version (`ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`)
 - Schema or breaking behavioral changes
 
 ### Never

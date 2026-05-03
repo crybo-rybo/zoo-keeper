@@ -2,6 +2,29 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## Unreleased: llama.cpp moved to FetchContent
+
+Zoo-Keeper no longer vendors llama.cpp as a git submodule at `extern/llama.cpp`.
+CMake's `FetchContent` now downloads llama.cpp at configure time, pinned by
+`ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`.
+
+### What changes for contributors
+
+- `git clone` is enough — drop `--recurse-submodules` and any
+  `git submodule update --init --recursive` step from your local workflow.
+- The first `cmake -B build` (or `scripts/build.sh`) requires network access
+  to fetch llama.cpp. Subsequent configures reuse `build/_deps/`.
+- To pin a different llama.cpp release tag, edit `ZOO_LLAMA_TAG` (or override
+  with `-DZOO_LLAMA_TAG=...`) — see `docs/instructions/UPDATE_LLAMA_CPP.md`.
+- Parent projects that already define `llama` and `llama-common` targets are
+  unaffected; Zoo-Keeper still reuses them and skips its own fetch.
+
+### What changes for downstream packagers
+
+- The `ZOO_FETCH_LLAMA` CMake option has been removed. FetchContent runs by
+  default whenever no parent-provided `llama`/`llama-common` targets exist.
+- `scripts/bootstrap.sh` has been removed; it only initialized the submodule.
+
 ## Unreleased: llama.cpp b8992
 
 ### CMake: `llama-common`

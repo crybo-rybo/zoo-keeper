@@ -1,5 +1,10 @@
 # llama.cpp b8992 Migration Plan
 
+> **Historical document.** This plan was written when llama.cpp was vendored
+> as a git submodule at `extern/llama.cpp`. The submodule has since been
+> replaced by CMake `FetchContent`; see [UPDATE_LLAMA_CPP.md](UPDATE_LLAMA_CPP.md)
+> for the current update process.
+
 ## Summary
 
 - Target latest tagged llama.cpp release `b8992` at commit `5cbfb18075c95437e4ac7fb50e3baf88fe137a87`.
