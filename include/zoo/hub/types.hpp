@@ -31,8 +31,14 @@ enum class HubErrorCode {
     FilesystemError = 709,        ///< A filesystem operation failed.
 };
 
+// The 700-799 numeric range is reserved for hub-layer errors in `ErrorCode`
+// (see comment at zoo/core/types.hpp:413). Hub-specific names live in
+// `HubErrorCode` to keep core unaware of hub concepts; the cast below is the
+// intentional bridge. The static analyzer cannot see this reservation, so
+// suppress its enum-range check.
 [[nodiscard]] constexpr ErrorCode to_error_code(HubErrorCode code) noexcept {
-    return static_cast<ErrorCode>(static_cast<int>(code));
+    return static_cast<ErrorCode>( // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+        static_cast<int>(code));
 }
 
 /**
