@@ -35,6 +35,7 @@ using zoo::TextResponse;
 using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::QueuedRequest;
 using zoo::internal::agent::RequestPayload;
+using zoo::internal::agent::RequestReservation;
 using zoo::internal::agent::RequestSlots;
 using zoo::internal::agent::ResultKind;
 
@@ -158,4 +159,77 @@ TEST(RequestSlotsTest, CancelDoesNotBlockNewReservationsWhileWaitingOnSlotLock) 
 
     auto third = emplace_future.get();
     ASSERT_TRUE(third.has_value()) << third.error().to_string();
+}
+
+TEST(RequestSlotsTest, FailAllDoesNotHoldTableLockWhileWaitingOnSlotMutex) {
+    RequestSlots slots(3);
+
+    auto first = slots.emplace(make_text_request("one"));
+    ASSERT_TRUE(first.has_value());
+
+    auto slot_lock =
+        zoo::internal::agent::test_support::RequestSlotsTestPeer::lock_slot(slots, first->slot);
+
+    std::promise<void> fail_started;
+    auto fail_started_future = fail_started.get_future();
+    auto fail_future = std::async(std::launch::async, [&] {
+        fail_started.set_value();
+        slots.fail_all(Error{ErrorCode::AgentNotRunning, "shutdown"});
+    });
+
+    ASSERT_EQ(fail_started_future.wait_for(1s), std::future_status::ready);
+    std::this_thread::sleep_for(20ms);
+
+    auto emplace_future =
+        std::async(std::launch::async, [&] { return slots.emplace(make_text_request("two")); });
+    EXPECT_EQ(emplace_future.wait_for(50ms), std::future_status::ready);
+
+    slot_lock.unlock();
+    fail_future.wait();
+
+    auto second = emplace_future.get();
+    ASSERT_TRUE(second.has_value()) << second.error().to_string();
+}
+
+TEST(RequestSlotsTest, ConcurrentResolveAndFailAllDoNotDeadlock) {
+    constexpr size_t kCapacity = 8;
+    constexpr int kIterations = 200;
+
+    for (int trial = 0; trial < kIterations; ++trial) {
+        RequestSlots slots(kCapacity);
+
+        std::vector<RequestReservation> reservations;
+        for (size_t i = 0; i < kCapacity; ++i) {
+            auto r = slots.emplace(make_text_request("msg"));
+            ASSERT_TRUE(r.has_value());
+            reservations.push_back(*r);
+        }
+
+        // Resolver thread: races to deliver results and free slots via release().
+        auto resolver = std::async(std::launch::async, [&] {
+            for (const auto& r : reservations) {
+                TextResponse response;
+                response.text = "ok";
+                slots.resolve_text(r.slot, r.generation,
+                                   Expected<TextResponse>(std::move(response)));
+            }
+        });
+
+        // Releaser thread: orphans or drains every slot.
+        auto releaser = std::async(std::launch::async, [&] {
+            for (const auto& r : reservations) {
+                slots.release(r.slot, r.generation);
+            }
+        });
+
+        // Failure thread: races to fail everything that's left.
+        auto failer = std::async(std::launch::async,
+                                 [&] { slots.fail_all(Error{ErrorCode::AgentNotRunning, "x"}); });
+
+        // Watchdog: 5 seconds is far longer than any legitimate completion path; the old
+        // lock-order inversion would hang here indefinitely.
+        ASSERT_EQ(resolver.wait_for(5s), std::future_status::ready) << "trial " << trial;
+        ASSERT_EQ(releaser.wait_for(5s), std::future_status::ready) << "trial " << trial;
+        ASSERT_EQ(failer.wait_for(5s), std::future_status::ready) << "trial " << trial;
+    }
 }
