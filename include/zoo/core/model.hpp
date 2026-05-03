@@ -195,6 +195,9 @@ class Model {
     void add_dist_sampler(llama_sampler* chain, const SamplingParams& sampling) const;
     bool rebuild_sampler_with_tool_grammar();
     bool rebuild_sampler_with_schema_grammar();
+    Expected<void> ensure_grammar_sampler_for_pass();
+    [[nodiscard]] std::vector<std::string>
+    merge_stop_sequences(std::vector<std::string> base) const;
     [[nodiscard]] int estimate_tokens(std::string_view text) const;
     [[nodiscard]] int estimate_message_tokens(const Message& message) const;
     void trim_history_to_fit();

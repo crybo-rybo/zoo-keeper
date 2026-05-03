@@ -45,12 +45,12 @@ std::string regex_escape(const std::string& str) {
 } // namespace
 
 bool Model::set_schema_grammar(const std::string& grammar_str) {
-    impl_->tool_grammar_str_ = grammar_str;
+    impl_->session_.tool_grammar_str = grammar_str;
     return rebuild_sampler_with_schema_grammar();
 }
 
 bool Model::rebuild_sampler_with_tool_grammar() {
-    if (!impl_->tool_state_ || impl_->tool_grammar_str_.empty()) {
+    if (!impl_->session_.tool_state || impl_->session_.tool_grammar_str.empty()) {
         return false;
     }
 
@@ -65,7 +65,7 @@ bool Model::rebuild_sampler_with_tool_grammar() {
     std::vector<std::string> trigger_patterns;
     std::vector<llama_token> trigger_tokens;
 
-    for (const auto& trigger : impl_->tool_state_->grammar_triggers) {
+    for (const auto& trigger : impl_->session_.tool_state->grammar_triggers) {
         switch (trigger.type) {
         case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
             trigger_patterns.push_back(regex_escape(trigger.value));
@@ -97,13 +97,14 @@ bool Model::rebuild_sampler_with_tool_grammar() {
     }
 
     llama_sampler* grammar_sampler = nullptr;
-    if (impl_->tool_state_->grammar_lazy) {
+    if (impl_->session_.tool_state->grammar_lazy) {
         grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
-            impl_->vocab_, impl_->tool_grammar_str_.c_str(), "root", trigger_patterns_c.data(),
-            trigger_patterns_c.size(), trigger_tokens.data(), trigger_tokens.size());
+            impl_->loaded_.vocab, impl_->session_.tool_grammar_str.c_str(), "root",
+            trigger_patterns_c.data(), trigger_patterns_c.size(), trigger_tokens.data(),
+            trigger_tokens.size());
     } else {
-        grammar_sampler =
-            llama_sampler_init_grammar(impl_->vocab_, impl_->tool_grammar_str_.c_str(), "root");
+        grammar_sampler = llama_sampler_init_grammar(
+            impl_->loaded_.vocab, impl_->session_.tool_grammar_str.c_str(), "root");
     }
 
     if (!grammar_sampler) {
@@ -113,11 +114,11 @@ bool Model::rebuild_sampler_with_tool_grammar() {
 
     // Grammar must filter logits before top-k/top-p narrow the candidate set,
     // otherwise the chain can still pick a token the grammar rejects.
-    add_sampling_stages(chain.get(), impl_->active_sampling_);
-    add_dist_sampler(chain.get(), impl_->active_sampling_);
+    add_sampling_stages(chain.get(), impl_->session_.active_sampling);
+    add_dist_sampler(chain.get(), impl_->session_.active_sampling);
 
-    impl_->sampler_ = std::move(chain);
-    impl_->grammar_mode_ = Impl::GrammarMode::NativeToolCall;
+    impl_->session_.sampler = std::move(chain);
+    impl_->session_.grammar_mode = Impl::GrammarMode::NativeToolCall;
     return true;
 }
 
@@ -131,18 +132,18 @@ bool Model::rebuild_sampler_with_schema_grammar() {
 
     // Grammar must filter logits before top-k/top-p narrow the candidate set,
     // otherwise top-k=1 can select a token the grammar rejects.
-    auto* grammar_sampler =
-        llama_sampler_init_grammar(impl_->vocab_, impl_->tool_grammar_str_.c_str(), "root");
+    auto* grammar_sampler = llama_sampler_init_grammar(
+        impl_->loaded_.vocab, impl_->session_.tool_grammar_str.c_str(), "root");
     if (!grammar_sampler) {
         return false;
     }
     llama_sampler_chain_add(chain.get(), grammar_sampler);
 
-    add_sampling_stages(chain.get(), impl_->active_sampling_);
-    add_dist_sampler(chain.get(), impl_->active_sampling_);
+    add_sampling_stages(chain.get(), impl_->session_.active_sampling);
+    add_dist_sampler(chain.get(), impl_->session_.active_sampling);
 
-    impl_->sampler_ = std::move(chain);
-    impl_->grammar_mode_ = Impl::GrammarMode::Schema;
+    impl_->session_.sampler = std::move(chain);
+    impl_->session_.grammar_mode = Impl::GrammarMode::Schema;
     return true;
 }
 
@@ -182,8 +183,8 @@ Model::LlamaSamplerHandle Model::create_sampler_chain() {
         return nullptr;
     }
 
-    add_sampling_stages(chain.get(), impl_->active_sampling_);
-    add_dist_sampler(chain.get(), impl_->active_sampling_);
+    add_sampling_stages(chain.get(), impl_->session_.active_sampling);
+    add_dist_sampler(chain.get(), impl_->session_.active_sampling);
 
     return chain;
 }

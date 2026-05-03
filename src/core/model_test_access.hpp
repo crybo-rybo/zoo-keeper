@@ -22,27 +22,27 @@ struct ModelTestAccess {
     }
 
     static auto& chat_templates(Model& model) {
-        return model.impl_->chat_templates_;
+        return model.impl_->loaded_.chat_templates;
     }
 
     static auto& tool_state(Model& model) {
-        return model.impl_->tool_state_;
+        return model.impl_->session_.tool_state;
     }
 
     static auto& tool_grammar_str(Model& model) {
-        return model.impl_->tool_grammar_str_;
+        return model.impl_->session_.tool_grammar_str;
     }
 
     static auto& grammar_mode(Model& model) {
-        return model.impl_->grammar_mode_;
+        return model.impl_->session_.grammar_mode;
     }
 
     static auto& messages(Model& model) {
-        return model.impl_->messages_;
+        return model.impl_->session_.messages;
     }
 
     static int estimated_tokens(const Model& model) {
-        return model.impl_->estimated_tokens_;
+        return model.impl_->session_.estimated_tokens;
     }
 
     static int estimate_message_tokens(Model& model, const Message& message) {

@@ -45,19 +45,19 @@ void Model::ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const
 Model::~Model() = default;
 
 bool Model::has_tool_calling() const noexcept {
-    return impl_->grammar_mode_ == Impl::GrammarMode::NativeToolCall;
+    return impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall;
 }
 
 bool Model::has_schema_grammar() const noexcept {
-    return impl_->grammar_mode_ == Impl::GrammarMode::Schema;
+    return impl_->session_.grammar_mode == Impl::GrammarMode::Schema;
 }
 
 const ModelConfig& Model::model_config() const noexcept {
-    return impl_->model_config_;
+    return impl_->loaded_.model_config;
 }
 
 const GenerationOptions& Model::default_generation_options() const noexcept {
-    return impl_->default_generation_options_;
+    return impl_->loaded_.default_generation_options;
 }
 
 Expected<std::unique_ptr<Model>> Model::load(const ModelConfig& model_config,
