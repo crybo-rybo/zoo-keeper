@@ -12,11 +12,11 @@
 
 namespace zoo {
 
-template <typename Result> RequestHandle<Result>::~RequestHandle() {
+template <internal::agent::RequestHandleResult Result> RequestHandle<Result>::~RequestHandle() {
     reset();
 }
 
-template <typename Result>
+template <internal::agent::RequestHandleResult Result>
 RequestHandle<Result>& RequestHandle<Result>::operator=(RequestHandle&& other) noexcept {
     if (this != &other) {
         reset();
@@ -27,11 +27,12 @@ RequestHandle<Result>& RequestHandle<Result>::operator=(RequestHandle&& other) n
     return *this;
 }
 
-template <typename Result> bool RequestHandle<Result>::ready() const {
+template <internal::agent::RequestHandleResult Result> bool RequestHandle<Result>::ready() const {
     return state_ && state_->ready();
 }
 
-template <typename Result> Expected<Result> RequestHandle<Result>::await_result() {
+template <internal::agent::RequestHandleResult Result>
+Expected<Result> RequestHandle<Result>::await_result() {
     if (!state_) {
         return std::unexpected(
             Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
@@ -42,7 +43,7 @@ template <typename Result> Expected<Result> RequestHandle<Result>::await_result(
     return result;
 }
 
-template <typename Result>
+template <internal::agent::RequestHandleResult Result>
 Expected<Result> RequestHandle<Result>::await_result_for(std::chrono::nanoseconds timeout) {
     if (!state_) {
         return std::unexpected(
@@ -57,7 +58,8 @@ Expected<Result> RequestHandle<Result>::await_result_for(std::chrono::nanosecond
     return result;
 }
 
-template <typename Result> void RequestHandle<Result>::reset() noexcept {
+template <internal::agent::RequestHandleResult Result>
+void RequestHandle<Result>::reset() noexcept {
     if (state_) {
         state_->release();
         state_.reset();

@@ -23,6 +23,10 @@ namespace zoo {
 
 namespace internal::agent {
 template <typename Result> class RequestStateBase;
+
+template <typename Result>
+concept RequestHandleResult =
+    std::same_as<Result, TextResponse> || std::same_as<Result, ExtractionResponse>;
 } // namespace internal::agent
 
 /**
@@ -33,7 +37,7 @@ template <typename Result> class RequestStateBase;
  * members are defined in `src/agent/request_handle.cpp` and explicitly
  * instantiated for `TextResponse` and `ExtractionResponse`.
  */
-template <typename Result> class RequestHandle {
+template <internal::agent::RequestHandleResult Result> class RequestHandle {
   public:
     RequestHandle() noexcept = default;
 
