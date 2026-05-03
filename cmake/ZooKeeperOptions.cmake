@@ -27,6 +27,14 @@ endif()
 option(ZOO_ENABLE_CUDA "Enable CUDA acceleration" OFF)
 option(ZOO_BUILD_HUB "Build the hub layer (GGUF inspection, HuggingFace, model store)" OFF)
 option(ZOO_ENABLE_LOGGING "Enable debug logging to stderr" OFF)
+option(ZOO_ENABLE_CRAP "Compute CRAP scores (complexity × coverage) via lizard + gcovr" OFF)
+set(ZOO_CRAP_THRESHOLD "30" CACHE STRING
+    "CRAP score threshold — functions above this value cause a non-zero exit (default: 30)")
+
+if(ZOO_ENABLE_CRAP)
+    set(ZOO_BUILD_TESTS ON CACHE BOOL "Build test suite (implied by ZOO_ENABLE_CRAP)" FORCE)
+    set(ZOO_ENABLE_COVERAGE ON CACHE BOOL "Coverage instrumentation (implied by ZOO_ENABLE_CRAP)" FORCE)
+endif()
 set(ZOO_LLAMA_TAG "b8992" CACHE STRING
     "llama.cpp release tag used by FetchContent")
 set(ZOO_LLAMA_ARCHIVE_BASE_URL "https://github.com/ggerganov/llama.cpp/archive/refs/tags" CACHE STRING
