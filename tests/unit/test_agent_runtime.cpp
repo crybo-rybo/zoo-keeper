@@ -23,11 +23,13 @@ using zoo::CancellationCallback;
 using zoo::Error;
 using zoo::ErrorCode;
 using zoo::Expected;
+using zoo::ExtractionResponse;
 using zoo::GenerationOptions;
 using zoo::HistorySnapshot;
 using zoo::Message;
 using zoo::MessageView;
 using zoo::ModelConfig;
+using zoo::RequestHandle;
 using zoo::Role;
 using zoo::TextResponse;
 using zoo::TokenAction;
@@ -39,6 +41,12 @@ using zoo::internal::agent::GenerationResult;
 using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::ParsedToolResponse;
 using zoo::internal::agent::ScopeExit;
+
+struct UnsupportedRequestResult {};
+
+static_assert(requires { typename RequestHandle<TextResponse>; });
+static_assert(requires { typename RequestHandle<ExtractionResponse>; });
+static_assert(!zoo::internal::agent::RequestHandleResult<UnsupportedRequestResult>);
 
 class FakeBackend final : public AgentBackend {
   public:

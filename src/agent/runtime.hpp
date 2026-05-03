@@ -11,8 +11,11 @@
 #include "request_slots.hpp"
 #include "zoo/agent.hpp"
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
+#include <string_view>
 #include <thread>
 
 namespace zoo::internal::agent {
@@ -90,6 +93,26 @@ class AgentRuntime {
     void enforce_history_limit();
     template <typename Result> RequestHandle<Result> make_immediate_error_handle(Error error);
     template <typename Result> RequestHandle<Result> enqueue_request(RequestPayload payload);
+
+    /// Generic sync-command helper: build a Command carrying a fresh promise<Expected<R>>,
+    /// push it on the mailbox, optionally bound by a timeout, and return the resolved result.
+    template <typename Result, typename Maker>
+    Expected<Result> send_sync_command(Maker&& make_cmd,
+                                       std::optional<std::chrono::nanoseconds> timeout,
+                                       std::string_view name);
+
+    Expected<void> set_system_prompt_impl(std::string prompt,
+                                          std::optional<std::chrono::nanoseconds> timeout);
+    Expected<void> add_system_message_impl(std::string message,
+                                           std::optional<std::chrono::nanoseconds> timeout);
+    Expected<HistorySnapshot>
+    get_history_impl(std::optional<std::chrono::nanoseconds> timeout) const;
+    Expected<void> clear_history_impl(std::optional<std::chrono::nanoseconds> timeout);
+    Expected<void> register_tool_impl(tools::ToolDefinition definition,
+                                      std::optional<std::chrono::nanoseconds> timeout);
+    Expected<void> register_tools_impl(std::vector<tools::ToolDefinition> definitions,
+                                       std::optional<std::chrono::nanoseconds> timeout);
+
     GenerationOptions resolve_generation_options(const GenerationOptions& overrides) const;
 
     ModelConfig model_config_;

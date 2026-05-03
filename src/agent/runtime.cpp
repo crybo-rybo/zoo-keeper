@@ -8,6 +8,7 @@
 
 #include "agent/runtime.hpp"
 
+#include "agent/request_state.hpp"
 #include "log.hpp"
 #include "zoo/core/model.hpp"
 #include "zoo/tools/registry.hpp"
@@ -19,40 +20,6 @@
 namespace zoo::internal::agent {
 
 namespace {
-
-template <typename Result> struct ImmediateResultState {
-    std::optional<Expected<Result>> result;
-};
-
-template <typename Result>
-Expected<Result> await_immediate_handle(void* state, uint32_t, uint32_t) {
-    auto& immediate = *static_cast<ImmediateResultState<Result>*>(state);
-    if (!immediate.result.has_value()) {
-        return std::unexpected(
-            Error{ErrorCode::AgentNotRunning, "Request result is no longer available"});
-    }
-    auto result = std::move(*immediate.result);
-    immediate.result.reset();
-    return result;
-}
-
-template <typename Result>
-Expected<Result> await_immediate_handle_for(void* state, uint32_t slot, uint32_t generation,
-                                            std::chrono::nanoseconds, bool* completed) {
-    if (completed != nullptr) {
-        *completed = true;
-    }
-    return await_immediate_handle<Result>(state, slot, generation);
-}
-
-template <typename Result> bool ready_immediate_handle(const void*, uint32_t, uint32_t) {
-    return true;
-}
-
-template <typename Result> void release_immediate_handle(void* state, uint32_t, uint32_t) {
-    auto& immediate = *static_cast<ImmediateResultState<Result>*>(state);
-    immediate.result.reset();
-}
 
 std::vector<Message> materialize_conversation(ConversationView messages) {
     std::vector<Message> owned;
@@ -194,206 +161,137 @@ void AgentRuntime::cancel(RequestId id) {
     request_slots_->cancel(id);
 }
 
-void AgentRuntime::set_system_prompt(std::string_view prompt) {
+template <typename Result, typename Maker>
+Expected<Result> AgentRuntime::send_sync_command(Maker&& make_cmd,
+                                                 std::optional<std::chrono::nanoseconds> timeout,
+                                                 std::string_view name) {
     if (!running_.load(std::memory_order_acquire)) {
-        return;
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
     }
 
-    auto done = std::make_shared<std::promise<void>>();
+    auto done = std::make_shared<std::promise<Expected<Result>>>();
     auto future = done->get_future();
-    if (!request_mailbox_.push_command(SetSystemPromptCmd{std::string(prompt), std::move(done)})) {
-        return;
+    if (!request_mailbox_.push_command(std::forward<Maker>(make_cmd)(std::move(done)))) {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
     }
-    future.get();
+    if (timeout && future.wait_for(*timeout) != std::future_status::ready) {
+        return std::unexpected(command_timeout_error(name));
+    }
+    return future.get();
+}
+
+namespace {
+
+template <typename CmdT> auto make_string_cmd(std::string s) {
+    return [s = std::move(s)](auto done) mutable -> Command {
+        return CmdT{std::move(s), std::move(done)};
+    };
+}
+
+} // namespace
+
+Expected<void>
+AgentRuntime::set_system_prompt_impl(std::string prompt,
+                                     std::optional<std::chrono::nanoseconds> timeout) {
+    return send_sync_command<void>(make_string_cmd<SetSystemPromptCmd>(std::move(prompt)), timeout,
+                                   "set_system_prompt");
+}
+
+void AgentRuntime::set_system_prompt(std::string_view prompt) {
+    (void)set_system_prompt_impl(std::string(prompt), std::nullopt);
 }
 
 Expected<void> AgentRuntime::set_system_prompt(std::string_view prompt,
                                                std::chrono::nanoseconds timeout) {
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
+    return set_system_prompt_impl(std::string(prompt), timeout);
+}
 
-    auto done = std::make_shared<std::promise<void>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(SetSystemPromptCmd{std::string(prompt), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    if (future.wait_for(timeout) != std::future_status::ready) {
-        return std::unexpected(command_timeout_error("set_system_prompt"));
-    }
-    future.get();
-    return {};
+Expected<void>
+AgentRuntime::add_system_message_impl(std::string message,
+                                      std::optional<std::chrono::nanoseconds> timeout) {
+    return send_sync_command<void>(make_string_cmd<AddSystemMessageCmd>(std::move(message)),
+                                   timeout, "add_system_message");
 }
 
 Expected<void> AgentRuntime::add_system_message(std::string_view message) {
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-
-    auto done = std::make_shared<std::promise<Expected<void>>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(
-            AddSystemMessageCmd{std::string(message), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    return future.get();
+    return add_system_message_impl(std::string(message), std::nullopt);
 }
 
 Expected<void> AgentRuntime::add_system_message(std::string_view message,
                                                 std::chrono::nanoseconds timeout) {
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
+    return add_system_message_impl(std::string(message), timeout);
+}
 
-    auto done = std::make_shared<std::promise<Expected<void>>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(
-            AddSystemMessageCmd{std::string(message), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    if (future.wait_for(timeout) != std::future_status::ready) {
-        return std::unexpected(command_timeout_error("add_system_message"));
-    }
-    return future.get();
+Expected<HistorySnapshot>
+AgentRuntime::get_history_impl(std::optional<std::chrono::nanoseconds> timeout) const {
+    return const_cast<AgentRuntime*>(this)->send_sync_command<HistorySnapshot>(
+        [](auto done) -> Command { return GetHistoryCmd{std::move(done)}; }, timeout,
+        "get_history");
 }
 
 HistorySnapshot AgentRuntime::get_history() const {
-    if (!running_.load(std::memory_order_acquire)) {
-        return {};
-    }
-
-    auto done = std::make_shared<std::promise<HistorySnapshot>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(GetHistoryCmd{std::move(done)})) {
-        return {};
-    }
-    return future.get();
+    return get_history_impl(std::nullopt).value_or(HistorySnapshot{});
 }
 
 Expected<HistorySnapshot> AgentRuntime::get_history(std::chrono::nanoseconds timeout) const {
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
+    return get_history_impl(timeout);
+}
 
-    auto done = std::make_shared<std::promise<HistorySnapshot>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(GetHistoryCmd{std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    if (future.wait_for(timeout) != std::future_status::ready) {
-        return std::unexpected(command_timeout_error("get_history"));
-    }
-    return future.get();
+Expected<void> AgentRuntime::clear_history_impl(std::optional<std::chrono::nanoseconds> timeout) {
+    return send_sync_command<void>(
+        [](auto done) -> Command { return ClearHistoryCmd{std::move(done)}; }, timeout,
+        "clear_history");
 }
 
 void AgentRuntime::clear_history() {
-    if (!running_.load(std::memory_order_acquire)) {
-        return;
-    }
-
-    auto done = std::make_shared<std::promise<void>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(ClearHistoryCmd{std::move(done)})) {
-        return;
-    }
-    future.get();
+    (void)clear_history_impl(std::nullopt);
 }
 
 Expected<void> AgentRuntime::clear_history(std::chrono::nanoseconds timeout) {
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
+    return clear_history_impl(timeout);
+}
 
-    auto done = std::make_shared<std::promise<void>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(ClearHistoryCmd{std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    if (future.wait_for(timeout) != std::future_status::ready) {
-        return std::unexpected(command_timeout_error("clear_history"));
-    }
-    future.get();
-    return {};
+Expected<void> AgentRuntime::register_tool_impl(tools::ToolDefinition definition,
+                                                std::optional<std::chrono::nanoseconds> timeout) {
+    assert(!inference_thread_.joinable() ||
+           std::this_thread::get_id() != inference_thread_.get_id());
+    return send_sync_command<void>(
+        [d = std::move(definition)](auto done) mutable -> Command {
+            return RegisterToolCmd{std::move(d), std::move(done)};
+        },
+        timeout, "register_tool");
 }
 
 Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition) {
-    assert(!inference_thread_.joinable() ||
-           std::this_thread::get_id() != inference_thread_.get_id());
-
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-
-    auto done = std::make_shared<std::promise<Expected<void>>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(RegisterToolCmd{std::move(definition), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    return future.get();
+    return register_tool_impl(std::move(definition), std::nullopt);
 }
 
 Expected<void> AgentRuntime::register_tool(tools::ToolDefinition definition,
                                            std::chrono::nanoseconds timeout) {
-    assert(!inference_thread_.joinable() ||
-           std::this_thread::get_id() != inference_thread_.get_id());
-
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-
-    auto done = std::make_shared<std::promise<Expected<void>>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(RegisterToolCmd{std::move(definition), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    if (future.wait_for(timeout) != std::future_status::ready) {
-        return std::unexpected(command_timeout_error("register_tool"));
-    }
-    return future.get();
+    return register_tool_impl(std::move(definition), timeout);
 }
 
-Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions) {
+Expected<void> AgentRuntime::register_tools_impl(std::vector<tools::ToolDefinition> definitions,
+                                                 std::optional<std::chrono::nanoseconds> timeout) {
     assert(!inference_thread_.joinable() ||
            std::this_thread::get_id() != inference_thread_.get_id());
-
     if (definitions.empty()) {
         return {};
     }
+    return send_sync_command<void>(
+        [d = std::move(definitions)](auto done) mutable -> Command {
+            return RegisterToolsCmd{std::move(d), std::move(done)};
+        },
+        timeout, "register_tools");
+}
 
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-
-    auto done = std::make_shared<std::promise<Expected<void>>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(RegisterToolsCmd{std::move(definitions), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    return future.get();
+Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions) {
+    return register_tools_impl(std::move(definitions), std::nullopt);
 }
 
 Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> definitions,
                                             std::chrono::nanoseconds timeout) {
-    assert(!inference_thread_.joinable() ||
-           std::this_thread::get_id() != inference_thread_.get_id());
-
-    if (definitions.empty()) {
-        return {};
-    }
-
-    if (!running_.load(std::memory_order_acquire)) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-
-    auto done = std::make_shared<std::promise<Expected<void>>>();
-    auto future = done->get_future();
-    if (!request_mailbox_.push_command(RegisterToolsCmd{std::move(definitions), std::move(done)})) {
-        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
-    }
-    if (future.wait_for(timeout) != std::future_status::ready) {
-        return std::unexpected(command_timeout_error("register_tools"));
-    }
-    return future.get();
+    return register_tools_impl(std::move(definitions), timeout);
 }
 
 size_t AgentRuntime::tool_count() const noexcept {
@@ -466,12 +364,14 @@ void AgentRuntime::handle_command(Command& cmd) {
         overloaded{
             [this](SetSystemPromptCmd& c) {
                 backend_->set_system_prompt(c.prompt);
-                c.done->set_value();
+                c.done->set_value(Expected<void>{});
             },
-            [this](GetHistoryCmd& c) { c.done->set_value(backend_->get_history()); },
+            [this](GetHistoryCmd& c) {
+                c.done->set_value(Expected<HistorySnapshot>{backend_->get_history()});
+            },
             [this](ClearHistoryCmd& c) {
                 backend_->clear_history();
-                c.done->set_value();
+                c.done->set_value(Expected<void>{});
             },
             [this](AddSystemMessageCmd& c) {
                 c.done->set_value(backend_->add_message(MessageView{Role::System, c.message}));
@@ -517,19 +417,16 @@ void AgentRuntime::fail_pending(const Error& error) {
 }
 
 void AgentRuntime::resolve_command_on_shutdown(Command& cmd) {
+    auto shutdown_error = []() {
+        return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
+    };
     std::visit(overloaded{
-                   [](SetSystemPromptCmd& c) { c.done->set_value(); },
-                   [](GetHistoryCmd& c) { c.done->set_value(HistorySnapshot{}); },
-                   [](ClearHistoryCmd& c) { c.done->set_value(); },
-                   [](AddSystemMessageCmd& c) { c.done->set_value(Expected<void>{}); },
-                   [](RegisterToolCmd& c) {
-                       c.done->set_value(std::unexpected(
-                           Error{ErrorCode::AgentNotRunning, "Agent is not running"}));
-                   },
-                   [](RegisterToolsCmd& c) {
-                       c.done->set_value(std::unexpected(
-                           Error{ErrorCode::AgentNotRunning, "Agent is not running"}));
-                   },
+                   [&](SetSystemPromptCmd& c) { c.done->set_value(shutdown_error()); },
+                   [&](GetHistoryCmd& c) { c.done->set_value(shutdown_error()); },
+                   [&](ClearHistoryCmd& c) { c.done->set_value(shutdown_error()); },
+                   [&](AddSystemMessageCmd& c) { c.done->set_value(shutdown_error()); },
+                   [&](RegisterToolCmd& c) { c.done->set_value(shutdown_error()); },
+                   [&](RegisterToolsCmd& c) { c.done->set_value(shutdown_error()); },
                },
                cmd);
 }
@@ -575,16 +472,9 @@ AgentRuntime::resolve_generation_options(const GenerationOptions& overrides) con
 
 template <typename Result>
 RequestHandle<Result> AgentRuntime::make_immediate_error_handle(Error error) {
-    auto state = std::make_shared<ImmediateResultState<Result>>();
-    state->result = std::unexpected(std::move(error));
-    return RequestHandle<Result>{0,
-                                 std::move(state),
-                                 0,
-                                 0,
-                                 &await_immediate_handle<Result>,
-                                 &await_immediate_handle_for<Result>,
-                                 &ready_immediate_handle<Result>,
-                                 &release_immediate_handle<Result>};
+    auto state = std::make_shared<ImmediateRequestState<Result>>(
+        Expected<Result>(std::unexpected(std::move(error))));
+    return RequestHandle<Result>{std::move(state), 0};
 }
 
 template <typename Result>
@@ -603,26 +493,9 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload payload) {
         return make_immediate_error_handle<Result>(reservation.error());
     }
 
-    RequestHandle<Result> handle;
-    if constexpr (std::same_as<Result, TextResponse>) {
-        handle = RequestHandle<Result>{reservation->id,
-                                       request_slots_,
-                                       reservation->slot,
-                                       reservation->generation,
-                                       &RequestSlots::await_text_handle,
-                                       &RequestSlots::await_text_handle_for,
-                                       &RequestSlots::ready_handle,
-                                       &RequestSlots::release_handle};
-    } else {
-        handle = RequestHandle<Result>{reservation->id,
-                                       request_slots_,
-                                       reservation->slot,
-                                       reservation->generation,
-                                       &RequestSlots::await_extraction_handle,
-                                       &RequestSlots::await_extraction_handle_for,
-                                       &RequestSlots::ready_handle,
-                                       &RequestSlots::release_handle};
-    }
+    auto state = std::make_shared<SlotRequestState<Result>>(request_slots_, reservation->slot,
+                                                            reservation->generation);
+    RequestHandle<Result> handle{std::move(state), reservation->id};
 
     if (!request_mailbox_.push_request(QueuedRequest{reservation->slot, reservation->generation})) {
         request_slots_->resolve_error(reservation->slot, reservation->generation,

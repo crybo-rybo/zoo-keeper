@@ -21,57 +21,38 @@
 
 namespace zoo {
 
+namespace internal::agent {
+template <typename Result> class RequestStateBase;
+
+template <typename Result>
+concept RequestHandleResult =
+    std::same_as<Result, TextResponse> || std::same_as<Result, ExtractionResponse>;
+} // namespace internal::agent
+
 /**
  * @brief Move-only async handle for one queued agent request.
+ *
+ * The handle holds a shared_ptr to a polymorphic state object whose concrete
+ * type lives in the runtime (see `src/agent/request_state.hpp`). All non-trivial
+ * members are defined in `src/agent/request_handle.cpp` and explicitly
+ * instantiated for `TextResponse` and `ExtractionResponse`.
  */
-template <typename Result> class RequestHandle {
+template <internal::agent::RequestHandleResult Result> class RequestHandle {
   public:
-    using AwaitFn = Expected<Result> (*)(void*, uint32_t, uint32_t);
-    using AwaitForFn = Expected<Result> (*)(void*, uint32_t, uint32_t, std::chrono::nanoseconds,
-                                            bool*);
-    using ReadyFn = bool (*)(const void*, uint32_t, uint32_t);
-    using ReleaseFn = void (*)(void*, uint32_t, uint32_t);
-
     RequestHandle() noexcept = default;
 
-    RequestHandle(RequestId id, std::shared_ptr<void> state, uint32_t slot, uint32_t generation,
-                  AwaitFn await_fn, AwaitForFn await_for_fn, ReadyFn ready_fn,
-                  ReleaseFn release_fn) noexcept
-        : id_(id), state_(std::move(state)), slot_(slot), generation_(generation), await_(await_fn),
-          await_for_(await_for_fn), ready_(ready_fn), release_(release_fn) {}
+    RequestHandle(std::shared_ptr<internal::agent::RequestStateBase<Result>> state,
+                  RequestId id) noexcept
+        : id_(id), state_(std::move(state)) {}
 
-    ~RequestHandle() {
-        reset();
-    }
+    ~RequestHandle();
 
-    RequestHandle(RequestHandle&& other) noexcept {
-        *this = std::move(other);
-    }
-    RequestHandle& operator=(RequestHandle&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
-        reset();
-
-        id_ = other.id_;
-        state_ = std::move(other.state_);
-        slot_ = other.slot_;
-        generation_ = other.generation_;
-        await_ = other.await_;
-        await_for_ = other.await_for_;
-        ready_ = other.ready_;
-        release_ = other.release_;
-
+    RequestHandle(RequestHandle&& other) noexcept
+        : id_(other.id_), state_(std::move(other.state_)) {
         other.id_ = 0;
-        other.slot_ = 0;
-        other.generation_ = 0;
-        other.await_ = nullptr;
-        other.await_for_ = nullptr;
-        other.ready_ = nullptr;
-        other.release_ = nullptr;
-        return *this;
     }
+
+    RequestHandle& operator=(RequestHandle&& other) noexcept;
 
     RequestHandle(const RequestHandle&) = delete;
     RequestHandle& operator=(const RequestHandle&) = delete;
@@ -85,70 +66,25 @@ template <typename Result> class RequestHandle {
     }
 
     [[nodiscard]] bool valid() const noexcept {
-        return static_cast<bool>(state_) && await_ != nullptr && await_for_ != nullptr &&
-               ready_ != nullptr && release_ != nullptr;
+        return static_cast<bool>(state_);
     }
 
-    [[nodiscard]] bool ready() const {
-        return valid() && ready_(state_.get(), slot_, generation_);
-    }
+    [[nodiscard]] bool ready() const;
 
-    Expected<Result> await_result() {
-        if (!valid()) {
-            return std::unexpected(
-                Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
-        }
-
-        auto result = await_(state_.get(), slot_, generation_);
-        clear_handle();
-        return result;
-    }
+    Expected<Result> await_result();
 
     template <typename Rep, typename Period>
     Expected<Result> await_result(std::chrono::duration<Rep, Period> timeout) {
-        if (!valid()) {
-            return std::unexpected(
-                Error{ErrorCode::AgentNotRunning, "Request handle is no longer valid"});
-        }
-
-        bool completed = false;
-        auto result =
-            await_for_(state_.get(), slot_, generation_,
-                       std::chrono::duration_cast<std::chrono::nanoseconds>(timeout), &completed);
-        if (completed) {
-            clear_handle();
-        }
-        return result;
+        return await_result_for(std::chrono::duration_cast<std::chrono::nanoseconds>(timeout));
     }
 
-    void reset() noexcept {
-        if (!valid()) {
-            return;
-        }
-        release_(state_.get(), slot_, generation_);
-        clear_handle();
-    }
+    void reset() noexcept;
 
   private:
-    void clear_handle() noexcept {
-        id_ = 0;
-        state_.reset();
-        slot_ = 0;
-        generation_ = 0;
-        await_ = nullptr;
-        await_for_ = nullptr;
-        ready_ = nullptr;
-        release_ = nullptr;
-    }
+    Expected<Result> await_result_for(std::chrono::nanoseconds timeout);
 
     RequestId id_ = 0;
-    std::shared_ptr<void> state_;
-    uint32_t slot_ = 0;
-    uint32_t generation_ = 0;
-    AwaitFn await_ = nullptr;
-    AwaitForFn await_for_ = nullptr;
-    ReadyFn ready_ = nullptr;
-    ReleaseFn release_ = nullptr;
+    std::shared_ptr<internal::agent::RequestStateBase<Result>> state_;
 };
 
 /**

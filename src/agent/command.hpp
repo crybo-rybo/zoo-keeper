@@ -21,17 +21,17 @@ namespace zoo::internal::agent {
 /// Replaces the system prompt on the underlying model.
 struct SetSystemPromptCmd {
     std::string prompt;
-    std::shared_ptr<std::promise<void>> done;
+    std::shared_ptr<std::promise<Expected<void>>> done;
 };
 
 /// Snapshots the current conversation history.
 struct GetHistoryCmd {
-    std::shared_ptr<std::promise<HistorySnapshot>> done;
+    std::shared_ptr<std::promise<Expected<HistorySnapshot>>> done;
 };
 
 /// Clears the conversation history and KV cache.
 struct ClearHistoryCmd {
-    std::shared_ptr<std::promise<void>> done;
+    std::shared_ptr<std::promise<Expected<void>>> done;
 };
 
 /// Appends a system-role message to the conversation without replacing the initial system prompt.

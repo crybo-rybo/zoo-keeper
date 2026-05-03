@@ -194,82 +194,6 @@ class RequestSlots {
         return slots_.size() - free_list_.size();
     }
 
-    [[nodiscard]] static bool ready_handle(const void* state, uint32_t slot, uint32_t generation) {
-        return static_cast<const RequestSlots*>(state)->ready(slot, generation);
-    }
-
-    [[nodiscard]] static Expected<TextResponse> await_text_handle(void* state, uint32_t slot,
-                                                                  uint32_t generation) {
-        return static_cast<RequestSlots*>(state)->await_result<TextResponse>(slot, generation);
-    }
-
-    [[nodiscard]] static Expected<TextResponse>
-    await_text_handle_for(void* state, uint32_t slot, uint32_t generation,
-                          std::chrono::nanoseconds timeout, bool* completed) {
-        return static_cast<RequestSlots*>(state)->await_result<TextResponse>(slot, generation,
-                                                                             timeout, completed);
-    }
-
-    [[nodiscard]] static Expected<ExtractionResponse>
-    await_extraction_handle(void* state, uint32_t slot, uint32_t generation) {
-        return static_cast<RequestSlots*>(state)->await_result<ExtractionResponse>(slot,
-                                                                                   generation);
-    }
-
-    [[nodiscard]] static Expected<ExtractionResponse>
-    await_extraction_handle_for(void* state, uint32_t slot, uint32_t generation,
-                                std::chrono::nanoseconds timeout, bool* completed) {
-        return static_cast<RequestSlots*>(state)->await_result<ExtractionResponse>(
-            slot, generation, timeout, completed);
-    }
-
-    static void release_handle(void* state, uint32_t slot, uint32_t generation) {
-        static_cast<RequestSlots*>(state)->release(slot, generation);
-    }
-
-  private:
-    friend class test_support::RequestSlotsTestPeer;
-
-    struct Slot {
-        mutable std::mutex mutex;
-        std::condition_variable cv;
-        uint32_t index = 0;
-        uint32_t generation = 1;
-        bool occupied = false;
-        bool orphaned = false;
-        bool ready = false;
-        RequestId request_id = 0;
-        std::atomic<bool> cancelled{false};
-        RequestPayload payload;
-        std::variant<std::monostate, Expected<TextResponse>, Expected<ExtractionResponse>> result;
-    };
-
-    template <typename Result>
-    void resolve(uint32_t slot_index, uint32_t generation, Expected<Result> result) {
-        if (slot_index >= slots_.size()) {
-            return;
-        }
-
-        Slot& slot = *slots_[slot_index];
-        std::lock_guard<std::mutex> lock(slot.mutex);
-        if (!slot.occupied || slot.generation != generation) {
-            return;
-        }
-
-        resolve_locked(slot, std::move(result));
-    }
-
-    template <typename Result> void resolve_locked(Slot& slot, Expected<Result> result) {
-        if (slot.orphaned) {
-            reset_locked(slot);
-            return;
-        }
-
-        slot.result = std::move(result);
-        slot.ready = true;
-        slot.cv.notify_all();
-    }
-
     [[nodiscard]] bool ready(uint32_t slot_index, uint32_t generation) const {
         if (slot_index >= slots_.size()) {
             return false;
@@ -343,6 +267,49 @@ class RequestSlots {
         }
 
         slot.orphaned = true;
+    }
+
+  private:
+    friend class test_support::RequestSlotsTestPeer;
+
+    struct Slot {
+        mutable std::mutex mutex;
+        std::condition_variable cv;
+        uint32_t index = 0;
+        uint32_t generation = 1;
+        bool occupied = false;
+        bool orphaned = false;
+        bool ready = false;
+        RequestId request_id = 0;
+        std::atomic<bool> cancelled{false};
+        RequestPayload payload;
+        std::variant<std::monostate, Expected<TextResponse>, Expected<ExtractionResponse>> result;
+    };
+
+    template <typename Result>
+    void resolve(uint32_t slot_index, uint32_t generation, Expected<Result> result) {
+        if (slot_index >= slots_.size()) {
+            return;
+        }
+
+        Slot& slot = *slots_[slot_index];
+        std::lock_guard<std::mutex> lock(slot.mutex);
+        if (!slot.occupied || slot.generation != generation) {
+            return;
+        }
+
+        resolve_locked(slot, std::move(result));
+    }
+
+    template <typename Result> void resolve_locked(Slot& slot, Expected<Result> result) {
+        if (slot.orphaned) {
+            reset_locked(slot);
+            return;
+        }
+
+        slot.result = std::move(result);
+        slot.ready = true;
+        slot.cv.notify_all();
     }
 
     void clear_slot(Slot& slot) {
