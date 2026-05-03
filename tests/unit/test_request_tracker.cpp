@@ -90,8 +90,7 @@ TEST(RequestSlotsTest, ResolveErrorPropagatesThroughAwaitHandle) {
     slots.resolve_error(reservation->slot, reservation->generation,
                         Error{ErrorCode::QueueFull, "Request queue is full"});
 
-    auto result =
-        RequestSlots::await_text_handle(&slots, reservation->slot, reservation->generation);
+    auto result = slots.await_result<TextResponse>(reservation->slot, reservation->generation);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::QueueFull);
     EXPECT_EQ(slots.size(), 0u);
@@ -103,7 +102,7 @@ TEST(RequestSlotsTest, ReleaseBeforeResolveDropsResultAndFreesSlot) {
     auto reservation = slots.emplace(make_text_request("orphan"));
     ASSERT_TRUE(reservation.has_value());
 
-    RequestSlots::release_handle(&slots, reservation->slot, reservation->generation);
+    slots.release(reservation->slot, reservation->generation);
     slots.resolve_text(reservation->slot, reservation->generation,
                        Expected<TextResponse>(TextResponse{.text = "done"}));
 
@@ -120,8 +119,8 @@ TEST(RequestSlotsTest, FailAllResolvesOutstandingRequests) {
 
     slots.fail_all(Error{ErrorCode::AgentNotRunning, "shutdown"});
 
-    auto r1 = RequestSlots::await_text_handle(&slots, first->slot, first->generation);
-    auto r2 = RequestSlots::await_text_handle(&slots, second->slot, second->generation);
+    auto r1 = slots.await_result<TextResponse>(first->slot, first->generation);
+    auto r2 = slots.await_result<TextResponse>(second->slot, second->generation);
 
     ASSERT_FALSE(r1.has_value());
     ASSERT_FALSE(r2.has_value());

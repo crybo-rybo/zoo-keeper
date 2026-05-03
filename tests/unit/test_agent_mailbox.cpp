@@ -64,7 +64,7 @@ TEST(RuntimeMailboxTest, CommandsArePrioritizedOverRequests) {
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, 1)));
 
-    auto promise = std::make_shared<std::promise<void>>();
+    auto promise = std::make_shared<std::promise<zoo::Expected<void>>>();
     ASSERT_TRUE(mailbox.push_command(SetSystemPromptCmd{"hello", promise}));
 
     auto first = mailbox.pop();
@@ -80,7 +80,7 @@ TEST(RuntimeMailboxTest, RejectsCommandsAfterShutdown) {
     RuntimeMailbox mailbox;
 
     mailbox.shutdown();
-    auto promise = std::make_shared<std::promise<void>>();
+    auto promise = std::make_shared<std::promise<zoo::Expected<void>>>();
     EXPECT_FALSE(mailbox.push_command(SetSystemPromptCmd{"late", promise}));
 }
 
@@ -89,8 +89,8 @@ TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
 
     ASSERT_TRUE(mailbox.push_request(make_request(1, 1)));
 
-    auto p1 = std::make_shared<std::promise<void>>();
-    auto p2 = std::make_shared<std::promise<void>>();
+    auto p1 = std::make_shared<std::promise<zoo::Expected<void>>>();
+    auto p2 = std::make_shared<std::promise<zoo::Expected<void>>>();
     ASSERT_TRUE(mailbox.push_command(ClearHistoryCmd{p1}));
     ASSERT_TRUE(mailbox.push_command(SetSystemPromptCmd{"hi", p2}));
 
@@ -110,7 +110,7 @@ TEST(RuntimeMailboxTest, AllCommandsDrainBeforeAnyRequest) {
 TEST(RuntimeMailboxTest, ShutdownDrainsCommandsThenStops) {
     RuntimeMailbox mailbox;
 
-    auto promise = std::make_shared<std::promise<void>>();
+    auto promise = std::make_shared<std::promise<zoo::Expected<void>>>();
     ASSERT_TRUE(mailbox.push_command(ClearHistoryCmd{promise}));
     mailbox.shutdown();
 
