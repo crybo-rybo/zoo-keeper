@@ -10,10 +10,8 @@
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
-#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -504,11 +502,11 @@ inline Expected<ToolDefinition> make_tool_definition(const std::string& name,
 } // namespace detail
 
 /**
- * @brief Thread-safe registry of tools available to the agent runtime.
+ * @brief Registry of tools available to the agent runtime.
  *
  * The registry owns normalized tool metadata, exposes deterministic JSON Schema
- * definitions for prompt construction and grammar generation, and provides
- * synchronized invocation of registered handlers.
+ * definitions for prompt construction and grammar generation, and invokes
+ * registered handlers. Callers serialize registration before later reads.
  */
 class ToolRegistry {
   public:
@@ -568,7 +566,6 @@ class ToolRegistry {
      * preserving registration order.
      */
     Expected<void> register_tool(ToolDefinition definition) {
-        std::unique_lock lock(mutex_);
         auto it = index_by_name_.find(definition.metadata.name);
         if (it != index_by_name_.end()) {
             tools_[it->second] = std::move(definition);
@@ -591,7 +588,6 @@ class ToolRegistry {
      * @return Void on success.
      */
     Expected<void> register_tools(std::vector<ToolDefinition> definitions) {
-        std::unique_lock lock(mutex_);
         for (auto& definition : definitions) {
             auto it = index_by_name_.find(definition.metadata.name);
             if (it != index_by_name_.end()) {
@@ -609,7 +605,6 @@ class ToolRegistry {
      * @brief Reports whether a tool name is currently registered.
      */
     bool has_tool(const std::string& name) const {
-        std::shared_lock lock(mutex_);
         return index_by_name_.find(name) != index_by_name_.end();
     }
 
@@ -617,16 +612,11 @@ class ToolRegistry {
      * @brief Invokes a registered tool with JSON arguments.
      */
     Expected<nlohmann::json> invoke(const std::string& name, const nlohmann::json& args) const {
-        ToolHandler handler;
-        {
-            std::shared_lock lock(mutex_);
-            auto it = index_by_name_.find(name);
-            if (it == index_by_name_.end()) {
-                return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
-            }
-            handler = tools_[it->second].handler;
+        auto it = index_by_name_.find(name);
+        if (it == index_by_name_.end()) {
+            return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
         }
-        return handler(args);
+        return tools_[it->second].handler(args);
     }
 
     /**
@@ -655,7 +645,6 @@ class ToolRegistry {
      * @brief Returns normalized metadata for a registered tool.
      */
     std::optional<ToolMetadata> get_tool_metadata(const std::string& name) const {
-        std::shared_lock lock(mutex_);
         auto it = index_by_name_.find(name);
         if (it == index_by_name_.end()) {
             return std::nullopt;
@@ -667,7 +656,6 @@ class ToolRegistry {
      * @brief Returns normalized metadata for every registered tool in registration order.
      */
     std::vector<ToolMetadata> get_all_tool_metadata() const {
-        std::shared_lock lock(mutex_);
         std::vector<ToolMetadata> metadata;
         metadata.reserve(tools_.size());
         for (const auto& tool : tools_) {
@@ -680,7 +668,6 @@ class ToolRegistry {
      * @brief Returns schemas for every registered tool in registration order.
      */
     nlohmann::json get_all_schemas() const {
-        std::shared_lock lock(mutex_);
         nlohmann::json schemas = nlohmann::json::array();
         for (const auto& tool : tools_) {
             schemas.push_back(build_schema_json(tool.metadata));
@@ -692,7 +679,6 @@ class ToolRegistry {
      * @brief Returns the names of every registered tool in registration order.
      */
     std::vector<std::string> get_tool_names() const {
-        std::shared_lock lock(mutex_);
         std::vector<std::string> names;
         names.reserve(tools_.size());
         for (const auto& tool : tools_) {
@@ -703,7 +689,6 @@ class ToolRegistry {
 
     /// Returns the number of registered tools.
     size_t size() const {
-        std::shared_lock lock(mutex_);
         return tools_.size();
     }
 
@@ -719,7 +704,6 @@ class ToolRegistry {
 
     std::vector<ToolDefinition> tools_;
     std::unordered_map<std::string, size_t> index_by_name_;
-    mutable std::shared_mutex mutex_;
 };
 
 } // namespace zoo::tools
