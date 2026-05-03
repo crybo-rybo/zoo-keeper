@@ -36,16 +36,11 @@ if (response) {
 ## API Reference
 
 ```cpp
-// Stateful - append one user message to retained history
+// Stateful - append one string-like user message or MessageView to retained history
+template <typename Message>
 RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
-    std::string_view user_message,
-    const GenerationOptions& options = GenerationOptions{},
-    AsyncTextCallback callback = {});
-
-RequestHandle<ExtractionResponse> extract(
-    const nlohmann::json& output_schema,
-    MessageView message,
+    Message&& message,
     const GenerationOptions& options = GenerationOptions{},
     AsyncTextCallback callback = {});
 
@@ -57,7 +52,7 @@ RequestHandle<ExtractionResponse> extract(
     AsyncTextCallback callback = {});
 ```
 
-These overloads return a `RequestHandle<ExtractionResponse>`. The structured
+These entry points return a `RequestHandle<ExtractionResponse>`. The structured
 result lives in `response->data`, and `response->tool_trace` is only populated
 when `GenerationOptions::record_tool_trace` is enabled for the request.
 

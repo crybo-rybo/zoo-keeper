@@ -16,6 +16,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,11 @@ template <typename Result> class RequestStateBase;
 template <typename Result>
 concept RequestHandleResult =
     std::same_as<Result, TextResponse> || std::same_as<Result, ExtractionResponse>;
+
+template <typename Message>
+concept ExtractMessage =
+    std::same_as<std::remove_cvref_t<Message>, MessageView> ||
+    requires(Message&& message) { std::string_view{std::forward<Message>(message)}; };
 } // namespace internal::agent
 
 /**
@@ -130,18 +136,19 @@ class Agent {
     /**
      * @brief Queues a structured extraction request (stateful).
      */
+    template <internal::agent::ExtractMessage Message>
     RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, std::string_view user_message,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
-
-    /**
-     * @brief Queues a structured extraction request (stateful).
-     */
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, MessageView message,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
+    extract(const nlohmann::json& output_schema, Message&& message,
+            const GenerationOptions& options = {}, AsyncTextCallback callback = {}) {
+        if constexpr (std::same_as<std::remove_cvref_t<Message>, MessageView>) {
+            return extract_stateful(output_schema, message, options, std::move(callback));
+        } else {
+            return extract_stateful(
+                output_schema,
+                MessageView{Role::User, std::string_view{std::forward<Message>(message)}}, options,
+                std::move(callback));
+        }
+    }
 
     /**
      * @brief Queues a structured extraction request (stateless).
@@ -214,95 +221,54 @@ class Agent {
     /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
-    /// @brief Registers a typed callable as a tool (initializer_list overload).
+    /// @brief Registers a typed callable as a tool.
     template <typename Func>
-    Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 std::initializer_list<std::string> param_names, Func func) {
-        return register_tool(name, description, std::vector<std::string>(param_names),
-                             std::move(func));
-    }
-
-    /// @brief Registers a typed callable as a tool with timeout (initializer_list overload).
-    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
-    template <typename Func>
-    Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 std::initializer_list<std::string> param_names, Func func,
-                                 std::chrono::nanoseconds timeout) {
-        return register_tool(name, description, std::vector<std::string>(param_names),
-                             std::move(func), timeout);
-    }
-
-    /// @brief Registers a typed callable as a tool (span overload).
-    template <typename Func>
-    Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 std::span<const std::string> param_names, Func func) {
-        auto definition = tools::detail::make_tool_definition(
-            name, description, std::vector<std::string>(param_names.begin(), param_names.end()),
-            std::move(func));
-        if (!definition) {
-            return std::unexpected(definition.error());
-        }
-        return register_tool(std::move(*definition));
-    }
-
-    /// @brief Registers a typed callable as a tool with timeout (span overload).
-    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
-    template <typename Func>
-    Expected<void> register_tool(const std::string& name, const std::string& description,
+    Expected<void> register_tool(std::string_view name, std::string_view description,
                                  std::span<const std::string> param_names, Func func,
-                                 std::chrono::nanoseconds timeout) {
+                                 std::optional<std::chrono::nanoseconds> timeout = {}) {
+        std::string tool_name{name};
+        std::string tool_description{description};
         auto definition = tools::detail::make_tool_definition(
-            name, description, std::vector<std::string>(param_names.begin(), param_names.end()),
-            std::move(func));
+            tool_name, tool_description,
+            std::vector<std::string>(param_names.begin(), param_names.end()), std::move(func));
         if (!definition) {
             return std::unexpected(definition.error());
         }
         return register_tool(std::move(*definition), timeout);
     }
 
+    template <typename Func>
+    Expected<void> register_tool(std::string_view name, std::string_view description,
+                                 std::initializer_list<std::string> param_names, Func func,
+                                 std::optional<std::chrono::nanoseconds> timeout = {}) {
+        const std::vector<std::string> names(param_names);
+        return register_tool(name, description, std::span<const std::string>(names),
+                             std::move(func), timeout);
+    }
+
     /// @brief Registers a tool using a JSON Schema and a JSON-backed handler.
     template <typename Handler>
         requires tools::detail::is_json_handler_like_v<Handler>
-    Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 const nlohmann::json& schema, Handler handler) {
-        return register_tool(name, description, nlohmann::json(schema),
-                             tools::ToolHandler(std::move(handler)));
-    }
-
-    /// @brief Registers a tool using a JSON Schema and handler, with timeout.
-    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
-    template <typename Handler>
-        requires tools::detail::is_json_handler_like_v<Handler>
-    Expected<void> register_tool(const std::string& name, const std::string& description,
+    Expected<void> register_tool(std::string_view name, std::string_view description,
                                  const nlohmann::json& schema, Handler handler,
-                                 std::chrono::nanoseconds timeout) {
+                                 std::optional<std::chrono::nanoseconds> timeout = {}) {
         return register_tool(name, description, nlohmann::json(schema),
                              tools::ToolHandler(std::move(handler)), timeout);
     }
 
     /// @brief Registers a tool from a prebuilt JSON Schema and handler.
-    Expected<void> register_tool(const std::string& name, const std::string& description,
-                                 nlohmann::json schema, tools::ToolHandler handler);
-    /// @brief Registers a tool from a prebuilt JSON Schema and handler, with timeout.
-    /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
-    Expected<void> register_tool(const std::string& name, const std::string& description,
+    Expected<void> register_tool(std::string_view name, std::string_view description,
                                  nlohmann::json schema, tools::ToolHandler handler,
-                                 std::chrono::nanoseconds timeout);
+                                 std::optional<std::chrono::nanoseconds> timeout = {});
 
     /**
      * @brief Registers multiple tool definitions in a single queued command.
-     * @param definitions Tool definitions to register.
-     * @return Void on success, or the first error encountered.
-     */
-    Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions);
-    /**
-     * @brief Registers multiple tool definitions in a single queued command, with timeout.
      * @param definitions Tool definitions to register.
      * @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
      * @return Void on success, or the first error encountered.
      */
     Expected<void> register_tools(std::vector<tools::ToolDefinition> definitions,
-                                  std::chrono::nanoseconds timeout);
+                                  std::optional<std::chrono::nanoseconds> timeout = {});
 
     [[nodiscard]] size_t tool_count() const noexcept;
 
@@ -311,9 +277,12 @@ class Agent {
 
     Agent(ModelConfig model_config, AgentConfig agent_config, GenerationOptions default_generation,
           std::unique_ptr<Impl> impl);
-    Expected<void> register_tool(tools::ToolDefinition definition);
+    RequestHandle<ExtractionResponse> extract_stateful(const nlohmann::json& output_schema,
+                                                       MessageView message,
+                                                       const GenerationOptions& options,
+                                                       AsyncTextCallback callback);
     Expected<void> register_tool(tools::ToolDefinition definition,
-                                 std::chrono::nanoseconds timeout);
+                                 std::optional<std::chrono::nanoseconds> timeout = {});
 
     ModelConfig model_config_;
     AgentConfig agent_config_;
