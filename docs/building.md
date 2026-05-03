@@ -243,22 +243,8 @@ The `crap` target:
 Functions exceeding the threshold are flagged with `<-- over threshold` and
 the process exits non-zero, making this suitable as a CI gate.
 
-To emit a machine-readable report alongside the console output, pass
-`--json-out` directly to `scripts/crap_report.py`:
-
-```bash
-cmake --build build --target crap -- \
-  CRAP_EXTRA_ARGS="--json-out build/crap_report.json"
-```
-
-Or run the script directly after the `crap` target has populated coverage data:
-
-```bash
-python3 scripts/crap_report.py \
-    --build-dir build --source-dir . \
-    --threshold 30 \
-    --json-out build/crap_report.json
-```
+A timestamped JSON report (`<YYYYMMDD_HHMMSS>_crap_report.json`) is written
+automatically to the working directory on every run alongside the console output.
 
 ## API Reference
 

@@ -11,6 +11,7 @@ is both complex and poorly tested — high change risk.
 
 import argparse
 import csv
+import datetime
 import io
 import json
 import os
@@ -56,8 +57,13 @@ def _run_lizard(src_dirs: list[Path]) -> list[FunctionData]:
         print(f"lizard error:\n{result.stderr}", file=sys.stderr)
         sys.exit(1)
 
+    _LIZARD_FIELDS = [
+        "NLOC", "CCN", "token", "PARAM", "length",
+        "location", "file", "method_name", "method_long_name",
+        "start_line", "end_line",
+    ]
     functions: list[FunctionData] = []
-    reader = csv.DictReader(io.StringIO(result.stdout))
+    reader = csv.DictReader(io.StringIO(result.stdout), fieldnames=_LIZARD_FIELDS)
     for row in reader:
         try:
             # location field: "func_name@/abs/path/to/file.cpp:start_line"
@@ -100,7 +106,11 @@ def _run_gcovr(
     coverage: dict[Path, dict[int, int]] = {}
     for entry in json.loads(result.stdout).get("files", []):
         # gcovr --root makes paths relative to source_dir
-        fpath = (source_dir / entry["filename"]).resolve()
+        # gcovr <7 uses "filename"; gcovr 7+ uses "file"
+        fname = entry.get("filename") or entry.get("file")
+        if not fname:
+            continue
+        fpath = (source_dir / fname).resolve()
         coverage[fpath] = {
             int(line["line_number"]): int(line["count"])
             for line in entry.get("lines", [])
@@ -134,8 +144,6 @@ def main() -> int:
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--threshold", type=float, default=30.0,
                         help="CRAP score at which a function is flagged (default: 30)")
-    parser.add_argument("--json-out", type=Path,
-                        help="Write full JSON report to this file")
     args = parser.parse_args()
 
     source_dir = args.source_dir.resolve()
@@ -181,21 +189,22 @@ def main() -> int:
     print(f"  Threshold       : {args.threshold}")
     print(f"  Over threshold  : {len(over_threshold)}")
 
-    if args.json_out:
-        report = [
-            {
-                "function": f.name,
-                "file": str(f.file.relative_to(source_dir) if f.file.is_relative_to(source_dir) else f.file),
-                "start_line": f.start_line,
-                "end_line": f.end_line,
-                "ccn": f.ccn,
-                "coverage_pct": round(f.coverage_pct, 1),
-                "crap": round(f.crap_score, 2),
-            }
-            for f in functions
-        ]
-        args.json_out.write_text(json.dumps(report, indent=2))
-        print(f"  JSON report     : {args.json_out}")
+    report = [
+        {
+            "function": f.name,
+            "file": str(f.file.relative_to(source_dir) if f.file.is_relative_to(source_dir) else f.file),
+            "start_line": f.start_line,
+            "end_line": f.end_line,
+            "ccn": f.ccn,
+            "coverage_pct": round(f.coverage_pct, 1),
+            "crap": round(f.crap_score, 2),
+        }
+        for f in functions
+    ]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    auto_out = Path.cwd() / f"{timestamp}_crap_report.json"
+    auto_out.write_text(json.dumps(report, indent=2))
+    print(f"  JSON report     : {auto_out}")
 
     if over_threshold:
         print(
