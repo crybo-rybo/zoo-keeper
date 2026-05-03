@@ -45,11 +45,11 @@ void Model::ChatTemplatesDeleter::operator()(common_chat_templates* tmpls) const
 Model::~Model() = default;
 
 bool Model::has_tool_calling() const noexcept {
-    return impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall;
+    return impl_->session_.sampler_policy.is_native_tool_call();
 }
 
 bool Model::has_schema_grammar() const noexcept {
-    return impl_->session_.grammar_mode == Impl::GrammarMode::Schema;
+    return impl_->session_.sampler_policy.is_schema();
 }
 
 const ModelConfig& Model::model_config() const noexcept {

@@ -203,6 +203,13 @@ GenerationResult tool_call_generation(const std::string& tool_name, const nlohma
     return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true, "", {}};
 }
 
+nlohmann::json simple_extraction_schema() {
+    return {{"type", "object"},
+            {"properties", {{"name", {{"type", "string"}}}, {"age", {{"type", "integer"}}}}},
+            {"required", nlohmann::json::array({"name", "age"})},
+            {"additionalProperties", false}};
+}
+
 TEST(AgentRuntimeTest, QueueFullFailsAdditionalRequestWhileSlotIsOccupied) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -471,6 +478,43 @@ TEST(AgentRuntimeTest, ToolLoopReturnsTraceOnlyWhenRequested) {
     EXPECT_EQ(result->text, "10");
     ASSERT_TRUE(result->tool_trace.has_value());
     ASSERT_EQ(result->tool_trace->invocations.size(), 1u);
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
+}
+
+TEST(AgentRuntimeTest, ToolCallingWorksAfterSchemaExtractionRestoresToolGrammar) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto definition = zoo::tools::detail::make_tool_definition("double", "Double a number",
+                                                               std::vector<std::string>{"value"},
+                                                               [](int value) { return value * 2; });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(
+            GenerationResult{R"({"name":"Alice","age":30})", 0, false, "", {}});
+    });
+    auto extraction = runtime.extract(simple_extraction_schema(), "Alice is 30").await_result();
+    ASSERT_TRUE(extraction.has_value()) << extraction.error().to_string();
+    EXPECT_EQ(extraction->data["name"], "Alice");
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("double", {{"value", 5}}));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"10", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto result = runtime.chat("double 5", options).await_result();
+
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "10");
+    ASSERT_TRUE(result->tool_trace.has_value());
     EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
 }
 

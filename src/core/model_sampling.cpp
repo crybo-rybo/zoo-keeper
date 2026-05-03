@@ -44,13 +44,19 @@ std::string regex_escape(const std::string& str) {
 
 } // namespace
 
-bool Model::set_schema_grammar(const std::string& grammar_str) {
-    impl_->session_.tool_grammar_str = grammar_str;
-    return rebuild_sampler_with_schema_grammar();
+bool Model::set_schema_grammar(const std::string& grammarstr) {
+    auto previous_policy = impl_->session_.sampler_policy;
+    impl_->session_.sampler_policy = Impl::SamplerPolicy::schema(grammarstr);
+    if (!rebuild_sampler_with_schema_grammar()) {
+        impl_->session_.sampler_policy = std::move(previous_policy);
+        return false;
+    }
+    return true;
 }
 
 bool Model::rebuild_sampler_with_tool_grammar() {
-    if (!impl_->session_.tool_state || impl_->session_.tool_grammar_str.empty()) {
+    const auto& policy = impl_->session_.sampler_policy;
+    if (!impl_->session_.tool_state || !policy.is_native_tool_call() || policy.grammar.empty()) {
         return false;
     }
 
@@ -99,12 +105,11 @@ bool Model::rebuild_sampler_with_tool_grammar() {
     llama_sampler* grammar_sampler = nullptr;
     if (impl_->session_.tool_state->grammar_lazy) {
         grammar_sampler = llama_sampler_init_grammar_lazy_patterns(
-            impl_->loaded_.vocab, impl_->session_.tool_grammar_str.c_str(), "root",
-            trigger_patterns_c.data(), trigger_patterns_c.size(), trigger_tokens.data(),
-            trigger_tokens.size());
+            impl_->loaded_.vocab, policy.grammar.c_str(), "root", trigger_patterns_c.data(),
+            trigger_patterns_c.size(), trigger_tokens.data(), trigger_tokens.size());
     } else {
-        grammar_sampler = llama_sampler_init_grammar(
-            impl_->loaded_.vocab, impl_->session_.tool_grammar_str.c_str(), "root");
+        grammar_sampler =
+            llama_sampler_init_grammar(impl_->loaded_.vocab, policy.grammar.c_str(), "root");
     }
 
     if (!grammar_sampler) {
@@ -118,11 +123,15 @@ bool Model::rebuild_sampler_with_tool_grammar() {
     add_dist_sampler(chain.get(), impl_->session_.active_sampling);
 
     impl_->session_.sampler = std::move(chain);
-    impl_->session_.grammar_mode = Impl::GrammarMode::NativeToolCall;
     return true;
 }
 
 bool Model::rebuild_sampler_with_schema_grammar() {
+    const auto& policy = impl_->session_.sampler_policy;
+    if (!policy.is_schema() || policy.grammar.empty()) {
+        return false;
+    }
+
     auto chain_params = llama_sampler_chain_default_params();
     chain_params.no_perf = false;
     auto chain = LlamaSamplerHandle(llama_sampler_chain_init(chain_params));
@@ -132,8 +141,8 @@ bool Model::rebuild_sampler_with_schema_grammar() {
 
     // Grammar must filter logits before top-k/top-p narrow the candidate set,
     // otherwise top-k=1 can select a token the grammar rejects.
-    auto* grammar_sampler = llama_sampler_init_grammar(
-        impl_->loaded_.vocab, impl_->session_.tool_grammar_str.c_str(), "root");
+    auto* grammar_sampler =
+        llama_sampler_init_grammar(impl_->loaded_.vocab, policy.grammar.c_str(), "root");
     if (!grammar_sampler) {
         return false;
     }
@@ -143,8 +152,35 @@ bool Model::rebuild_sampler_with_schema_grammar() {
     add_dist_sampler(chain.get(), impl_->session_.active_sampling);
 
     impl_->session_.sampler = std::move(chain);
-    impl_->session_.grammar_mode = Impl::GrammarMode::Schema;
     return true;
+}
+
+Expected<void> Model::Impl::SamplerPolicy::ensure_sampler_for_pass(Model& model) const {
+    if (mode == Mode::Plain) {
+        return {};
+    }
+
+    if (is_native_tool_call()) {
+        if (grammar.empty()) {
+            model.impl_->session_.sampler = model.create_sampler_chain();
+            if (!model.impl_->session_.sampler) {
+                return std::unexpected(
+                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
+            }
+            return {};
+        }
+        if (!model.rebuild_sampler_with_tool_grammar()) {
+            return std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
+        }
+        return {};
+    }
+
+    if (!model.rebuild_sampler_with_schema_grammar()) {
+        return std::unexpected(
+            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
+    }
+    return {};
 }
 
 void Model::add_sampling_stages(llama_sampler* chain, const SamplingParams& sp) const {

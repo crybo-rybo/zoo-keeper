@@ -35,10 +35,37 @@ struct Model::Impl {
         bool dirty = true;
     };
 
-    enum class GrammarMode {
-        None,
-        NativeToolCall,
-        Schema,
+    struct SamplerPolicy {
+        enum class Mode {
+            Plain,
+            NativeToolCall,
+            Schema,
+        };
+
+        Mode mode = Mode::Plain;
+        std::string grammar;
+
+        [[nodiscard]] bool is_native_tool_call() const noexcept {
+            return mode == Mode::NativeToolCall;
+        }
+
+        [[nodiscard]] bool is_schema() const noexcept {
+            return mode == Mode::Schema;
+        }
+
+        static SamplerPolicy plain() {
+            return {};
+        }
+
+        static SamplerPolicy native_tool_call(std::string grammar) {
+            return {Mode::NativeToolCall, std::move(grammar)};
+        }
+
+        static SamplerPolicy schema(std::string grammar) {
+            return {Mode::Schema, std::move(grammar)};
+        }
+
+        Expected<void> ensure_sampler_for_pass(Model& model) const;
     };
 
     // Loaded model state: set once during initialize() and immutable thereafter.
@@ -65,8 +92,7 @@ struct Model::Impl {
         Model::LlamaContextHandle ctx;
         Model::LlamaSamplerHandle sampler;
 
-        std::string tool_grammar_str;
-        GrammarMode grammar_mode = GrammarMode::None;
+        SamplerPolicy sampler_policy = SamplerPolicy::plain();
         std::unique_ptr<ToolCallingState> tool_state;
 
         PromptState prompt_state;

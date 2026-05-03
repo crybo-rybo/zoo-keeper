@@ -140,7 +140,7 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     StopSequenceMatcher stop_matcher{std::span<const std::string>(stop_sequences)};
     StreamFilter stream_filter;
     if (on_token && impl_->session_.tool_state &&
-        impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall) {
+        impl_->session_.sampler_policy.is_native_tool_call()) {
         const auto& trigger_matcher = impl_->session_.tool_state->trigger_matcher;
         stream_filter = StreamFilter(std::span<const std::string>(trigger_matcher.word_triggers()),
                                      &trigger_matcher);
@@ -288,8 +288,7 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
 
     // When native tool calling is active, parse the output to extract
     // structured tool calls for proper history round-tripping.
-    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall &&
-        impl_->session_.tool_state) {
+    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
         auto parsed = parse_tool_response(generated_text);
         if (!parsed.tool_calls.empty()) {
             impl_->session_.messages.push_back(Message::assistant_with_tool_calls(
@@ -370,7 +369,7 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
     bool tool_detected = false;
     std::string parsed_content;
     std::vector<ToolCallInfo> parsed_tool_calls;
-    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall) {
+    if (impl_->session_.sampler_policy.is_native_tool_call()) {
         auto parsed = parse_tool_response(*text_result);
         tool_detected = !parsed.tool_calls.empty();
         parsed_content = std::move(parsed.content);
@@ -382,27 +381,11 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
 }
 
 Expected<void> Model::ensure_grammar_sampler_for_pass() {
-    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall) {
-        if (impl_->session_.tool_grammar_str.empty()) {
-            impl_->session_.sampler = create_sampler_chain();
-            if (!impl_->session_.sampler) {
-                return std::unexpected(
-                    Error{ErrorCode::InferenceFailed, "Failed to rebuild sampler chain"});
-            }
-        } else if (!rebuild_sampler_with_tool_grammar()) {
-            return std::unexpected(
-                Error{ErrorCode::InferenceFailed, "Failed to rebuild tool grammar sampler"});
-        }
-    } else if (impl_->session_.grammar_mode == Impl::GrammarMode::Schema &&
-               !rebuild_sampler_with_schema_grammar()) {
-        return std::unexpected(
-            Error{ErrorCode::InferenceFailed, "Failed to rebuild schema grammar sampler"});
-    }
-    return {};
+    return impl_->session_.sampler_policy.ensure_sampler_for_pass(*this);
 }
 
 std::vector<std::string> Model::merge_stop_sequences(std::vector<std::string> base) const {
-    if (impl_->session_.tool_state) {
+    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
         const auto& extras = impl_->session_.tool_state->additional_stops;
         base.insert(base.end(), extras.begin(), extras.end());
     }

@@ -49,9 +49,9 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     state->preserved_tokens = {"stale-token"};
     state->additional_stops = {"stale-stop"};
 
-    ModelTestAccess::tool_grammar_str(*model) = state->grammar;
     ModelTestAccess::tool_state(*model) = std::move(state);
-    ModelTestAccess::grammar_mode(*model) = ModelTestAccess::GrammarMode::NativeToolCall;
+    ModelTestAccess::set_sampler_policy(
+        *model, ModelTestAccess::SamplerPolicy::native_tool_call("stale-grammar"));
     ModelTestAccess::messages(*model).push_back(zoo::Message::user("hello"));
 
     auto prompt = ModelTestAccess::render_prompt_delta(*model);
@@ -62,8 +62,10 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     EXPECT_EQ(ModelTestAccess::tool_state(*model)->parser_params.format,
               COMMON_CHAT_FORMAT_PEG_NATIVE);
     EXPECT_FALSE(ModelTestAccess::tool_state(*model)->grammar.empty());
-    EXPECT_EQ(ModelTestAccess::tool_grammar_str(*model),
+    EXPECT_EQ(ModelTestAccess::sampler_policy(*model).grammar,
               ModelTestAccess::tool_state(*model)->grammar);
+    EXPECT_EQ(ModelTestAccess::sampler_policy(*model).mode,
+              ModelTestAccess::GrammarMode::NativeToolCall);
     EXPECT_TRUE(ModelTestAccess::tool_state(*model)->grammar_lazy);
     ASSERT_EQ(ModelTestAccess::tool_state(*model)->grammar_triggers.size(), 1u);
     EXPECT_EQ(ModelTestAccess::tool_state(*model)->grammar_triggers.front().type,
@@ -89,7 +91,8 @@ TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
          R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"]})"});
 
     ModelTestAccess::tool_state(*model) = std::move(state);
-    ModelTestAccess::grammar_mode(*model) = ModelTestAccess::GrammarMode::NativeToolCall;
+    ModelTestAccess::set_sampler_policy(
+        *model, ModelTestAccess::SamplerPolicy::native_tool_call("stale-grammar"));
     ModelTestAccess::messages(*model).push_back(zoo::Message::user("hello"));
 
     auto prompt = ModelTestAccess::render_prompt_delta(*model);
@@ -120,19 +123,45 @@ TEST(ModelToolCallingTest, AssistantWithToolCallsPreservesStructure) {
 TEST(ModelToolCallingTest, PlainAssistantMessageWhenNoToolState) {
     auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
-    EXPECT_EQ(ModelTestAccess::grammar_mode(*model), ModelTestAccess::GrammarMode::None);
+    EXPECT_EQ(ModelTestAccess::sampler_policy(*model).mode, ModelTestAccess::GrammarMode::Plain);
     EXPECT_EQ(ModelTestAccess::tool_state(*model), nullptr);
 
     std::string generated_text = "Hello, world!";
-    zoo::Message msg =
-        (ModelTestAccess::grammar_mode(*model) == ModelTestAccess::GrammarMode::NativeToolCall &&
-         ModelTestAccess::tool_state(*model))
-            ? zoo::Message::assistant_with_tool_calls("", {})
-            : zoo::Message::assistant(generated_text);
+    zoo::Message msg = (ModelTestAccess::sampler_policy(*model).is_native_tool_call() &&
+                        ModelTestAccess::tool_state(*model))
+                           ? zoo::Message::assistant_with_tool_calls("", {})
+                           : zoo::Message::assistant(generated_text);
 
     EXPECT_EQ(msg.role, zoo::Role::Assistant);
     EXPECT_EQ(msg.content, "Hello, world!");
     EXPECT_TRUE(msg.tool_calls.empty());
+}
+
+TEST(ModelToolCallingTest, RenderPromptDeltaDoesNotOverwriteSchemaPolicy) {
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
+
+    auto templates = common_chat_templates_init(nullptr, peg_native_tool_template());
+    ASSERT_TRUE(templates);
+    ModelTestAccess::chat_templates(*model).reset(templates.release());
+
+    auto state = std::make_unique<ModelTestAccess::ToolCallingState>();
+    state->tools.push_back(
+        {"echo", "Echo text",
+         R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"]})"});
+    state->grammar = "tool-grammar";
+    state->additional_stops = {"tool-stop"};
+
+    ModelTestAccess::tool_state(*model) = std::move(state);
+    ModelTestAccess::set_sampler_policy(*model,
+                                        ModelTestAccess::SamplerPolicy::schema("schema-grammar"));
+    ModelTestAccess::messages(*model).push_back(zoo::Message::user("extract"));
+
+    auto prompt = ModelTestAccess::render_prompt_delta(*model);
+    ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();
+
+    EXPECT_EQ(ModelTestAccess::sampler_policy(*model).mode, ModelTestAccess::GrammarMode::Schema);
+    EXPECT_EQ(ModelTestAccess::sampler_policy(*model).grammar, "schema-grammar");
+    EXPECT_EQ(ModelTestAccess::tool_state(*model)->grammar, "tool-grammar");
 }
 
 } // namespace

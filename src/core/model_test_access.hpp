@@ -12,7 +12,8 @@
 namespace zoo::core {
 
 struct ModelTestAccess {
-    using GrammarMode = Model::Impl::GrammarMode;
+    using SamplerPolicy = Model::Impl::SamplerPolicy;
+    using GrammarMode = SamplerPolicy::Mode;
     using ToolCallingState = Model::Impl::ToolCallingState;
 
     static std::unique_ptr<Model> make(ModelConfig model_config,
@@ -29,12 +30,12 @@ struct ModelTestAccess {
         return model.impl_->session_.tool_state;
     }
 
-    static auto& tool_grammar_str(Model& model) {
-        return model.impl_->session_.tool_grammar_str;
+    static const auto& sampler_policy(const Model& model) {
+        return model.impl_->session_.sampler_policy;
     }
 
-    static auto& grammar_mode(Model& model) {
-        return model.impl_->session_.grammar_mode;
+    static void set_sampler_policy(Model& model, SamplerPolicy policy) {
+        model.impl_->session_.sampler_policy = std::move(policy);
     }
 
     static auto& messages(Model& model) {

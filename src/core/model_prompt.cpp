@@ -48,8 +48,8 @@ Expected<std::string> Model::render_prompt_delta() {
     inputs.add_generation_prompt = true;
     inputs.use_jinja = true;
 
-    // If tools are registered, include them so the template can format them.
-    if (impl_->session_.tool_state) {
+    // Tool definitions belong to native tool-call generations, not schema extraction overrides.
+    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
         inputs.tools = impl_->session_.tool_state->tools;
         inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     }
@@ -96,8 +96,7 @@ Expected<std::string> Model::render_prompt_delta() {
     // format/parsing/grammar state from this render pass. The template output
     // can vary with history. Skip this when in Schema mode (extraction) to
     // avoid overwriting the caller's schema grammar with tool-call grammar.
-    if (impl_->session_.grammar_mode == Impl::GrammarMode::NativeToolCall &&
-        impl_->session_.tool_state) {
+    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
         common_chat_parser_params parser_params;
         try {
             parser_params = make_tool_parser_params(params);
@@ -115,7 +114,8 @@ Expected<std::string> Model::render_prompt_delta() {
             ToolCallTriggerMatcher(impl_->session_.tool_state->grammar_triggers);
         impl_->session_.tool_state->preserved_tokens = std::move(params.preserved_tokens);
         impl_->session_.tool_state->additional_stops = std::move(params.additional_stops);
-        impl_->session_.tool_grammar_str = impl_->session_.tool_state->grammar;
+        impl_->session_.sampler_policy =
+            Impl::SamplerPolicy::native_tool_call(impl_->session_.tool_state->grammar);
     }
 
     return delta;
@@ -129,7 +129,7 @@ void Model::finalize_response() {
     inputs.add_generation_prompt = false;
     inputs.use_jinja = true;
 
-    if (impl_->session_.tool_state) {
+    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
         inputs.tools = impl_->session_.tool_state->tools;
         inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     }

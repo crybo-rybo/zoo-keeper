@@ -12,6 +12,7 @@
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -45,6 +46,30 @@ class ScopeExit {
 
   private:
     std::function<void()> callback_;
+};
+
+/// Scope-owned schema grammar activation for extraction requests.
+class ScopedGrammarOverride {
+  public:
+    static Expected<ScopedGrammarOverride> activate(AgentBackend& backend,
+                                                    const std::string& grammar,
+                                                    std::function<void()> restore_callback) {
+        if (!backend.set_schema_grammar(grammar)) {
+            return std::unexpected(
+                Error{ErrorCode::ExtractionFailed, "Failed to initialize schema grammar"});
+        }
+        return ScopedGrammarOverride(ScopeExit(std::move(restore_callback)));
+    }
+
+    ScopedGrammarOverride(const ScopedGrammarOverride&) = delete;
+    ScopedGrammarOverride& operator=(const ScopedGrammarOverride&) = delete;
+    ScopedGrammarOverride(ScopedGrammarOverride&&) noexcept = default;
+    ScopedGrammarOverride& operator=(ScopedGrammarOverride&&) noexcept = default;
+
+  private:
+    explicit ScopedGrammarOverride(ScopeExit guard) : guard_(std::move(guard)) {}
+
+    ScopeExit guard_;
 };
 
 /// Replace backend history with the given messages. Returns error on failure.
