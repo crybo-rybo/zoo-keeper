@@ -44,7 +44,7 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 - `src/hub/` — hub layer implementation (compiled when `ZOO_BUILD_HUB=ON`)
 - `tests/unit/` — GoogleTest suite; `tests/fixtures/` — reusable data
 - `examples/` — demo executables and sample config
-- `docs/` — architecture, guides, ADRs
+- `docs/` — architecture and guides
 - `cmake/` — build helpers (llama.cpp is fetched into `build/_deps/` at configure time)
 
 ## Architecture (four layers)

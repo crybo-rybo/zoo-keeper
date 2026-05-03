@@ -105,6 +105,5 @@ Shared helpers (`ScopeExit`, `snapshot_from_messages`, `swap_history`) live in `
 - `architecture.md` explains the public layers, targets, and user-visible threading guarantees
 - `maintainer-architecture.md` explains private ownership and implementation seams
 - `maintainer-cmake-packaging.md` explains build-tree vs install-tree package config generation and usage
-- `adr/` contains Architecture Decision Records documenting *why* key design choices were made
 
 If a document starts teaching private command types, mailbox structure, or backend adapter details to normal consumers, that content belongs here instead.
