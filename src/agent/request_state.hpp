@@ -60,8 +60,7 @@ template <typename Result> class SlotRequestState final : public RequestStateBas
 
 template <typename Result> class ImmediateRequestState final : public RequestStateBase<Result> {
   public:
-    explicit ImmediateRequestState(Expected<Result> result) noexcept
-        : result_(std::move(result)) {}
+    explicit ImmediateRequestState(Expected<Result> result) noexcept : result_(std::move(result)) {}
 
     [[nodiscard]] bool ready() const override {
         return true;
