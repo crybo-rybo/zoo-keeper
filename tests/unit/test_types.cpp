@@ -90,8 +90,7 @@ TEST(ToolCallTest, ToolCallSpanSupportsBorrowedAndOwnedStorage) {
 }
 
 TEST(ConversationViewTest, SupportsBorrowedAndOwnedStorage) {
-    const std::array<zoo::MessageView, 1> borrowed = {
-        zoo::MessageView{zoo::Role::User, "hello"}};
+    const std::array<zoo::MessageView, 1> borrowed = {zoo::MessageView{zoo::Role::User, "hello"}};
     const zoo::ConversationView borrowed_view{std::span<const zoo::MessageView>(borrowed)};
 
     EXPECT_EQ(borrowed_view.size(), 1u);
