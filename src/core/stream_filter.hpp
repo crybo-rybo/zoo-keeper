@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <optional>
 #include <regex>
 #include <span>
 #include <string>
@@ -15,6 +16,18 @@
 struct common_grammar_trigger;
 
 namespace zoo::core {
+
+/// Matches generated text against configured stop-sequence suffixes.
+class StopSequenceMatcher {
+  public:
+    explicit StopSequenceMatcher(std::span<const std::string> stop_sequences)
+        : stop_sequences_(stop_sequences) {}
+
+    [[nodiscard]] size_t match_suffix(std::string_view generated_text) const noexcept;
+
+  private:
+    std::span<const std::string> stop_sequences_;
+};
 
 /// Precompiled matcher for non-token tool-call grammar triggers.
 class ToolCallTriggerMatcher {
@@ -74,6 +87,26 @@ class ToolCallWordTriggerFilter {
     std::vector<std::string> owned_triggers_;
     std::span<const std::string> borrowed_triggers_;
     std::string pending_;
+    bool suppressing_ = false;
+};
+
+/// Streams visible text until a configured tool-call trigger is detected.
+class StreamFilter {
+  public:
+    StreamFilter() = default;
+    StreamFilter(std::span<const std::string> word_triggers,
+                 const ToolCallTriggerMatcher* trigger_matcher = nullptr);
+
+    std::string consume(std::string_view token, std::string_view accumulated_text);
+    std::string finalize();
+
+    bool suppressing() const noexcept {
+        return suppressing_;
+    }
+
+  private:
+    std::optional<ToolCallWordTriggerFilter> word_filter_;
+    const ToolCallTriggerMatcher* trigger_matcher_ = nullptr;
     bool suppressing_ = false;
 };
 

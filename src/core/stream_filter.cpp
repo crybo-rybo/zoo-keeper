@@ -3,6 +3,20 @@
 
 namespace zoo::core {
 
+size_t StopSequenceMatcher::match_suffix(std::string_view generated_text) const noexcept {
+    for (const auto& stop_sequence : stop_sequences_) {
+        if (stop_sequence.empty()) {
+            continue;
+        }
+        if (generated_text.size() >= stop_sequence.size() &&
+            generated_text.compare(generated_text.size() - stop_sequence.size(),
+                                   stop_sequence.size(), stop_sequence) == 0) {
+            return stop_sequence.size();
+        }
+    }
+    return 0;
+}
+
 ToolCallTriggerMatcher::ToolCallTriggerMatcher(
     const std::vector<common_grammar_trigger>& triggers) {
     word_triggers_.reserve(triggers.size());
@@ -118,6 +132,42 @@ std::string ToolCallWordTriggerFilter::finalize() {
     std::string trailing = std::move(pending_);
     pending_.clear();
     return trailing;
+}
+
+StreamFilter::StreamFilter(std::span<const std::string> word_triggers,
+                           const ToolCallTriggerMatcher* trigger_matcher)
+    : trigger_matcher_(trigger_matcher) {
+    if (!word_triggers.empty()) {
+        word_filter_.emplace(word_triggers);
+    }
+}
+
+std::string StreamFilter::consume(std::string_view token, std::string_view accumulated_text) {
+    if (suppressing_) {
+        return {};
+    }
+
+    std::string visible_chunk;
+    if (word_filter_) {
+        visible_chunk = word_filter_->consume(token);
+        suppressing_ = word_filter_->suppressing();
+    } else {
+        visible_chunk.assign(token);
+    }
+
+    if (!suppressing_ && trigger_matcher_ && trigger_matcher_->is_detected(accumulated_text)) {
+        suppressing_ = true;
+        visible_chunk.clear();
+    }
+
+    return visible_chunk;
+}
+
+std::string StreamFilter::finalize() {
+    if (suppressing_ || !word_filter_) {
+        return {};
+    }
+    return word_filter_->finalize();
 }
 
 } // namespace zoo::core

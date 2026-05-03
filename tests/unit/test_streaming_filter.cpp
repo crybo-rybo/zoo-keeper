@@ -24,6 +24,16 @@ TEST(StreamingFilterTest, NoTriggersNeverDetects) {
     EXPECT_FALSE(zoo::core::is_tool_trigger_detected("any text", triggers));
 }
 
+TEST(StreamingFilterTest, StopSequenceMatcherIgnoresEmptyAndMatchesSuffix) {
+    std::vector<std::string> stops = {"", "<stop>", "END"};
+    zoo::core::StopSequenceMatcher matcher{std::span<const std::string>(stops)};
+
+    EXPECT_EQ(matcher.match_suffix("hello"), 0u);
+    EXPECT_EQ(matcher.match_suffix("hello<stop>"), 6u);
+    EXPECT_EQ(matcher.match_suffix("friend"), 0u);
+    EXPECT_EQ(matcher.match_suffix("the END"), 3u);
+}
+
 TEST(StreamingFilterTest, WordTriggerDetectedInText) {
     std::vector<common_grammar_trigger> triggers;
     triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
@@ -109,6 +119,18 @@ TEST(StreamingFilterTest, FinalizeFlushesIncompleteBufferedPrefix) {
     EXPECT_EQ(filter.consume("[TOO"), "");
     EXPECT_EQ(filter.finalize(), "[TOO");
     EXPECT_FALSE(filter.suppressing());
+}
+
+TEST(StreamingFilterTest, StreamFilterSuppressesRegexTriggerChunk) {
+    std::vector<common_grammar_trigger> triggers;
+    triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, R"(<\|tool_call_start\|>)"});
+    zoo::core::ToolCallTriggerMatcher matcher(triggers);
+    zoo::core::StreamFilter filter({}, &matcher);
+
+    EXPECT_EQ(filter.consume("hello ", "hello "), "hello ");
+    EXPECT_EQ(filter.consume("<|tool_call_start|>", "hello <|tool_call_start|>"), "");
+    EXPECT_TRUE(filter.suppressing());
+    EXPECT_EQ(filter.consume("hidden", "hello <|tool_call_start|>hidden"), "");
 }
 
 } // namespace
