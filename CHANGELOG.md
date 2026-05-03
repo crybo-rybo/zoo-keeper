@@ -7,6 +7,8 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-05-03
+
 ### Changed
 
 - Replaced the `extern/llama.cpp` git submodule with CMake `FetchContent`. The
@@ -26,11 +28,20 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   same prefix llama.cpp expects.
 - Hub HuggingFace downloads now use llama.cpp's Hugging Face-style cache and
   `common_download_model()` for repo, repo-file, and raw URL downloads.
+- Doxygen output is now focused on generated API reference; the markdown guide
+  set remains source documentation under `docs/`.
 
 ### Fixed
 
 - Removed Hub's manual HEAD size probing and duplicate Authorization header path;
   bearer tokens now flow through `common_download_opts::bearer_token`.
+- Stabilized CI build coverage after the FetchContent migration, including
+  coverage filtering, clang diagnostics, and the release build matrix.
+
+### Tests
+
+- Integration coverage now asserts tool trace capture for live tool-calling
+  prompts.
 
 ### Compatibility
 
@@ -240,6 +251,8 @@ return typed handles instead of immediate results.
 - C++23 required
 - Windows is not supported
 
+[Unreleased]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.0.3...v1.1.0

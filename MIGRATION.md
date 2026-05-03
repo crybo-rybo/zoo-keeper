@@ -2,7 +2,9 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
-## Unreleased: llama.cpp moved to FetchContent
+## v1.1.2 → v1.1.3
+
+### llama.cpp moved to FetchContent
 
 Zoo-Keeper no longer vendors llama.cpp as a git submodule at `extern/llama.cpp`.
 CMake's `FetchContent` now downloads llama.cpp at configure time, pinned by
@@ -25,9 +27,7 @@ CMake's `FetchContent` now downloads llama.cpp at configure time, pinned by
   default whenever no parent-provided `llama`/`llama-common` targets exist.
 - `scripts/bootstrap.sh` has been removed; it only initialized the submodule.
 
-## Unreleased: llama.cpp b8992
-
-### CMake: `llama-common`
+### llama.cpp b8992 and `llama-common`
 
 Zoo-Keeper now targets llama.cpp release `b8992`, where the upstream `common`
 target/archive is named `llama-common`/`libllama-common.a`, with
@@ -289,9 +289,12 @@ Source files (`src/`) and CMake packaging internals are not part of the compatib
 
 C++23 is required. This has not changed from 0.2.x.
 
-### llama.cpp Submodule
+### llama.cpp Dependency at 1.0.0
 
-The `extern/llama.cpp` submodule is now pinned to a specific commit (`d1b4757dedbb60a811c8d7012249a96b1b702606`, tagged `gguf-v0.17.1-2054-gd1b4757de`) for reproducible builds. Consumers embedding Zoo-Keeper via `add_subdirectory` or `FetchContent` will get this pinned version automatically.
+At the 1.0.0 release, `extern/llama.cpp` was pinned to a specific commit
+(`d1b4757dedbb60a811c8d7012249a96b1b702606`, tagged
+`gguf-v0.17.1-2054-gd1b4757de`) for reproducible builds. Current releases use
+CMake `FetchContent` instead; see the v1.1.2 → v1.1.3 notes above.
 
 ### What Has Not Changed
 
