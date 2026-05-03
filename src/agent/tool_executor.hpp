@@ -55,8 +55,8 @@ class ToolExecutor {
      * Returns a future that resolves to the handler's return value. If called
      * after shutdown, the future resolves immediately with AgentNotRunning.
      */
-    [[nodiscard]] std::future<Expected<nlohmann::json>>
-    submit(tools::ToolHandler handler, nlohmann::json args) {
+    [[nodiscard]] std::future<Expected<nlohmann::json>> submit(tools::ToolHandler handler,
+                                                               nlohmann::json args) {
         auto promise = std::make_shared<std::promise<Expected<nlohmann::json>>>();
         auto future = promise->get_future();
         {
