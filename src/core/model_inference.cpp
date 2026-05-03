@@ -54,18 +54,18 @@ struct InferencePhase {
                     Error{ErrorCode::ContextWindowExceeded, "Prompt tokens exceed context size"});
             }
 
-            llama_batch batch = llama_batch_init(chunk.count, 0, 1);
+            LlamaBatchHandle batch(chunk.count, 0, 1);
+            auto& raw_batch = batch.get();
             for (int i = 0; i < chunk.count; ++i) {
-                batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
-                batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
-                batch.n_seq_id[i] = 1;
-                batch.seq_id[i][0] = 0;
-                batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
+                raw_batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
+                raw_batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
+                raw_batch.n_seq_id[i] = 1;
+                raw_batch.seq_id[i][0] = 0;
+                raw_batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
             }
-            batch.n_tokens = chunk.count;
+            raw_batch.n_tokens = chunk.count;
 
-            int rc = llama_decode(phase_ctx.ctx, batch);
-            llama_batch_free(batch);
+            int rc = llama_decode(phase_ctx.ctx, raw_batch);
             if (rc != 0) {
                 return std::unexpected(
                     Error{ErrorCode::InferenceFailed, "Failed to decode prefill batch"});
@@ -155,12 +155,11 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     }
 
     int current_pos = *current_pos_result;
-    llama_batch ar_batch = llama_batch_init(1, 0, 1);
+    LlamaBatchHandle ar_batch(1, 0, 1);
 
     while (true) {
         auto decoded = phase.decode();
         if (!decoded) {
-            llama_batch_free(ar_batch);
             return std::unexpected(decoded.error());
         }
         if (decoded->end_of_generation) {
@@ -183,7 +182,6 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             if (!visible_chunk.empty()) {
                 auto action = invoke_token_callback(on_token, visible_chunk);
                 if (!action) {
-                    llama_batch_free(ar_batch);
                     return std::unexpected(action.error());
                 }
                 if (*action == TokenAction::Stop) {
@@ -197,13 +195,10 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             break;
         }
 
-        if (auto result = phase.finalize(ar_batch, decoded->token, current_pos); !result) {
-            llama_batch_free(ar_batch);
+        if (auto result = phase.finalize(ar_batch.get(), decoded->token, current_pos); !result) {
             return std::unexpected(result.error());
         }
     }
-
-    llama_batch_free(ar_batch);
 
     if (on_token && !stream_filter.suppressing() && !stopped_by_callback) {
         std::string trailing = stream_filter.finalize();

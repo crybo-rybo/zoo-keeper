@@ -6,6 +6,8 @@
 #pragma once
 
 #include <algorithm>
+#include <llama.h>
+#include <utility>
 #include <vector>
 
 namespace zoo::core {
@@ -47,5 +49,48 @@ struct BatchChunk {
     }
     return chunks;
 }
+
+class LlamaBatchHandle {
+  public:
+    LlamaBatchHandle(int n_tokens, int embd, int n_seq_max)
+        : batch_(llama_batch_init(n_tokens, embd, n_seq_max)), owns_(true) {}
+
+    LlamaBatchHandle(const LlamaBatchHandle&) = delete;
+    LlamaBatchHandle& operator=(const LlamaBatchHandle&) = delete;
+
+    LlamaBatchHandle(LlamaBatchHandle&& other) noexcept
+        : batch_(std::exchange(other.batch_, llama_batch{})),
+          owns_(std::exchange(other.owns_, false)) {}
+
+    LlamaBatchHandle& operator=(LlamaBatchHandle&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+        reset();
+        batch_ = std::exchange(other.batch_, llama_batch{});
+        owns_ = std::exchange(other.owns_, false);
+        return *this;
+    }
+
+    ~LlamaBatchHandle() {
+        reset();
+    }
+
+    [[nodiscard]] llama_batch& get() noexcept {
+        return batch_;
+    }
+
+  private:
+    void reset() noexcept {
+        if (owns_) {
+            llama_batch_free(batch_);
+            owns_ = false;
+            batch_ = llama_batch{};
+        }
+    }
+
+    llama_batch batch_{};
+    bool owns_ = false;
+};
 
 } // namespace zoo::core
