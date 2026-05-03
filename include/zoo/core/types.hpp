@@ -410,9 +410,8 @@ enum class ErrorCode {
         600, ///< A supplied output schema is malformed or uses unsupported constructs.
     ExtractionFailed = 601, ///< Structured extraction from model output failed.
 
-    // Hub layer errors (700-799). The hub layer mirrors these as `HubErrorCode`
-    // for namespaced internal use; `to_error_code(HubErrorCode)` performs the
-    // explicit one-to-one mapping when surfacing errors to callers.
+    // Hub layer errors (700-799). Only reachable when the hub layer is enabled
+    // via ZOO_BUILD_HUB=ON; always defined so callers can switch on them.
     GgufReadFailed = 700,         ///< Could not open or parse a GGUF file for inspection.
     GgufMetadataNotFound = 701,   ///< An expected metadata key was missing from the GGUF file.
     ModelNotFound = 702,          ///< No model matched the given name, alias, or path.
