@@ -78,7 +78,7 @@ auto response = handle.await_result().value();
 |-----------|:---:|:---:|
 | Model loading and inference | Manual C API | `Model::load()` with validated config |
 | Async inference with streaming | Build your own | `Agent::chat()` returns `RequestHandle<T>` |
-| Request cancellation | Implement yourself | `agent->cancel(handle.id())` |
+| Request cancellation | Implement yourself | `handle.cancel()` or `agent->cancel(handle.id())` |
 | Chat history with KV cache sync | Manual bookkeeping | Built into `Model`, auto-trimmed |
 | Tool calling (llama.cpp PEG formats) | Parse text yourself | Template-driven detection + execution loop |
 | Type-safe tool registration | N/A | `register_tool("name", desc, params, callable)` |
@@ -163,7 +163,10 @@ int main() {
     model.n_gpu_layers = -1; // Offload all layers to GPU
 
     auto agent = zoo::Agent::create(model).value();
-    agent->set_system_prompt("You are a concise assistant.");
+    if (auto set_prompt = agent->try_set_system_prompt("You are a concise assistant."); !set_prompt) {
+        std::cerr << set_prompt.error().to_string() << '\n';
+        return 1;
+    }
 
     // Register a native C++ function as a tool
     agent->register_tool("add", "Add two integers", {"a", "b"},
@@ -175,7 +178,8 @@ int main() {
         return zoo::TokenAction::Continue;
     };
 
-    auto handle = agent->chat("What is 42 + 58?", {}, on_token);
+    auto handle =
+        agent->chat("What is 42 + 58?", zoo::GenerationOverride::inherit_defaults(), on_token);
     auto response = handle.await_result();
 
     if (!response) {

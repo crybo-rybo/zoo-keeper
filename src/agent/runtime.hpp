@@ -39,29 +39,29 @@ class AgentRuntime {
     AgentRuntime& operator=(AgentRuntime&&) = delete;
 
     RequestHandle<TextResponse> chat(std::string_view user_message,
-                                     const GenerationOptions& options = GenerationOptions{},
-                                     AsyncTextCallback callback = {});
-    RequestHandle<TextResponse> chat(MessageView message,
-                                     const GenerationOptions& options = GenerationOptions{},
-                                     AsyncTextCallback callback = {});
+                                     GenerationOverride generation = {},
+                                     AsyncTokenCallback callback = {});
+    RequestHandle<TextResponse> chat(MessageView message, GenerationOverride generation = {},
+                                     AsyncTokenCallback callback = {});
     RequestHandle<TextResponse> complete(ConversationView messages,
-                                         const GenerationOptions& options = GenerationOptions{},
-                                         AsyncTextCallback callback = {});
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, std::string_view user_message,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, MessageView message,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, ConversationView messages,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTextCallback callback = {});
+                                         GenerationOverride generation = {},
+                                         AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              std::string_view user_message,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              MessageView message,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              ConversationView messages,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
 
     void cancel(RequestId id);
     void set_system_prompt(std::string_view prompt);
+    Expected<void> try_set_system_prompt(std::string_view prompt);
     Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
     Expected<void> add_system_message(std::string_view message);
     Expected<void> add_system_message(std::string_view message, std::chrono::nanoseconds timeout);
@@ -69,8 +69,10 @@ class AgentRuntime {
     bool is_running() const noexcept;
 
     HistorySnapshot get_history() const;
+    Expected<HistorySnapshot> try_get_history() const;
     Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
     void clear_history();
+    Expected<void> try_clear_history();
     Expected<void> clear_history(std::chrono::nanoseconds timeout);
 
     Expected<void> register_tool(tools::ToolDefinition definition,
@@ -111,7 +113,7 @@ class AgentRuntime {
     Expected<void> register_tools_impl(std::vector<tools::ToolDefinition> definitions,
                                        std::optional<std::chrono::nanoseconds> timeout);
 
-    GenerationOptions resolve_generation_options(const GenerationOptions& overrides) const;
+    GenerationOptions resolve_generation_options(GenerationOverride generation) const;
 
     ModelConfig model_config_;
     AgentConfig agent_config_;

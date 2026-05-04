@@ -67,12 +67,13 @@ class FakeBackend final : public AgentBackend {
         return {};
     }
 
-    Expected<GenerationResult> generate_from_history(const GenerationOptions&,
+    Expected<GenerationResult> generate_from_history(const GenerationOptions& options,
                                                      TokenCallback on_token,
                                                      CancellationCallback should_cancel) override {
         GenerationAction action;
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            last_options_ = options;
             if (generations_.empty()) {
                 return std::unexpected(
                     Error{ErrorCode::InferenceFailed, "No scripted generation available"});
@@ -81,6 +82,11 @@ class FakeBackend final : public AgentBackend {
             generations_.pop_front();
         }
         return action(on_token, should_cancel);
+    }
+
+    GenerationOptions last_generation_options() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return last_options_;
     }
 
     void finalize_response() override {}
@@ -179,6 +185,7 @@ class FakeBackend final : public AgentBackend {
     mutable std::mutex mutex_;
     std::deque<GenerationAction> generations_;
     std::vector<Message> history_;
+    GenerationOptions last_options_;
     bool tool_calling_supported_ = true;
 };
 
@@ -310,6 +317,37 @@ TEST(AgentRuntimeTest, CancelDuringGenerationPropagatesRequestCancelled) {
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 }
 
+TEST(AgentRuntimeTest, RequestHandleCancelCancelsRunningRequest) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+
+    backend_ptr->push_generation([entered](TokenCallback,
+                                           const CancellationCallback& should_cancel) {
+        entered->set_value();
+        for (int attempt = 0; attempt < 100 && !should_cancel(); ++attempt) {
+            std::this_thread::sleep_for(5ms);
+        }
+        if (should_cancel()) {
+            return Expected<GenerationResult>(
+                std::unexpected(Error{ErrorCode::RequestCancelled, "cancelled by handle"}));
+        }
+        return Expected<GenerationResult>(GenerationResult{"unexpected reply", 0, false, "", {}});
+    });
+
+    auto handle = runtime.chat("cancel me");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+    handle.cancel();
+
+    auto result = handle.await_result(1s);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+}
+
 TEST(AgentRuntimeTest, AwaitResultTimeoutDoesNotConsumeHandle) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -401,6 +439,88 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
     EXPECT_EQ(streamed, "Once upon a time");
     EXPECT_EQ(result->usage.prompt_tokens, 7);
     EXPECT_EQ(result->usage.completion_tokens, 3);
+}
+
+TEST(AgentRuntimeTest, ChatStreamingTokenCallbackCanStopGeneration) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("enough"), TokenAction::Stop);
+        }
+        return Expected<GenerationResult>(GenerationResult{"enough", 4, false, "", {}});
+    });
+
+    std::string streamed;
+    auto handle =
+        runtime.chat("Tell me something short", GenerationOptions{}, [&](std::string_view token) {
+            streamed.append(token.data(), token.size());
+            return TokenAction::Stop;
+        });
+
+    auto result = handle.await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "enough");
+    EXPECT_EQ(streamed, "enough");
+    EXPECT_EQ(result->usage.completion_tokens, 1);
+}
+
+TEST(AgentRuntimeTest, GenerationOverrideInheritsConfiguredDefaults) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    GenerationOptions defaults;
+    defaults.max_tokens = 17;
+    AgentRuntime runtime(make_model_config(), make_agent_config(), defaults, std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"ok", 0, false, "", {}});
+    });
+
+    auto result =
+        runtime.chat("inherit", zoo::GenerationOverride::inherit_defaults()).await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(backend_ptr->last_generation_options().max_tokens, 17);
+}
+
+TEST(AgentRuntimeTest, GenerationOverrideUsesExplicitNonDefaultOptions) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    GenerationOptions defaults;
+    defaults.max_tokens = 17;
+    AgentRuntime runtime(make_model_config(), make_agent_config(), defaults, std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"ok", 0, false, "", {}});
+    });
+
+    GenerationOptions explicit_options;
+    explicit_options.max_tokens = 3;
+    auto result =
+        runtime.chat("explicit", zoo::GenerationOverride::explicit_options(explicit_options))
+            .await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(backend_ptr->last_generation_options().max_tokens, 3);
+}
+
+TEST(AgentRuntimeTest, GenerationOverrideCanRequestBuiltInDefaults) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    GenerationOptions defaults;
+    defaults.max_tokens = 17;
+    AgentRuntime runtime(make_model_config(), make_agent_config(), defaults, std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"ok", 0, false, "", {}});
+    });
+
+    auto result =
+        runtime.chat("builtin", zoo::GenerationOverride::explicit_options(GenerationOptions{}))
+            .await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(backend_ptr->last_generation_options().max_tokens, -1);
 }
 
 TEST(AgentRuntimeTest, ChatStreamingCallbackFailureFailsRequest) {
@@ -529,6 +649,25 @@ TEST(AgentRuntimeTest, SetSystemPromptUpdatesHistoryThroughCommandLane) {
     ASSERT_EQ(history.size(), 1u);
     EXPECT_EQ(history[0].role, Role::System);
     EXPECT_EQ(history[0].content, "Be concise.");
+}
+
+TEST(AgentRuntimeTest, TryCommandMethodsReportStoppedAgent) {
+    auto backend = std::make_unique<FakeBackend>();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+    runtime.stop();
+
+    auto set_result = runtime.try_set_system_prompt("ignored");
+    ASSERT_FALSE(set_result.has_value());
+    EXPECT_EQ(set_result.error().code, ErrorCode::AgentNotRunning);
+
+    auto history_result = runtime.try_get_history();
+    ASSERT_FALSE(history_result.has_value());
+    EXPECT_EQ(history_result.error().code, ErrorCode::AgentNotRunning);
+
+    auto clear_result = runtime.try_clear_history();
+    ASSERT_FALSE(clear_result.has_value());
+    EXPECT_EQ(clear_result.error().code, ErrorCode::AgentNotRunning);
 }
 
 TEST(AgentRuntimeTest, SetSystemPromptTimeoutReturnsRequestTimeoutWhenCommandLaneIsBusy) {
