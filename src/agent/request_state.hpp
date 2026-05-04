@@ -26,14 +26,15 @@ template <typename Result> class RequestStateBase {
     [[nodiscard]] virtual Expected<Result> await() = 0;
     [[nodiscard]] virtual Expected<Result> await_for(std::chrono::nanoseconds timeout,
                                                      bool* completed) = 0;
+    virtual void cancel() noexcept = 0;
     virtual void release() = 0;
 };
 
 template <typename Result> class SlotRequestState final : public RequestStateBase<Result> {
   public:
-    SlotRequestState(std::shared_ptr<RequestSlots> slots, uint32_t slot,
+    SlotRequestState(std::shared_ptr<RequestSlots> slots, RequestId id, uint32_t slot,
                      uint32_t generation) noexcept
-        : slots_(std::move(slots)), slot_(slot), generation_(generation) {}
+        : slots_(std::move(slots)), id_(id), slot_(slot), generation_(generation) {}
 
     [[nodiscard]] bool ready() const override {
         return slots_->ready(slot_, generation_);
@@ -52,8 +53,13 @@ template <typename Result> class SlotRequestState final : public RequestStateBas
         slots_->release(slot_, generation_);
     }
 
+    void cancel() noexcept override {
+        slots_->cancel(id_);
+    }
+
   private:
     std::shared_ptr<RequestSlots> slots_;
+    RequestId id_ = 0;
     uint32_t slot_;
     uint32_t generation_;
 };
@@ -86,6 +92,8 @@ template <typename Result> class ImmediateRequestState final : public RequestSta
     void release() override {
         result_.reset();
     }
+
+    void cancel() noexcept override {}
 
   private:
     std::optional<Expected<Result>> result_;

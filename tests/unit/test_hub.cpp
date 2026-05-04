@@ -5,6 +5,7 @@
 
 #include "hub/download_validation.hpp"
 #include "hub/hf_cache_paths.hpp"
+#include "hub/store_internals.hpp"
 #include "zoo/hub/huggingface.hpp"
 #include "zoo/hub/inspector.hpp"
 #include "zoo/hub/store.hpp"
@@ -19,6 +20,8 @@
 #include <fstream>
 #include <string>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -60,6 +63,18 @@ void write_catalog(const std::filesystem::path& store_dir, const nlohmann::json&
     std::ofstream out(store_dir / "catalog.json");
     ASSERT_TRUE(out.is_open());
     out << json.dump(2) << '\n';
+}
+
+zoo::hub::ModelEntry make_entry(std::string id, std::string name, std::string file_path,
+                                std::vector<std::string> aliases = {}) {
+    zoo::hub::ModelEntry entry;
+    entry.id = std::move(id);
+    entry.file_path = std::move(file_path);
+    entry.info.file_path = entry.file_path;
+    entry.info.name = std::move(name);
+    entry.aliases = std::move(aliases);
+    entry.added_at = "2026-03-31T12:00:00Z";
+    return entry;
 }
 
 void sentinel_log_callback(ggml_log_level, const char*, void*) {}
@@ -406,6 +421,91 @@ TEST(HubDownloadValidationTest, RejectsMissingFile) {
 }
 
 // ---- ModelStore catalog persistence / validation ----
+
+TEST(ModelStoreCatalogTest, CatalogRepositorySaveReplacesCatalogWithoutTempFiles) {
+    TempDir temp_dir;
+    zoo::hub::ModelStoreConfig config;
+    config.store_directory = temp_dir.path().string();
+    zoo::hub::detail::CatalogRepository repository(config);
+
+    ASSERT_TRUE(repository.save({make_entry("old", "old-model", "/tmp/old.gguf")}).has_value());
+    ASSERT_TRUE(repository.save({make_entry("new", "new-model", "/tmp/new.gguf")}).has_value());
+
+    auto loaded = repository.load();
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().to_string();
+    ASSERT_EQ(loaded->size(), 1u);
+    EXPECT_EQ((*loaded)[0].id, "new");
+
+    for (const auto& item : std::filesystem::directory_iterator(temp_dir.path())) {
+        EXPECT_EQ(item.path().filename().string().find(".tmp."), std::string::npos);
+    }
+}
+
+TEST(ModelStoreCatalogTest, ResolverPrecedenceUsesAliasThenExactNameThenSubstring) {
+    std::vector<zoo::hub::ModelEntry> entries;
+    entries.push_back(make_entry("name-match", "shared", "/tmp/name.gguf"));
+    entries.push_back(make_entry("alias-match", "other", "/tmp/alias.gguf", {"shared"}));
+
+    auto alias_idx = zoo::hub::detail::ModelResolver::find_index(entries, "shared");
+    ASSERT_TRUE(alias_idx.has_value()) << alias_idx.error().to_string();
+    EXPECT_EQ(*alias_idx, 1u);
+
+    entries.clear();
+    entries.push_back(make_entry("substring-match", "qwen-large", "/tmp/qwen-large.gguf"));
+    entries.push_back(make_entry("exact-match", "qwen", "/tmp/qwen.gguf"));
+
+    auto exact_idx = zoo::hub::detail::ModelResolver::find_index(entries, "qwen");
+    ASSERT_TRUE(exact_idx.has_value()) << exact_idx.error().to_string();
+    EXPECT_EQ(*exact_idx, 1u);
+}
+
+TEST(ModelStoreCatalogTest, OpenRejectsDuplicateAliasesOnSameEntry) {
+    TempDir temp_dir;
+
+    write_catalog(
+        temp_dir.path(),
+        nlohmann::json{
+            {"version", 1},
+            {"models", nlohmann::json::array({nlohmann::json{
+                           {"id", "model-1"},
+                           {"file_path", "/tmp/model.gguf"},
+                           {"info", {{"file_path", "/tmp/model.gguf"}, {"name", "fixture-model"}}},
+                           {"aliases", nlohmann::json::array({"dup", "dup"})},
+                           {"added_at", "2026-03-31T12:00:00Z"},
+                       }})},
+        });
+
+    zoo::hub::ModelStoreConfig config;
+    config.store_directory = temp_dir.path().string();
+
+    auto store = zoo::hub::ModelStore::open(config);
+    ASSERT_FALSE(store.has_value());
+    EXPECT_EQ(store.error().code, zoo::ErrorCode::StoreCorrupted);
+}
+
+TEST(ModelStoreCatalogTest, HubPullServicePersistsSourceAnnotation) {
+    TempDir temp_dir;
+    zoo::hub::ModelStoreConfig config;
+    config.store_directory = temp_dir.path().string();
+    zoo::hub::detail::CatalogRepository repository(config);
+
+    std::vector<zoo::hub::ModelEntry> entries = {
+        make_entry("model-1", "fixture-model", "/tmp/model.gguf")};
+    ASSERT_TRUE(repository.save(entries).has_value());
+
+    auto annotated = zoo::hub::detail::HubPullService::persist_source_annotation(
+        entries, repository, "model-1", "https://huggingface.co/owner/repo/resolve/main/model.gguf",
+        "owner/repo");
+    ASSERT_TRUE(annotated.has_value()) << annotated.error().to_string();
+    EXPECT_EQ(annotated->source_url, "https://huggingface.co/owner/repo/resolve/main/model.gguf");
+    EXPECT_EQ(annotated->huggingface_repo, "owner/repo");
+
+    auto loaded = repository.load();
+    ASSERT_TRUE(loaded.has_value()) << loaded.error().to_string();
+    ASSERT_EQ(loaded->size(), 1u);
+    EXPECT_EQ((*loaded)[0].source_url, "https://huggingface.co/owner/repo/resolve/main/model.gguf");
+    EXPECT_EQ((*loaded)[0].huggingface_repo, "owner/repo");
+}
 
 TEST(ModelStoreCatalogTest, OpenPreservesMetadataAndSourceFields) {
     TempDir temp_dir;

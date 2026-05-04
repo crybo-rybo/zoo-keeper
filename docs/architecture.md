@@ -29,8 +29,8 @@ requests and stateless request-scoped `complete(...)` requests. `Agent` is the
 primary high-level runtime surface for most consumers.
 
 `RequestHandle<Result>` is the public async return type. It carries the request
-ID and exposes `await_result()` for retrieving the completed response or
-error.
+ID and exposes `cancel()`, `ready()`, and `await_result()` for cancellation,
+polling, and retrieving the completed response or error.
 
 ## Public Threading Guarantees
 
@@ -41,6 +41,9 @@ error.
 - Model state is owned by the inference thread while the agent is running.
 - Streaming token callbacks execute on the CallbackDispatcher thread. Tool
   handlers execute on the inference thread.
+- Direct `ToolRegistry` use is single-threaded unless callers externally
+  synchronize overlapping operations. `Agent` serializes registry mutation on
+  its inference thread.
 
 These guarantees are part of the public behavioral contract. Private runtime
 mechanisms that implement them are documented separately for maintainers.

@@ -74,18 +74,25 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
     state->preserved_tokens = std::move(params.preserved_tokens);
     state->additional_stops = std::move(params.additional_stops);
 
-    impl_->session_.tool_grammar_str = state->grammar;
     impl_->session_.tool_state = std::move(state);
+    impl_->session_.sampler_policy =
+        Impl::SamplerPolicy::native_tool_call(impl_->session_.tool_state->grammar);
 
-    if (!impl_->session_.tool_grammar_str.empty()) {
-        if (!rebuild_sampler_with_tool_grammar()) {
+    if (!impl_->session_.sampler_policy.grammar.empty()) {
+        if (!rebuild_sampler_with_tool_grammar(*impl_)) {
             impl_->session_.tool_state.reset();
-            impl_->session_.tool_grammar_str.clear();
+            impl_->session_.sampler_policy = Impl::SamplerPolicy::plain();
+            return false;
+        }
+    } else {
+        impl_->session_.sampler = create_sampler_chain(*impl_);
+        if (!impl_->session_.sampler) {
+            impl_->session_.tool_state.reset();
+            impl_->session_.sampler_policy = Impl::SamplerPolicy::plain();
             return false;
         }
     }
 
-    impl_->session_.grammar_mode = Impl::GrammarMode::NativeToolCall;
     ZOO_LOG("info", "native tool calling enabled: format '%s' (%zu tools registered)",
             common_chat_format_name(impl_->session_.tool_state->parser_params.format),
             impl_->session_.tool_state->tools.size());
@@ -131,14 +138,13 @@ Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
 // ---------------------------------------------------------------------------
 
 void Model::clear_tool_grammar() noexcept {
-    if (impl_->session_.grammar_mode == Impl::GrammarMode::None) {
+    if (impl_->session_.sampler_policy.mode == Impl::SamplerPolicy::Mode::Plain) {
         return;
     }
 
-    impl_->session_.tool_grammar_str.clear();
     impl_->session_.tool_state.reset();
-    impl_->session_.grammar_mode = Impl::GrammarMode::None;
-    impl_->session_.sampler = create_sampler_chain();
+    impl_->session_.sampler_policy = Impl::SamplerPolicy::plain();
+    impl_->session_.sampler = create_sampler_chain(*impl_);
 }
 
 // ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@ struct RequestPayload {
     std::vector<Message> messages;
     HistoryMode history_mode = HistoryMode::Append;
     GenerationOptions options;
-    AsyncTextCallback streaming_callback;
+    AsyncTokenCallback streaming_callback;
     std::optional<nlohmann::json> extraction_schema;
     ResultKind result_kind = ResultKind::Text;
 };

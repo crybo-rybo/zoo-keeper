@@ -41,7 +41,7 @@ struct ActiveRequest {
     HistoryMode history_mode = HistoryMode::Append;
     const std::vector<Message>* messages = nullptr;
     const GenerationOptions* options = nullptr;
-    AsyncTextCallback* streaming_callback = nullptr;
+    AsyncTokenCallback* streaming_callback = nullptr;
     const std::optional<nlohmann::json>* extraction_schema = nullptr;
     const std::atomic<bool>* cancelled = nullptr;
     ResultKind result_kind = ResultKind::Text;

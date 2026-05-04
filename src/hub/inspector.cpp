@@ -17,6 +17,7 @@
 #include <gguf.h>
 #include <llama.h>
 #include <log.h>
+#include <memory>
 
 namespace zoo::hub {
 
@@ -37,6 +38,35 @@ class ScopedLlamaLogSilencer {
     ggml_log_callback original_callback_ = nullptr;
     void* original_user_data_ = nullptr;
 };
+
+struct GgufContextDeleter {
+    void operator()(gguf_context* ctx) const noexcept {
+        if (ctx != nullptr) {
+            gguf_free(ctx);
+        }
+    }
+};
+
+struct VocabOnlyModelDeleter {
+    void operator()(llama_model* model) const noexcept {
+        if (model != nullptr) {
+            llama_model_free(model);
+        }
+    }
+};
+
+using GgufContextHandle = std::unique_ptr<gguf_context, GgufContextDeleter>;
+using VocabOnlyModelHandle = std::unique_ptr<llama_model, VocabOnlyModelDeleter>;
+
+GgufContextHandle make_gguf_context(const char* path, gguf_init_params params) {
+    return GgufContextHandle(gguf_init_from_file(path, params));
+}
+
+VocabOnlyModelHandle load_vocab_only_model(const char* path) {
+    auto params = llama_model_default_params();
+    params.vocab_only = true;
+    return VocabOnlyModelHandle(llama_model_load_from_file(path, params));
+}
 
 std::string read_gguf_string(const gguf_context* ctx, const char* key) {
     const int64_t id = gguf_find_key(ctx, key);
@@ -134,7 +164,7 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     gguf_params.no_alloc = true;
     gguf_params.ctx = nullptr;
 
-    auto* gguf_ctx = gguf_init_from_file(file_path.c_str(), gguf_params);
+    auto gguf_ctx = make_gguf_context(file_path.c_str(), gguf_params);
     if (!gguf_ctx) {
         return std::unexpected(
             Error{ErrorCode::GgufReadFailed, "Failed to parse GGUF file: " + file_path});
@@ -142,25 +172,26 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
 
     ModelInfo info;
     info.file_path = std::filesystem::absolute(file_path).string();
-    info.name = read_gguf_string(gguf_ctx, "general.name");
-    info.architecture = read_gguf_string(gguf_ctx, "general.architecture");
+    info.name = read_gguf_string(gguf_ctx.get(), "general.name");
+    info.architecture = read_gguf_string(gguf_ctx.get(), "general.architecture");
 
     // Try architecture-specific context length keys, then generic.
     const std::string arch = info.architecture;
     if (!arch.empty()) {
-        info.context_length = read_gguf_u32_as_i32(gguf_ctx, (arch + ".context_length").c_str());
+        info.context_length =
+            read_gguf_u32_as_i32(gguf_ctx.get(), (arch + ".context_length").c_str());
         if (info.context_length == 0) {
-            info.context_length = read_gguf_u32_as_i32(gguf_ctx, (arch + ".block_count").c_str());
+            info.context_length =
+                read_gguf_u32_as_i32(gguf_ctx.get(), (arch + ".block_count").c_str());
             // block_count isn't context_length; reset if we got it wrong.
             info.context_length = 0;
         }
     }
     if (info.context_length == 0) {
-        info.context_length = read_gguf_u32_as_i32(gguf_ctx, "llm.context_length");
+        info.context_length = read_gguf_u32_as_i32(gguf_ctx.get(), "llm.context_length");
     }
 
-    collect_all_metadata(gguf_ctx, info.metadata);
-    gguf_free(gguf_ctx);
+    collect_all_metadata(gguf_ctx.get(), info.metadata);
 
     // Phase 2: Vocab-only model load for derived statistics.
     core::ensure_backend_initialized();
@@ -168,26 +199,21 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     // Suppress llama.cpp log output during inspection.
     ScopedLlamaLogSilencer silenced_logs;
 
-    auto model_params = llama_model_default_params();
-    model_params.vocab_only = true;
-
-    auto* llama_model = llama_model_load_from_file(file_path.c_str(), model_params);
+    auto llama_model = load_vocab_only_model(file_path.c_str());
     if (llama_model) {
-        info.parameter_count = llama_model_n_params(llama_model);
-        info.file_size_bytes = llama_model_size(llama_model);
-        info.embedding_dim = static_cast<int32_t>(llama_model_n_embd(llama_model));
-        info.layer_count = static_cast<int32_t>(llama_model_n_layer(llama_model));
+        info.parameter_count = llama_model_n_params(llama_model.get());
+        info.file_size_bytes = llama_model_size(llama_model.get());
+        info.embedding_dim = static_cast<int32_t>(llama_model_n_embd(llama_model.get()));
+        info.layer_count = static_cast<int32_t>(llama_model_n_layer(llama_model.get()));
 
         // Get the training context length if we couldn't get it from raw GGUF.
         if (info.context_length == 0) {
-            info.context_length = static_cast<int32_t>(llama_model_n_ctx_train(llama_model));
+            info.context_length = static_cast<int32_t>(llama_model_n_ctx_train(llama_model.get()));
         }
 
         char desc_buf[256] = {};
-        llama_model_desc(llama_model, desc_buf, sizeof(desc_buf));
+        llama_model_desc(llama_model.get(), desc_buf, sizeof(desc_buf));
         info.description = desc_buf;
-
-        llama_model_free(llama_model);
     }
 
     // Extract quantization from description (typically "7B Q4_K_M" -> "Q4_K_M").

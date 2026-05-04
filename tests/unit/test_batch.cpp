@@ -6,8 +6,11 @@
 #include "core/batch.hpp"
 #include <gtest/gtest.h>
 
+#include <utility>
+
 using zoo::core::BatchChunk;
 using zoo::core::compute_prefill_chunks;
+using zoo::core::LlamaBatchHandle;
 
 TEST(ComputePrefillChunksTest, SingleChunkFitsExactly) {
     auto chunks = compute_prefill_chunks(512, 512);
@@ -97,4 +100,27 @@ TEST(ComputePrefillChunksTest, NoChunkExceedsBatchSize) {
     for (const auto& chunk : chunks) {
         EXPECT_LE(chunk.count, 512);
     }
+}
+
+TEST(LlamaBatchHandleTest, MoveConstructionTransfersBatchState) {
+    LlamaBatchHandle batch(2, 0, 1);
+    batch.get().n_tokens = 1;
+    batch.get().token[0] = 42;
+
+    LlamaBatchHandle moved(std::move(batch));
+
+    EXPECT_EQ(moved.get().n_tokens, 1);
+    EXPECT_EQ(moved.get().token[0], 42);
+}
+
+TEST(LlamaBatchHandleTest, MoveAssignmentReleasesPreviousBatchAndTransfersState) {
+    LlamaBatchHandle source(2, 0, 1);
+    source.get().n_tokens = 1;
+    source.get().token[0] = 7;
+
+    LlamaBatchHandle target(1, 0, 1);
+    target = std::move(source);
+
+    EXPECT_EQ(target.get().n_tokens, 1);
+    EXPECT_EQ(target.get().token[0], 7);
 }
