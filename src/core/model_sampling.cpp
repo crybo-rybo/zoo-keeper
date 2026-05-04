@@ -70,6 +70,43 @@ void add_dist_sampler(llama_sampler* chain, const SamplingParams& sampling) {
     }
 }
 
+std::string anchored_full_pattern(std::string pattern) {
+    if (pattern.empty() || pattern.front() != '^') {
+        pattern = "^" + pattern;
+    }
+    if (pattern.empty() || pattern.back() != '$') {
+        pattern += "$";
+    }
+    return pattern;
+}
+
+void append_grammar_trigger(const common_grammar_trigger& trigger,
+                            std::vector<std::string>& trigger_patterns,
+                            std::vector<llama_token>& trigger_tokens) {
+    switch (trigger.type) {
+    case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
+        trigger_patterns.push_back(regex_escape(trigger.value));
+        break;
+    case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
+        trigger_patterns.push_back(trigger.value);
+        break;
+    case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL:
+        trigger_patterns.push_back(anchored_full_pattern(trigger.value));
+        break;
+    case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
+        trigger_tokens.push_back(trigger.token);
+        break;
+    }
+}
+
+void collect_grammar_triggers(const std::vector<common_grammar_trigger>& triggers,
+                              std::vector<std::string>& trigger_patterns,
+                              std::vector<llama_token>& trigger_tokens) {
+    for (const auto& trigger : triggers) {
+        append_grammar_trigger(trigger, trigger_patterns, trigger_tokens);
+    }
+}
+
 } // namespace
 
 bool Model::set_schema_grammar(const std::string& grammar_str) {
@@ -98,31 +135,8 @@ bool rebuild_sampler_with_tool_grammar(Model::Impl& impl) {
     // Convert common_grammar_trigger to the arrays expected by the lazy grammar API.
     std::vector<std::string> trigger_patterns;
     std::vector<llama_token> trigger_tokens;
-
-    for (const auto& trigger : impl.session_.tool_state->grammar_triggers) {
-        switch (trigger.type) {
-        case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-            trigger_patterns.push_back(regex_escape(trigger.value));
-            break;
-        case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
-            trigger_patterns.push_back(trigger.value);
-            break;
-        case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL: {
-            std::string anchored = trigger.value;
-            if (anchored.empty() || anchored.front() != '^') {
-                anchored = "^" + anchored;
-            }
-            if (anchored.empty() || anchored.back() != '$') {
-                anchored = anchored + "$";
-            }
-            trigger_patterns.push_back(std::move(anchored));
-            break;
-        }
-        case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
-            trigger_tokens.push_back(trigger.token);
-            break;
-        }
-    }
+    collect_grammar_triggers(impl.session_.tool_state->grammar_triggers, trigger_patterns,
+                             trigger_tokens);
 
     std::vector<const char*> trigger_patterns_c;
     trigger_patterns_c.reserve(trigger_patterns.size());
