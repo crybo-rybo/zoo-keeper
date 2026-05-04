@@ -115,6 +115,48 @@ Expected<void> validate_enum_values(const std::vector<nlohmann::json>& values, T
     return {};
 }
 
+Expected<std::vector<std::string>>
+collect_required_names(const nlohmann::json& schema, const nlohmann::json& properties,
+                       const std::string& tool_name,
+                       std::unordered_set<std::string>& required_lookup) {
+    std::vector<std::string> required_names;
+    auto required_it = schema.find("required");
+    if (required_it == schema.end()) {
+        return required_names;
+    }
+    if (!required_it->is_array()) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidToolSchema,
+                  "Tool schema for '" + tool_name + "' must use an array for 'required'"});
+    }
+
+    for (const auto& value : *required_it) {
+        if (!value.is_string()) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidToolSchema,
+                      "Tool schema for '" + tool_name + "' must use string entries in 'required'"});
+        }
+
+        const std::string required_name = value.get<std::string>();
+        if (!required_lookup.insert(required_name).second) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidToolSchema,
+                      "Tool schema for '" + tool_name +
+                          "' contains duplicate names in 'required': " + required_name});
+        }
+
+        if (!properties.contains(required_name)) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidToolSchema,
+                      "Tool schema for '" + tool_name +
+                          "' lists a missing property in 'required': " + required_name});
+        }
+
+        required_names.push_back(required_name);
+    }
+    return required_names;
+}
+
 Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
                                                       const std::string& description,
                                                       const nlohmann::json& schema) {
@@ -149,39 +191,10 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
                                          "' must omit 'additionalProperties' or set it to false"});
     }
 
-    std::vector<std::string> required_names;
     std::unordered_set<std::string> required_lookup;
-    if (auto required_it = schema.find("required"); required_it != schema.end()) {
-        if (!required_it->is_array()) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidToolSchema,
-                      "Tool schema for '" + name + "' must use an array for 'required'"});
-        }
-
-        for (const auto& value : *required_it) {
-            if (!value.is_string()) {
-                return std::unexpected(
-                    Error{ErrorCode::InvalidToolSchema,
-                          "Tool schema for '" + name + "' must use string entries in 'required'"});
-            }
-
-            const std::string required_name = value.get<std::string>();
-            if (!required_lookup.insert(required_name).second) {
-                return std::unexpected(
-                    Error{ErrorCode::InvalidToolSchema,
-                          "Tool schema for '" + name +
-                              "' contains duplicate names in 'required': " + required_name});
-            }
-
-            if (!props_it->contains(required_name)) {
-                return std::unexpected(
-                    Error{ErrorCode::InvalidToolSchema,
-                          "Tool schema for '" + name +
-                              "' lists a missing property in 'required': " + required_name});
-            }
-
-            required_names.push_back(required_name);
-        }
+    auto required_names = collect_required_names(schema, *props_it, name, required_lookup);
+    if (!required_names) {
+        return std::unexpected(required_names.error());
     }
 
     std::unordered_map<std::string, ToolParameter> parameters_by_name;
@@ -246,7 +259,7 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
     std::vector<ToolParameter> parameters;
     parameters.reserve(parameters_by_name.size());
 
-    for (const auto& required_name : required_names) {
+    for (const auto& required_name : *required_names) {
         auto node = parameters_by_name.extract(required_name);
         parameters.push_back(std::move(node.mapped()));
     }
