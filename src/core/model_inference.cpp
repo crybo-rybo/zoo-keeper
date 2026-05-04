@@ -293,8 +293,14 @@ Expected<TextResponse> Model::generate(MessageView message, GenerationOverride g
         impl_->session_.messages.push_back(Message::assistant(std::move(generated_text)));
     }
 
-    impl_->session_.estimated_tokens +=
-        estimate_message_tokens(*impl_, impl_->session_.messages.back());
+    if (!impl_->session_.sampler_policy.is_native_tool_call() && all_stops.empty() &&
+        completion_tokens > 0) {
+        impl_->session_.estimated_tokens +=
+            completion_tokens + Model::Impl::kTemplateOverheadPerMessage;
+    } else {
+        impl_->session_.estimated_tokens +=
+            estimate_message_tokens(*impl_, impl_->session_.messages.back());
+    }
     note_history_append(*impl_);
     finalize_response();
 
