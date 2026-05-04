@@ -41,15 +41,15 @@ template <typename Message>
 RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
     Message&& message,
-    const GenerationOptions& options = GenerationOptions{},
-    AsyncTextCallback callback = {});
+    GenerationOverride generation = {},
+    AsyncTokenCallback callback = {});
 
 // Stateless - use an explicit borrowed message sequence
 RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
     ConversationView messages,
-    const GenerationOptions& options = GenerationOptions{},
-    AsyncTextCallback callback = {});
+    GenerationOverride generation = {},
+    AsyncTokenCallback callback = {});
 ```
 
 These entry points return a `RequestHandle<ExtractionResponse>`. The structured
@@ -75,22 +75,25 @@ const std::array<zoo::MessageView, 2> messages = {
     zoo::MessageView{zoo::Role::User, "Bob is a 42-year-old engineer."},
 };
 auto handle =
-    agent->extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)});
+    agent->extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)},
+                   zoo::GenerationOverride::inherit_defaults());
 ```
 
 ## Streaming
 
 Pass an `on_token` callback to receive tokens as they are generated. The
 callback runs on the CallbackDispatcher thread; avoid blocking inside it to
-prevent backing up the dispatcher queue.
+prevent backing up the dispatcher queue. Return `TokenAction::Stop` when the
+callback has received enough output.
 
 ```cpp
 auto handle = agent->extract(
     schema,
     "Carol is 25.",
-    {},
+    zoo::GenerationOverride::inherit_defaults(),
     [](std::string_view token) {
         std::cout << token << std::flush;
+        return zoo::TokenAction::Continue;
     });
 
 auto response = handle.await_result();
@@ -98,13 +101,14 @@ auto response = handle.await_result();
 
 ## Cancellation
 
-`Agent::cancel(handle.id())` cancels an in-progress extraction with the same
-semantics as `chat()` cancellation. A cancelled extraction returns
-`ErrorCode::RequestCancelled`.
+`RequestHandle::cancel()` cancels an in-progress extraction with the same
+semantics as `chat()` cancellation. `Agent::cancel(handle.id())` remains
+available when a caller needs to correlate requests externally. A cancelled
+extraction returns `ErrorCode::RequestCancelled`.
 
 ```cpp
 auto handle = agent->extract(schema, "...");
-agent->cancel(handle.id());
+handle.cancel();
 auto response = handle.await_result();
 ```
 

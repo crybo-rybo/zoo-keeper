@@ -251,11 +251,64 @@ make_tool_definition(const std::string& name, const std::string& description,
 } // namespace detail
 
 /**
+ * @brief Builds a normalized tool definition from a JSON Schema and handler.
+ */
+[[nodiscard]] Expected<ToolDefinition> make_tool_definition(const std::string& name,
+                                                            const std::string& description,
+                                                            const nlohmann::json& schema,
+                                                            ToolHandler handler);
+
+/**
+ * @brief Builds a normalized tool definition from a strongly typed callable.
+ */
+template <typename Func>
+Expected<ToolDefinition>
+make_tool_definition(const std::string& name, const std::string& description,
+                     const std::vector<std::string>& param_names, Func func) {
+    return detail::make_tool_definition(name, description, param_names, std::move(func));
+}
+
+/**
+ * @brief Builds a normalized tool definition from a strongly typed callable.
+ */
+template <typename Func>
+Expected<ToolDefinition>
+make_tool_definition(const std::string& name, const std::string& description,
+                     std::initializer_list<std::string> param_names, Func func) {
+    return make_tool_definition(name, description, std::vector<std::string>(param_names),
+                                std::move(func));
+}
+
+/**
+ * @brief Builds a normalized tool definition from a strongly typed callable.
+ */
+template <typename Func>
+Expected<ToolDefinition> make_tool_definition(const std::string& name,
+                                              const std::string& description,
+                                              std::span<const std::string> param_names, Func func) {
+    return make_tool_definition(name, description,
+                                std::vector<std::string>(param_names.begin(), param_names.end()),
+                                std::move(func));
+}
+
+/**
+ * @brief Builds a normalized tool definition from a JSON Schema and JSON-backed callable.
+ */
+template <typename Handler>
+    requires detail::is_json_handler_like_v<Handler>
+Expected<ToolDefinition> make_tool_definition(const std::string& name,
+                                              const std::string& description,
+                                              const nlohmann::json& schema, Handler handler) {
+    return make_tool_definition(name, description, schema, ToolHandler(std::move(handler)));
+}
+
+/**
  * @brief Registry of tools available to the agent runtime.
  *
  * The registry owns normalized tool metadata, exposes deterministic JSON Schema
  * definitions for prompt construction and grammar generation, and invokes
- * registered handlers. Callers serialize registration before later reads.
+ * registered handlers. It has no internal synchronization; callers must
+ * externally serialize any access that can overlap with mutation.
  */
 class ToolRegistry {
   public:
@@ -275,7 +328,7 @@ class ToolRegistry {
     template <typename Func>
     Expected<void> register_tool(const std::string& name, const std::string& description,
                                  std::span<const std::string> param_names, Func func) {
-        auto definition = detail::make_tool_definition(
+        auto definition = make_tool_definition(
             name, description, std::vector<std::string>(param_names.begin(), param_names.end()),
             std::move(func));
         if (!definition) {
@@ -309,7 +362,7 @@ class ToolRegistry {
     Expected<void> register_tool(ToolDefinition definition);
 
     /**
-     * @brief Registers multiple tool definitions under a single lock acquisition.
+     * @brief Registers multiple tool definitions as one ordered batch.
      *
      * Existing entries with the same name are replaced in place while
      * preserving registration order.
