@@ -136,10 +136,9 @@ TEST_F(ToolRegistryTest, ManualSchemaRejectsRefKeyword) {
 }
 
 TEST_F(ToolRegistryTest, ManualSchemaRejectsArrayType) {
-    json schema = {
-        {"type", "object"},
-        {"properties", {{"items", {{"type", "array"}}}}},
-        {"required", json::array({"items"})}};
+    json schema = {{"type", "object"},
+                   {"properties", {{"items", {{"type", "array"}}}}},
+                   {"required", json::array({"items"})}};
 
     auto result =
         registry.register_tool("array_tool", "Schema with array", schema,

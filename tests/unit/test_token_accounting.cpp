@@ -129,10 +129,8 @@ TEST(TokenAccountingTest, ReplaceHistoryIncludesToolCalls) {
 TEST(TokenAccountingTest, TrimHistoryKeepsSystemPromptAndLatestExchange) {
     auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
     std::vector<zoo::Message> messages = {
-        zoo::Message::system("system"),
-        zoo::Message::user("old question"),
-        zoo::Message::assistant("old answer"),
-        zoo::Message::user("new question"),
+        zoo::Message::system("system"),        zoo::Message::user("old question"),
+        zoo::Message::assistant("old answer"), zoo::Message::user("new question"),
         zoo::Message::assistant("new answer"),
     };
     model->replace_history(zoo::HistorySnapshot{messages});

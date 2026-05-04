@@ -325,9 +325,10 @@ std::string repo_id_with_tag(const HuggingFaceClient::ParsedIdentifier& parsed) 
     return repo;
 }
 
-Expected<PulledModelSource>
-download_explicit_pull_file(HuggingFaceClient& client, const std::string& identifier,
-                            const std::string& repo_id, const std::string& filename) {
+Expected<PulledModelSource> download_explicit_pull_file(HuggingFaceClient& client,
+                                                        const std::string& identifier,
+                                                        const std::string& repo_id,
+                                                        const std::string& filename) {
     auto url = client.resolve_download_url(repo_id, filename);
     if (!url) {
         return std::unexpected(url.error());
@@ -383,8 +384,9 @@ Expected<ModelEntry> HubPullService::pull(HuggingFaceClient& client, const std::
         return std::unexpected(validation.error());
     }
 
-    return ModelImporter::add_local_file(entries, repository, source->local_path, std::move(aliases),
-                                         std::move(source->source_url), parsed->repo_id);
+    return ModelImporter::add_local_file(entries, repository, source->local_path,
+                                         std::move(aliases), std::move(source->source_url),
+                                         parsed->repo_id);
 }
 
 } // namespace detail

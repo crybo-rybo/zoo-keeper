@@ -160,10 +160,8 @@ TEST(MessageTest, MessageViewEqualityIncludesToolMetadata) {
 
     EXPECT_EQ(base,
               zoo::MessageView(zoo::Role::Assistant, "hello", "tool-1", std::span(echo_call)));
-    EXPECT_NE(base,
-              zoo::MessageView(zoo::Role::User, "hello", "tool-1", std::span(echo_call)));
-    EXPECT_NE(base,
-              zoo::MessageView(zoo::Role::Assistant, "bye", "tool-1", std::span(echo_call)));
+    EXPECT_NE(base, zoo::MessageView(zoo::Role::User, "hello", "tool-1", std::span(echo_call)));
+    EXPECT_NE(base, zoo::MessageView(zoo::Role::Assistant, "bye", "tool-1", std::span(echo_call)));
     EXPECT_NE(base,
               zoo::MessageView(zoo::Role::Assistant, "hello", "tool-2", std::span(echo_call)));
     EXPECT_NE(base,

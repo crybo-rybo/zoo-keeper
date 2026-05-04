@@ -224,8 +224,8 @@ Expected<std::string> run_inference(Model::Impl& impl, const std::vector<int>& p
             break;
         }
 
-        auto callback_stop = emit_visible_chunk(on_token, stream_filter, decoded->piece,
-                                                generated_text);
+        auto callback_stop =
+            emit_visible_chunk(on_token, stream_filter, decoded->piece, generated_text);
         if (!callback_stop) {
             return std::unexpected(callback_stop.error());
         }
