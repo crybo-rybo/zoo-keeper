@@ -6,10 +6,11 @@
 #pragma once
 
 #include "log.hpp"
+#include "zoo/core/types.hpp"
 
 #include <condition_variable>
 #include <exception>
-#include <functional>
+#include <future>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -21,11 +22,10 @@ namespace zoo::internal::agent {
 /**
  * @brief Dispatches streaming callbacks on a dedicated thread.
  *
- * The inference thread calls `dispatch()` to enqueue a callback invocation
- * without blocking on the user's callback. The dispatcher thread executes
- * callbacks in FIFO order. `drain()` blocks until queued callbacks have been
- * executed or skipped after a callback failure, providing a synchronization point
- * between generation passes.
+ * The inference thread calls `dispatch()` to enqueue a callback invocation on
+ * the dispatcher thread. `dispatch()` returns the callback's TokenAction after
+ * the dispatcher thread executes it, and `drain()` provides a synchronization
+ * point between generation passes.
  */
 class CallbackDispatcher {
   public:
@@ -51,14 +51,20 @@ class CallbackDispatcher {
      * @brief Enqueues a callback invocation for async execution.
      *
      * The token string is copied into the queue. The callback reference must
-     * remain valid until `drain()` returns.
+     * remain valid until `dispatch()` returns.
      */
-    void dispatch(std::function<void(std::string_view)>& callback, std::string_view token) {
+    TokenAction dispatch(AsyncTokenCallback& callback, std::string_view token) {
+        auto done = std::make_shared<std::promise<TokenAction>>();
+        auto future = done->get_future();
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            queue_.push(Entry{&callback, std::string(token)});
+            if (shutdown_) {
+                return TokenAction::Continue;
+            }
+            queue_.push(Entry{&callback, std::string(token), std::move(done)});
         }
         cv_.notify_one();
+        return future.get();
     }
 
     /**
@@ -67,18 +73,13 @@ class CallbackDispatcher {
     void drain() {
         std::unique_lock<std::mutex> lock(mutex_);
         drain_cv_.wait(lock, [this] { return queue_.empty() && !executing_; });
-        if (failure_) {
-            auto failure = failure_;
-            failure_ = nullptr;
-            lock.unlock();
-            std::rethrow_exception(failure);
-        }
     }
 
   private:
     struct Entry {
-        std::function<void(std::string_view)>* callback;
+        AsyncTokenCallback* callback;
         std::string token;
+        std::shared_ptr<std::promise<TokenAction>> done;
     };
 
     void run() {
@@ -87,37 +88,19 @@ class CallbackDispatcher {
             cv_.wait(lock, [this] { return shutdown_ || !queue_.empty(); });
 
             while (!queue_.empty()) {
-                if (failure_) {
-                    queue_ = {};
-                    drain_cv_.notify_all();
-                    break;
-                }
-
                 auto entry = std::move(queue_.front());
                 queue_.pop();
                 executing_ = true;
                 lock.unlock();
 
                 try {
-                    (*entry.callback)(entry.token);
+                    entry.done->set_value((*entry.callback)(entry.token));
                 } catch (const std::exception& e) {
                     ZOO_LOG("error", "streaming callback threw: %s", e.what());
-                    lock.lock();
-                    if (!failure_) {
-                        failure_ = std::current_exception();
-                    }
-                    executing_ = false;
-                    drain_cv_.notify_all();
-                    continue;
+                    entry.done->set_exception(std::current_exception());
                 } catch (...) {
                     ZOO_LOG("error", "streaming callback threw unknown exception");
-                    lock.lock();
-                    if (!failure_) {
-                        failure_ = std::current_exception();
-                    }
-                    executing_ = false;
-                    drain_cv_.notify_all();
-                    continue;
+                    entry.done->set_exception(std::current_exception());
                 }
 
                 lock.lock();
@@ -137,7 +120,6 @@ class CallbackDispatcher {
     std::queue<Entry> queue_;
     bool shutdown_ = false;
     bool executing_ = false;
-    std::exception_ptr failure_;
     std::thread thread_;
 };
 

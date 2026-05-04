@@ -232,7 +232,7 @@ class GenerationRunner {
         : backend_(backend), callback_dispatcher_(callback_dispatcher) {}
 
     Expected<GenerationPassResult> run(const GenerationOptions& options,
-                                       AsyncTextCallback* streaming_callback,
+                                       AsyncTokenCallback* streaming_callback,
                                        CancellationCallback should_cancel, GenerationStats& stats) {
         int completion_tokens = 0;
         const auto generation_start_time = std::chrono::steady_clock::now();
@@ -240,15 +240,16 @@ class GenerationRunner {
         bool first_token_received_this_pass = false;
 
         auto callback = [&](std::string_view token) -> TokenAction {
+            TokenAction action = TokenAction::Continue;
             if (streaming_callback != nullptr && *streaming_callback) {
-                callback_dispatcher_.dispatch(*streaming_callback, token);
+                action = callback_dispatcher_.dispatch(*streaming_callback, token);
             }
             if (!first_token_received_this_pass) {
                 first_token_time_this_pass = std::chrono::steady_clock::now();
                 first_token_received_this_pass = true;
             }
             ++completion_tokens;
-            return TokenAction::Continue;
+            return action;
         };
 
         auto generated =

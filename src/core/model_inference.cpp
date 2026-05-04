@@ -54,18 +54,18 @@ struct InferencePhase {
                     Error{ErrorCode::ContextWindowExceeded, "Prompt tokens exceed context size"});
             }
 
-            llama_batch batch = llama_batch_init(chunk.count, 0, 1);
+            LlamaBatchHandle batch(chunk.count, 0, 1);
+            auto& raw_batch = batch.get();
             for (int i = 0; i < chunk.count; ++i) {
-                batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
-                batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
-                batch.n_seq_id[i] = 1;
-                batch.seq_id[i][0] = 0;
-                batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
+                raw_batch.token[i] = static_cast<llama_token>(prompt_tokens[chunk.offset + i]);
+                raw_batch.pos[i] = static_cast<llama_pos>(base_pos + chunk.offset + i);
+                raw_batch.n_seq_id[i] = 1;
+                raw_batch.seq_id[i][0] = 0;
+                raw_batch.logits[i] = (chunk.emit_logits && i == chunk.count - 1);
             }
-            batch.n_tokens = chunk.count;
+            raw_batch.n_tokens = chunk.count;
 
-            int rc = llama_decode(phase_ctx.ctx, batch);
-            llama_batch_free(batch);
+            int rc = llama_decode(phase_ctx.ctx, raw_batch);
             if (rc != 0) {
                 return std::unexpected(
                     Error{ErrorCode::InferenceFailed, "Failed to decode prefill batch"});
@@ -128,26 +128,25 @@ Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::
 
 } // namespace
 
-Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens, int max_tokens,
-                                           const std::vector<std::string>& stop_sequences,
-                                           TokenCallback on_token,
-                                           CancellationCallback should_cancel) {
+Expected<std::string> run_inference(Model::Impl& impl, const std::vector<int>& prompt_tokens,
+                                    int max_tokens, const std::vector<std::string>& stop_sequences,
+                                    TokenCallback on_token, CancellationCallback should_cancel) {
     std::string generated_text;
-    const int effective_max = (max_tokens > 0) ? max_tokens : impl_->loaded_.context_size;
+    const int effective_max = (max_tokens > 0) ? max_tokens : impl.loaded_.context_size;
     generated_text.reserve(std::min(static_cast<size_t>(effective_max) * 8, size_t{65536}));
     int token_count = 0;
     bool stopped_by_callback = false;
     StopSequenceMatcher stop_matcher{std::span<const std::string>(stop_sequences)};
     StreamFilter stream_filter;
-    if (on_token && impl_->session_.tool_state &&
-        impl_->session_.sampler_policy.is_native_tool_call()) {
-        const auto& trigger_matcher = impl_->session_.tool_state->trigger_matcher;
+    if (on_token && impl.session_.tool_state &&
+        impl.session_.sampler_policy.is_native_tool_call()) {
+        const auto& trigger_matcher = impl.session_.tool_state->trigger_matcher;
         stream_filter = StreamFilter(std::span<const std::string>(trigger_matcher.word_triggers()),
                                      &trigger_matcher);
     }
 
-    InferencePhase phase{InferenceCtx{impl_->session_.ctx.get(), impl_->session_.sampler.get(),
-                                      impl_->loaded_.vocab, impl_->loaded_.context_size},
+    InferencePhase phase{InferenceCtx{impl.session_.ctx.get(), impl.session_.sampler.get(),
+                                      impl.loaded_.vocab, impl.loaded_.context_size},
                          should_cancel};
     auto current_pos_result = phase.prefill(prompt_tokens);
     if (!current_pos_result) {
@@ -155,12 +154,11 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     }
 
     int current_pos = *current_pos_result;
-    llama_batch ar_batch = llama_batch_init(1, 0, 1);
+    LlamaBatchHandle ar_batch(1, 0, 1);
 
     while (true) {
         auto decoded = phase.decode();
         if (!decoded) {
-            llama_batch_free(ar_batch);
             return std::unexpected(decoded.error());
         }
         if (decoded->end_of_generation) {
@@ -183,7 +181,6 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             if (!visible_chunk.empty()) {
                 auto action = invoke_token_callback(on_token, visible_chunk);
                 if (!action) {
-                    llama_batch_free(ar_batch);
                     return std::unexpected(action.error());
                 }
                 if (*action == TokenAction::Stop) {
@@ -193,17 +190,14 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
             }
         }
 
-        if (token_count >= effective_max || current_pos >= impl_->loaded_.context_size) {
+        if (token_count >= effective_max || current_pos >= impl.loaded_.context_size) {
             break;
         }
 
-        if (auto result = phase.finalize(ar_batch, decoded->token, current_pos); !result) {
-            llama_batch_free(ar_batch);
+        if (auto result = phase.finalize(ar_batch.get(), decoded->token, current_pos); !result) {
             return std::unexpected(result.error());
         }
     }
-
-    llama_batch_free(ar_batch);
 
     if (on_token && !stream_filter.suppressing() && !stopped_by_callback) {
         std::string trailing = stream_filter.finalize();
@@ -218,16 +212,15 @@ Expected<std::string> Model::run_inference(const std::vector<int>& prompt_tokens
     return generated_text;
 }
 
-Expected<TextResponse> Model::generate(std::string_view user_message,
-                                       const GenerationOptions& options, TokenCallback on_token,
-                                       CancellationCallback should_cancel) {
-    return generate(MessageView{Role::User, user_message}, options, on_token, should_cancel);
+Expected<TextResponse> Model::generate(std::string_view user_message, GenerationOverride generation,
+                                       TokenCallback on_token, CancellationCallback should_cancel) {
+    return generate(MessageView{Role::User, user_message}, generation, on_token, should_cancel);
 }
 
-Expected<TextResponse> Model::generate(MessageView message, const GenerationOptions& options,
+Expected<TextResponse> Model::generate(MessageView message, GenerationOverride generation,
                                        TokenCallback on_token, CancellationCallback should_cancel) {
     auto start_time = std::chrono::steady_clock::now();
-    auto effective_options = resolve_generation_options(options);
+    auto effective_options = resolve_generation_options(*impl_, generation);
     if (auto validation = effective_options.validate(); !validation) {
         return std::unexpected(validation.error());
     }
@@ -255,32 +248,32 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
         return TokenAction::Continue;
     };
 
-    auto prompt_result = render_prompt_delta();
+    auto prompt_result = render_prompt_delta(*impl_);
     if (!prompt_result) {
-        rollback_last_message();
+        rollback_last_message(*impl_);
         return std::unexpected(prompt_result.error());
     }
 
-    if (auto rebuild = ensure_grammar_sampler_for_pass(); !rebuild) {
-        rollback_last_message();
+    if (auto rebuild = ensure_grammar_sampler_for_pass(*impl_); !rebuild) {
+        rollback_last_message(*impl_);
         return std::unexpected(rebuild.error());
     }
 
-    auto tokens_result = tokenize(*prompt_result);
+    auto tokens_result = tokenize(*impl_, *prompt_result);
     if (!tokens_result) {
-        rollback_last_message();
+        rollback_last_message(*impl_);
         return std::unexpected(tokens_result.error());
     }
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
-    auto all_stops = merge_stop_sequences(effective_options.stop_sequences);
+    auto all_stops = merge_stop_sequences(*impl_, effective_options.stop_sequences);
 
-    auto generate_result = run_inference(*tokens_result, effective_options.max_tokens, all_stops,
-                                         TokenCallback(wrapped_callback), should_cancel);
+    auto generate_result = run_inference(*impl_, *tokens_result, effective_options.max_tokens,
+                                         all_stops, TokenCallback(wrapped_callback), should_cancel);
 
     if (!generate_result) {
-        rollback_last_message();
+        rollback_last_message(*impl_);
         return std::unexpected(generate_result.error());
     }
 
@@ -300,8 +293,9 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
         impl_->session_.messages.push_back(Message::assistant(std::move(generated_text)));
     }
 
-    impl_->session_.estimated_tokens += estimate_message_tokens(impl_->session_.messages.back());
-    note_history_append();
+    impl_->session_.estimated_tokens +=
+        estimate_message_tokens(*impl_, impl_->session_.messages.back());
+    note_history_append(*impl_);
     finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
@@ -329,36 +323,36 @@ Expected<TextResponse> Model::generate(MessageView message, const GenerationOpti
     return response;
 }
 
-Expected<Model::GenerationResult> Model::generate_from_history(const GenerationOptions& options,
+Expected<Model::GenerationResult> Model::generate_from_history(GenerationOverride generation,
                                                                TokenCallback on_token,
                                                                CancellationCallback should_cancel) {
-    auto effective_options = resolve_generation_options(options);
+    auto effective_options = resolve_generation_options(*impl_, generation);
     if (auto validation = effective_options.validate(); !validation) {
         return std::unexpected(validation.error());
     }
 
     impl_->session_.active_sampling = effective_options.sampling;
 
-    auto prompt_result = render_prompt_delta();
+    auto prompt_result = render_prompt_delta(*impl_);
     if (!prompt_result) {
         return std::unexpected(prompt_result.error());
     }
 
-    if (auto rebuild = ensure_grammar_sampler_for_pass(); !rebuild) {
+    if (auto rebuild = ensure_grammar_sampler_for_pass(*impl_); !rebuild) {
         return std::unexpected(rebuild.error());
     }
 
-    auto tokens_result = tokenize(*prompt_result);
+    auto tokens_result = tokenize(*impl_, *prompt_result);
     if (!tokens_result) {
         return std::unexpected(tokens_result.error());
     }
 
     const int prompt_tokens = static_cast<int>(tokens_result->size());
 
-    auto all_stops = merge_stop_sequences(effective_options.stop_sequences);
+    auto all_stops = merge_stop_sequences(*impl_, effective_options.stop_sequences);
 
-    auto text_result = run_inference(*tokens_result, effective_options.max_tokens, all_stops,
-                                     on_token, should_cancel);
+    auto text_result = run_inference(*impl_, *tokens_result, effective_options.max_tokens,
+                                     all_stops, on_token, should_cancel);
 
     if (!text_result) {
         return std::unexpected(text_result.error());
@@ -380,23 +374,25 @@ Expected<Model::GenerationResult> Model::generate_from_history(const GenerationO
                             std::move(parsed_content), std::move(parsed_tool_calls)};
 }
 
-Expected<void> Model::ensure_grammar_sampler_for_pass() {
-    return impl_->session_.sampler_policy.ensure_sampler_for_pass(*this);
+Expected<void> ensure_grammar_sampler_for_pass(Model::Impl& impl) {
+    return impl.session_.sampler_policy.ensure_sampler_for_pass(impl);
 }
 
-std::vector<std::string> Model::merge_stop_sequences(std::vector<std::string> base) const {
-    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
-        const auto& extras = impl_->session_.tool_state->additional_stops;
+std::vector<std::string> merge_stop_sequences(const Model::Impl& impl,
+                                              std::vector<std::string> base) {
+    if (impl.session_.sampler_policy.is_native_tool_call() && impl.session_.tool_state) {
+        const auto& extras = impl.session_.tool_state->additional_stops;
         base.insert(base.end(), extras.begin(), extras.end());
     }
     return base;
 }
 
-GenerationOptions Model::resolve_generation_options(const GenerationOptions& overrides) const {
-    if (overrides.is_default()) {
-        return impl_->loaded_.default_generation_options;
+GenerationOptions resolve_generation_options(const Model::Impl& impl,
+                                             GenerationOverride generation) {
+    if (!generation.options()) {
+        return impl.loaded_.default_generation_options;
     }
-    return overrides;
+    return *generation.options();
 }
 
 } // namespace zoo::core
