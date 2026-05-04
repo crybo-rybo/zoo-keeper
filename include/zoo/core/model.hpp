@@ -11,14 +11,6 @@
 #include <string_view>
 #include <vector>
 
-/// Forward declarations for llama.cpp runtime types owned by `zoo::core::Model`.
-struct llama_model;
-struct llama_context;
-struct llama_sampler;
-struct llama_vocab;
-struct llama_chat_message;
-struct common_chat_templates;
-
 namespace zoo::core {
 
 struct ModelTestAccess;
@@ -26,12 +18,14 @@ struct ModelTestAccess;
 /**
  * @brief Direct llama.cpp wrapper for model lifecycle, history, and generation.
  *
- * `Model` owns the llama.cpp model, context, sampler chain, and incremental
- * chat-template state. It can be used standalone, but it is intentionally not
- * thread-safe; callers that need concurrency should use `zoo::Agent`.
+ * `Model` owns the backend model state and incremental chat-template state. It
+ * can be used standalone, but it is intentionally not thread-safe; callers
+ * that need concurrency should use `zoo::Agent`.
  */
 class Model {
   public:
+    struct Impl;
+
     /**
      * @brief Loads and initializes a model from the supplied configuration.
      *
@@ -154,53 +148,7 @@ class Model {
   private:
     friend struct ModelTestAccess;
 
-    struct Impl;
-
-    struct LlamaModelDeleter {
-        void operator()(llama_model* model) const noexcept;
-    };
-    struct LlamaContextDeleter {
-        void operator()(llama_context* context) const noexcept;
-    };
-    struct LlamaSamplerDeleter {
-        void operator()(llama_sampler* sampler) const noexcept;
-    };
-    struct ChatTemplatesDeleter {
-        void operator()(common_chat_templates* tmpls) const noexcept;
-    };
-
-    using LlamaModelHandle = std::unique_ptr<llama_model, LlamaModelDeleter>;
-    using LlamaContextHandle = std::unique_ptr<llama_context, LlamaContextDeleter>;
-    using LlamaSamplerHandle = std::unique_ptr<llama_sampler, LlamaSamplerDeleter>;
-    using ChatTemplatesHandle = std::unique_ptr<common_chat_templates, ChatTemplatesDeleter>;
-
     explicit Model(ModelConfig model_config, GenerationOptions default_generation);
-
-    Expected<void> initialize();
-    Expected<std::vector<int>> tokenize(std::string_view text);
-    Expected<std::string> run_inference(const std::vector<int>& prompt_tokens, int max_tokens,
-                                        const std::vector<std::string>& stop_sequences,
-                                        TokenCallback on_token = {},
-                                        CancellationCallback should_cancel = {});
-    Expected<std::string> render_prompt_delta();
-    void clear_kv_cache();
-    void note_history_append() noexcept;
-    void note_history_rewrite() noexcept;
-    void note_history_reset() noexcept;
-    static void initialize_global();
-    LlamaSamplerHandle create_sampler_chain();
-    void add_sampling_stages(llama_sampler* chain, const SamplingParams& sampling) const;
-    void add_dist_sampler(llama_sampler* chain, const SamplingParams& sampling) const;
-    bool rebuild_sampler_with_tool_grammar();
-    bool rebuild_sampler_with_schema_grammar();
-    Expected<void> ensure_grammar_sampler_for_pass();
-    [[nodiscard]] std::vector<std::string>
-    merge_stop_sequences(std::vector<std::string> base) const;
-    [[nodiscard]] int estimate_tokens(std::string_view text) const;
-    [[nodiscard]] int estimate_message_tokens(const Message& message) const;
-    void trim_history_to_fit();
-    void rollback_last_message() noexcept;
-    [[nodiscard]] GenerationOptions resolve_generation_options(GenerationOverride generation) const;
 
     std::unique_ptr<Impl> impl_;
 };

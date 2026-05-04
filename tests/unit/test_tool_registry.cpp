@@ -197,6 +197,46 @@ TEST_F(ToolRegistryTest, LambdaRegistration) {
     EXPECT_EQ((*invoke_result)["result"], 10);
 }
 
+TEST(ToolDefinitionFactoryTest, TypedCallableBuildsMetadataAndHandler) {
+    auto definition = zoo::tools::make_tool_definition("add", "Add two integers", {"a", "b"},
+                                                       [](int a, int b) { return a + b; });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+
+    EXPECT_EQ(definition->metadata.name, "add");
+    ASSERT_EQ(definition->metadata.parameters.size(), 2u);
+    EXPECT_EQ(definition->metadata.parameters[0].type, zoo::tools::ToolValueType::Integer);
+    EXPECT_EQ(definition->metadata.parameters_schema["required"], json::array({"a", "b"}));
+
+    auto result = definition->handler({{"a", 2}, {"b", 5}});
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ((*result)["result"], 7);
+}
+
+TEST(ToolDefinitionFactoryTest, JsonSchemaBuildsMetadataAndHandler) {
+    json schema = {{"type", "object"},
+                   {"properties",
+                    {{"query", {{"type", "string"}}},
+                     {"limit", {{"type", "integer"}, {"enum", json::array({5, 10})}}}}},
+                   {"required", json::array({"query"})},
+                   {"additionalProperties", false}};
+
+    auto definition = zoo::tools::make_tool_definition(
+        "search", "Search documents", schema, [](const json& args) -> zoo::Expected<json> {
+            return json{{"query", args.at("query")}, {"limit", args.value("limit", 5)}};
+        });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+
+    ASSERT_EQ(definition->metadata.parameters.size(), 2u);
+    EXPECT_EQ(definition->metadata.parameters[0].name, "query");
+    EXPECT_TRUE(definition->metadata.parameters[0].required);
+    EXPECT_EQ(definition->metadata.parameters[1].name, "limit");
+    EXPECT_FALSE(definition->metadata.parameters[1].required);
+
+    auto result = definition->handler({{"query", "llama"}});
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ((*result)["limit"], 5);
+}
+
 TEST_F(ToolRegistryTest, OverwriteExistingPreservesOrder) {
     ASSERT_TRUE(registry.register_tool("add", "Add v1", {"a", "b"}, add).has_value());
     ASSERT_TRUE(registry.register_tool("greet", "Greet", {"name"}, greet).has_value());
@@ -210,10 +250,10 @@ TEST_F(ToolRegistryTest, OverwriteExistingPreservesOrder) {
 }
 
 TEST_F(ToolRegistryTest, RegisterToolsBatchAddsAllTools) {
-    auto def1 = zoo::tools::detail::make_tool_definition("add", "Add",
-                                                         std::vector<std::string>{"a", "b"}, add);
-    auto def2 = zoo::tools::detail::make_tool_definition("greet", "Greet",
-                                                         std::vector<std::string>{"name"}, greet);
+    auto def1 =
+        zoo::tools::make_tool_definition("add", "Add", std::vector<std::string>{"a", "b"}, add);
+    auto def2 =
+        zoo::tools::make_tool_definition("greet", "Greet", std::vector<std::string>{"name"}, greet);
     ASSERT_TRUE(def1.has_value());
     ASSERT_TRUE(def2.has_value());
 

@@ -151,8 +151,8 @@ Expected<void> Agent::register_tool(std::string_view name, std::string_view desc
                                     std::optional<std::chrono::nanoseconds> timeout) {
     std::string tool_name{name};
     std::string tool_description{description};
-    auto definition = tools::detail::make_tool_definition(tool_name, tool_description, schema,
-                                                          std::move(handler));
+    auto definition =
+        tools::make_tool_definition(tool_name, tool_description, schema, std::move(handler));
     if (!definition) {
         return std::unexpected(definition.error());
     }
