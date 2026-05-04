@@ -7,5 +7,5 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_ENABLE_CRAP=ON "$@"
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON -DZOO_ENABLE_CRAP=ON "$@"
 cmake --build build --target crap
