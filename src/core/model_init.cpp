@@ -47,9 +47,9 @@ Expected<void> initialize_model(Model::Impl& impl) {
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
-    // Use 8-bit KV cache to reduce memory footprint vs the upstream F16 default.
-    ctx_params.type_k = GGML_TYPE_Q8_0;
-    ctx_params.type_v = GGML_TYPE_Q8_0;
+    // F16 uses more memory than Q8, but avoids KV dequant overhead in decode.
+    ctx_params.type_k = GGML_TYPE_F16;
+    ctx_params.type_v = GGML_TYPE_F16;
 
     auto ctx = LlamaContextHandle(llama_init_from_model(llama_model.get(), ctx_params));
     if (!ctx) {
