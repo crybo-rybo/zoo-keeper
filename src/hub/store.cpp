@@ -6,6 +6,7 @@
 #include "zoo/hub/store.hpp"
 #include "hub/download_validation.hpp"
 #include "hub/hf_cache_paths.hpp"
+#include "hub/store_internals.hpp"
 #include "hub/store_json.hpp"
 #include "zoo/hub/inspector.hpp"
 
@@ -19,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <random>
+#include <span>
 #include <sstream>
 #include <string_view>
 #include <unordered_set>
@@ -95,104 +97,6 @@ Expected<void> validate_catalog_entries(const std::vector<ModelEntry>& entries) 
 
 } // namespace
 
-struct ModelStore::Impl {
-    ModelStoreConfig config;
-    std::vector<ModelEntry> entries;
-
-    [[nodiscard]] std::string catalog_path() const {
-        return config.store_directory + "/" + config.catalog_filename;
-    }
-
-    Expected<void> load_catalog() {
-        const auto path = catalog_path();
-        if (!std::filesystem::exists(path)) {
-            entries.clear();
-            return {};
-        }
-
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            return std::unexpected(
-                Error{ErrorCode::FilesystemError, "Cannot open catalog: " + path});
-        }
-
-        try {
-            auto j = nlohmann::json::parse(file);
-            if (!j.is_object() || !j.contains("models") || !j["models"].is_array()) {
-                return std::unexpected(
-                    Error{ErrorCode::StoreCorrupted, "Catalog has invalid structure: " + path});
-            }
-            entries = j["models"].get<std::vector<ModelEntry>>();
-        } catch (const nlohmann::json::exception& e) {
-            return std::unexpected(Error{ErrorCode::StoreCorrupted,
-                                         "Failed to parse catalog: " + std::string(e.what())});
-        }
-        if (auto result = validate_catalog_entries(entries); !result) {
-            return std::unexpected(result.error());
-        }
-        return {};
-    }
-
-    Expected<void> save_catalog() const {
-        const auto path = catalog_path();
-
-        nlohmann::json j;
-        j["version"] = 1;
-        j["models"] = entries;
-
-        std::ofstream file(path);
-        if (!file.is_open()) {
-            return std::unexpected(
-                Error{ErrorCode::FilesystemError, "Cannot write catalog: " + path});
-        }
-        file << j.dump(2) << "\n";
-        return {};
-    }
-
-    Expected<size_t> find_index(const std::string& query) const {
-        // 1. Exact alias match.
-        for (size_t i = 0; i < entries.size(); ++i) {
-            for (const auto& alias : entries[i].aliases) {
-                if (alias == query) {
-                    return i;
-                }
-            }
-        }
-
-        // 2. Exact name match.
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (entries[i].info.name == query) {
-                return i;
-            }
-        }
-
-        // 3. Name substring match.
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (!entries[i].info.name.empty() &&
-                entries[i].info.name.find(query) != std::string::npos) {
-                return i;
-            }
-        }
-
-        // 4. Path match.
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (entries[i].file_path == query) {
-                return i;
-            }
-        }
-
-        // 5. ID match.
-        for (size_t i = 0; i < entries.size(); ++i) {
-            if (entries[i].id == query) {
-                return i;
-            }
-        }
-
-        return std::unexpected(
-            Error{ErrorCode::ModelNotFound, "No model found matching: " + query});
-    }
-};
-
 Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries,
                                           std::span<const std::string> aliases,
                                           std::optional<size_t> skip_index = std::nullopt) {
@@ -222,6 +126,252 @@ Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries
     return {};
 }
 
+namespace detail {
+
+CatalogRepository::CatalogRepository(ModelStoreConfig config) : config_(std::move(config)) {}
+
+const ModelStoreConfig& CatalogRepository::config() const noexcept {
+    return config_;
+}
+
+std::string CatalogRepository::catalog_path() const {
+    return config_.store_directory + "/" + config_.catalog_filename;
+}
+
+Expected<std::vector<ModelEntry>> CatalogRepository::load() const {
+    const auto path = catalog_path();
+    if (!std::filesystem::exists(path)) {
+        return std::vector<ModelEntry>{};
+    }
+
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return std::unexpected(Error{ErrorCode::FilesystemError, "Cannot open catalog: " + path});
+    }
+
+    std::vector<ModelEntry> loaded_entries;
+    try {
+        auto j = nlohmann::json::parse(file);
+        if (!j.is_object() || !j.contains("models") || !j["models"].is_array()) {
+            return std::unexpected(
+                Error{ErrorCode::StoreCorrupted, "Catalog has invalid structure: " + path});
+        }
+        loaded_entries = j["models"].get<std::vector<ModelEntry>>();
+    } catch (const nlohmann::json::exception& e) {
+        return std::unexpected(
+            Error{ErrorCode::StoreCorrupted, "Failed to parse catalog: " + std::string(e.what())});
+    }
+    if (auto result = validate_catalog_entries(loaded_entries); !result) {
+        return std::unexpected(result.error());
+    }
+    return loaded_entries;
+}
+
+Expected<void> CatalogRepository::save(const std::vector<ModelEntry>& entries) const {
+    const auto path = catalog_path();
+    const auto temp_path = path + ".tmp." + generate_id();
+
+    nlohmann::json j;
+    j["version"] = 1;
+    j["models"] = entries;
+
+    {
+        std::ofstream file(temp_path, std::ios::trunc);
+        if (!file.is_open()) {
+            return std::unexpected(
+                Error{ErrorCode::FilesystemError, "Cannot write catalog: " + temp_path});
+        }
+        file << j.dump(2) << "\n";
+        file.flush();
+        if (!file.good()) {
+            std::error_code remove_ec;
+            std::filesystem::remove(temp_path, remove_ec);
+            return std::unexpected(
+                Error{ErrorCode::FilesystemError, "Failed while writing catalog: " + temp_path});
+        }
+    }
+
+    std::error_code ec;
+    std::filesystem::rename(temp_path, path, ec);
+    if (ec) {
+        std::error_code remove_ec;
+        std::filesystem::remove(temp_path, remove_ec);
+        return std::unexpected(
+            Error{ErrorCode::FilesystemError, "Cannot replace catalog: " + path, ec.message()});
+    }
+    return {};
+}
+
+Expected<size_t> ModelResolver::find_index(std::span<const ModelEntry> entries,
+                                           const std::string& query) {
+    // 1. Exact alias match.
+    for (size_t i = 0; i < entries.size(); ++i) {
+        for (const auto& alias : entries[i].aliases) {
+            if (alias == query) {
+                return i;
+            }
+        }
+    }
+
+    // 2. Exact name match.
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (entries[i].info.name == query) {
+            return i;
+        }
+    }
+
+    // 3. Name substring match.
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (!entries[i].info.name.empty() &&
+            entries[i].info.name.find(query) != std::string::npos) {
+            return i;
+        }
+    }
+
+    // 4. Path match.
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (entries[i].file_path == query) {
+            return i;
+        }
+    }
+
+    // 5. ID match.
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (entries[i].id == query) {
+            return i;
+        }
+    }
+
+    return std::unexpected(Error{ErrorCode::ModelNotFound, "No model found matching: " + query});
+}
+
+Expected<ModelEntry> ModelImporter::add_local_file(std::vector<ModelEntry>& entries,
+                                                   const CatalogRepository& repository,
+                                                   const std::string& file_path,
+                                                   std::vector<std::string> aliases) {
+    const auto abs_path = std::filesystem::absolute(file_path).string();
+
+    if (auto result = validate_aliases_for_store(entries, aliases); !result) {
+        return std::unexpected(result.error());
+    }
+
+    for (const auto& entry : entries) {
+        if (entry.file_path == abs_path) {
+            return std::unexpected(
+                Error{ErrorCode::ModelAlreadyExists, "Model already registered: " + abs_path});
+        }
+    }
+
+    auto info = GgufInspector::inspect(abs_path);
+    if (!info) {
+        return std::unexpected(info.error());
+    }
+
+    ModelEntry entry;
+    entry.id = generate_id();
+    entry.file_path = abs_path;
+    entry.info = std::move(*info);
+    entry.aliases = std::move(aliases);
+    entry.added_at = now_iso8601();
+
+    entries.push_back(entry);
+
+    if (auto result = repository.save(entries); !result) {
+        entries.pop_back();
+        return std::unexpected(result.error());
+    }
+
+    return entry;
+}
+
+Expected<ModelEntry> HubPullService::persist_source_annotation(std::vector<ModelEntry>& entries,
+                                                               const CatalogRepository& repository,
+                                                               const std::string& entry_id,
+                                                               std::string source_url,
+                                                               std::string repo_id) {
+    auto it = std::find_if(entries.begin(), entries.end(),
+                           [&](const ModelEntry& entry) { return entry.id == entry_id; });
+    if (it == entries.end()) {
+        return std::unexpected(
+            Error{ErrorCode::ModelNotFound, "No model found matching: " + entry_id});
+    }
+
+    const std::string old_source_url = it->source_url;
+    const std::string old_repo = it->huggingface_repo;
+    it->source_url = std::move(source_url);
+    it->huggingface_repo = std::move(repo_id);
+
+    if (auto result = repository.save(entries); !result) {
+        it->source_url = old_source_url;
+        it->huggingface_repo = old_repo;
+        return std::unexpected(result.error());
+    }
+
+    return *it;
+}
+
+Expected<ModelEntry> HubPullService::pull(HuggingFaceClient& client, const std::string& identifier,
+                                          std::vector<std::string> aliases,
+                                          std::vector<ModelEntry>& entries,
+                                          const CatalogRepository& repository) {
+    auto parsed = HuggingFaceClient::parse_identifier(identifier);
+    if (!parsed) {
+        return std::unexpected(parsed.error());
+    }
+
+    std::string repo_with_tag = parsed->repo_id;
+    if (parsed->tag) {
+        repo_with_tag += ":" + *parsed->tag;
+    }
+
+    std::string local_path;
+    std::string source_url;
+    if (parsed->filename) {
+        auto url = client.resolve_download_url(parsed->repo_id, *parsed->filename);
+        if (!url) {
+            return std::unexpected(url.error());
+        }
+        source_url = *url;
+        auto result = client.download_model(identifier);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+        local_path = *result;
+    } else {
+        auto result = client.download_model(repo_with_tag);
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+        local_path = *result;
+
+        if (auto url = detail::source_url_from_hf_snapshot(parsed->repo_id, local_path)) {
+            source_url = std::move(*url);
+        }
+    }
+
+    if (auto validation = detail::validate_downloaded_file(local_path); !validation) {
+        return std::unexpected(validation.error());
+    }
+
+    auto entry = ModelImporter::add_local_file(entries, repository, local_path, std::move(aliases));
+    if (!entry) {
+        return std::unexpected(entry.error());
+    }
+
+    return persist_source_annotation(entries, repository, entry->id, std::move(source_url),
+                                     parsed->repo_id);
+}
+
+} // namespace detail
+
+struct ModelStore::Impl {
+    detail::CatalogRepository repository;
+    std::vector<ModelEntry> entries;
+
+    Impl(detail::CatalogRepository repo, std::vector<ModelEntry> loaded_entries)
+        : repository(std::move(repo)), entries(std::move(loaded_entries)) {}
+};
+
 Expected<std::unique_ptr<ModelStore>> ModelStore::open(ModelStoreConfig config) {
     if (config.store_directory.empty()) {
         config.store_directory = default_store_directory();
@@ -240,13 +390,13 @@ Expected<std::unique_ptr<ModelStore>> ModelStore::open(ModelStoreConfig config) 
                                      ec.message()});
     }
 
-    auto impl = std::make_unique<Impl>();
-    impl->config = std::move(config);
-
-    if (auto result = impl->load_catalog(); !result) {
-        return std::unexpected(result.error());
+    detail::CatalogRepository repository(std::move(config));
+    auto entries = repository.load();
+    if (!entries) {
+        return std::unexpected(entries.error());
     }
 
+    auto impl = std::make_unique<Impl>(std::move(repository), std::move(*entries));
     return std::unique_ptr<ModelStore>(new ModelStore(std::move(impl)));
 }
 
@@ -257,45 +407,12 @@ ModelStore& ModelStore::operator=(ModelStore&&) noexcept = default;
 
 Expected<ModelEntry> ModelStore::add(const std::string& file_path,
                                      std::vector<std::string> aliases) {
-    const auto abs_path = std::filesystem::absolute(file_path).string();
-
-    if (auto result = validate_aliases_for_store(impl_->entries, aliases); !result) {
-        return std::unexpected(result.error());
-    }
-
-    // Check for duplicates.
-    for (const auto& entry : impl_->entries) {
-        if (entry.file_path == abs_path) {
-            return std::unexpected(
-                Error{ErrorCode::ModelAlreadyExists, "Model already registered: " + abs_path});
-        }
-    }
-
-    // Inspect the model.
-    auto info = GgufInspector::inspect(abs_path);
-    if (!info) {
-        return std::unexpected(info.error());
-    }
-
-    ModelEntry entry;
-    entry.id = generate_id();
-    entry.file_path = abs_path;
-    entry.info = std::move(*info);
-    entry.aliases = std::move(aliases);
-    entry.added_at = now_iso8601();
-
-    impl_->entries.push_back(entry);
-
-    if (auto result = impl_->save_catalog(); !result) {
-        impl_->entries.pop_back();
-        return std::unexpected(result.error());
-    }
-
-    return entry;
+    return detail::ModelImporter::add_local_file(impl_->entries, impl_->repository, file_path,
+                                                 std::move(aliases));
 }
 
 Expected<void> ModelStore::remove(const std::string& name_or_alias, bool delete_file) {
-    auto idx = impl_->find_index(name_or_alias);
+    auto idx = detail::ModelResolver::find_index(impl_->entries, name_or_alias);
     if (!idx) {
         return std::unexpected(idx.error());
     }
@@ -306,13 +423,19 @@ Expected<void> ModelStore::remove(const std::string& name_or_alias, bool delete_
         // Ignore removal errors — the file may already be gone.
     }
 
+    auto removed = std::move(impl_->entries[*idx]);
     impl_->entries.erase(impl_->entries.begin() + static_cast<ptrdiff_t>(*idx));
-    return impl_->save_catalog();
+    if (auto result = impl_->repository.save(impl_->entries); !result) {
+        impl_->entries.insert(impl_->entries.begin() + static_cast<ptrdiff_t>(*idx),
+                              std::move(removed));
+        return std::unexpected(result.error());
+    }
+    return {};
 }
 
 Expected<void> ModelStore::add_alias(const std::string& name_or_alias,
                                      const std::string& new_alias) {
-    auto idx = impl_->find_index(name_or_alias);
+    auto idx = detail::ModelResolver::find_index(impl_->entries, name_or_alias);
     if (!idx) {
         return std::unexpected(idx.error());
     }
@@ -322,7 +445,11 @@ Expected<void> ModelStore::add_alias(const std::string& name_or_alias,
     }
 
     impl_->entries[*idx].aliases.push_back(new_alias);
-    return impl_->save_catalog();
+    if (auto result = impl_->repository.save(impl_->entries); !result) {
+        impl_->entries[*idx].aliases.pop_back();
+        return std::unexpected(result.error());
+    }
+    return {};
 }
 
 std::vector<ModelEntry> ModelStore::list() const {
@@ -330,7 +457,7 @@ std::vector<ModelEntry> ModelStore::list() const {
 }
 
 Expected<ModelEntry> ModelStore::find(const std::string& query) const {
-    auto idx = impl_->find_index(query);
+    auto idx = detail::ModelResolver::find_index(impl_->entries, query);
     if (!idx) {
         return std::unexpected(idx.error());
     }
@@ -366,68 +493,12 @@ Expected<std::unique_ptr<Agent>> ModelStore::create_agent(const std::string& nam
 
 Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::string& identifier,
                                       std::vector<std::string> aliases) {
-    auto parsed = HuggingFaceClient::parse_identifier(identifier);
-    if (!parsed) {
-        return std::unexpected(parsed.error());
-    }
-
-    // Build the repo string with tag for llama.cpp's download infrastructure.
-    std::string repo_with_tag = parsed->repo_id;
-    if (parsed->tag) {
-        repo_with_tag += ":" + *parsed->tag;
-    }
-
-    std::string local_path;
-    std::string source_url;
-    if (parsed->filename) {
-        // Specific file requested -- keep the user-facing source URL simple,
-        // while llama.cpp stores the file in its Hugging Face cache layout.
-        auto url = client.resolve_download_url(parsed->repo_id, *parsed->filename);
-        if (!url) {
-            return std::unexpected(url.error());
-        }
-        source_url = *url;
-        auto result = client.download_model(identifier);
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-        local_path = *result;
-    } else {
-        // Let llama.cpp resolve the best GGUF file and download it.
-        auto result = client.download_model(repo_with_tag);
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-        local_path = *result;
-
-        if (auto url = detail::source_url_from_hf_snapshot(parsed->repo_id, local_path)) {
-            source_url = std::move(*url);
-        }
-    }
-
-    if (auto validation = detail::validate_downloaded_file(local_path); !validation) {
-        return std::unexpected(validation.error());
-    }
-
-    auto entry = add(local_path, std::move(aliases));
-    if (!entry) {
-        return std::unexpected(entry.error());
-    }
-
-    // Annotate with HuggingFace source info.
-    auto idx = impl_->find_index(entry->id);
-    if (idx) {
-        impl_->entries[*idx].source_url = std::move(source_url);
-        impl_->entries[*idx].huggingface_repo = parsed->repo_id;
-        impl_->save_catalog(); // Best-effort save of annotations.
-        return impl_->entries[*idx];
-    }
-
-    return entry;
+    return detail::HubPullService::pull(client, identifier, std::move(aliases), impl_->entries,
+                                        impl_->repository);
 }
 
 const ModelStoreConfig& ModelStore::config() const noexcept {
-    return impl_->config;
+    return impl_->repository.config();
 }
 
 } // namespace zoo::hub
