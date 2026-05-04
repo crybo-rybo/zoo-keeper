@@ -212,21 +212,32 @@ TEST(CallbackDispatcherTest, VoidCallbackExceptionRethrowsAtDrain) {
 TEST(CallbackDispatcherTest, VoidCallbackExceptionRethrowsAtNextDispatch) {
     CallbackDispatcher dispatcher;
 
-    std::promise<void> failed_signal;
-    auto failed_future = failed_signal.get_future();
+    std::promise<void> entered;
+    auto entered_future = entered.get_future();
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+    std::promise<void> marker_done;
+    auto marker_future = marker_done.get_future();
 
-    AsyncTokenCallback failing = [&](std::string_view) {
-        struct Notify {
-            std::promise<void>* signal;
-            ~Notify() {
-                signal->set_value();
-            }
-        } notify{&failed_signal};
+    AsyncTokenCallback failing = [&, release_future](std::string_view) mutable {
+        entered.set_value();
+        release_future.wait();
         throw std::runtime_error("boom");
     };
     EXPECT_EQ(dispatcher.dispatch(failing, "x"), TokenAction::Continue);
 
-    ASSERT_EQ(failed_future.wait_for(2s), std::future_status::ready);
+    ASSERT_EQ(entered_future.wait_for(2s), std::future_status::ready);
+
+    bool marker_ran = false;
+    AsyncTokenCallback marker = [&](std::string_view) {
+        marker_ran = true;
+        marker_done.set_value();
+    };
+    EXPECT_EQ(dispatcher.dispatch(marker, "marker"), TokenAction::Continue);
+
+    release.set_value();
+    ASSERT_EQ(marker_future.wait_for(2s), std::future_status::ready);
+    EXPECT_TRUE(marker_ran);
 
     bool ran = false;
     AsyncTokenCallback succeeding = [&](std::string_view) { ran = true; };
