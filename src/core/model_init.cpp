@@ -47,9 +47,9 @@ Expected<void> initialize_model(Model::Impl& impl) {
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
-    // Use 8-bit KV cache to reduce memory footprint vs the upstream F16 default.
-    ctx_params.type_k = GGML_TYPE_Q8_0;
-    ctx_params.type_v = GGML_TYPE_Q8_0;
+    // F16 uses more memory than Q8, but avoids KV dequant overhead in decode.
+    ctx_params.type_k = GGML_TYPE_F16;
+    ctx_params.type_v = GGML_TYPE_F16;
 
     auto ctx = LlamaContextHandle(llama_init_from_model(llama_model.get(), ctx_params));
     if (!ctx) {
@@ -94,25 +94,42 @@ Expected<void> initialize_model(Model::Impl& impl) {
 Expected<std::vector<int>> tokenize(Model::Impl& impl, std::string_view text) {
     static_assert(sizeof(int) == sizeof(llama_token));
     static_assert(alignof(int) == alignof(llama_token));
+    if (text.size() > static_cast<size_t>(INT32_MAX - 8)) {
+        return std::unexpected(Error{ErrorCode::TokenizationFailed, "Tokenization overflow"});
+    }
 
     const bool is_first =
         llama_memory_seq_pos_max(llama_get_memory(impl.session_.ctx.get()), 0) == -1;
-    const int32_t raw =
-        llama_tokenize(impl.loaded_.vocab, text.data(), text.length(), nullptr, 0, is_first, true);
-    if (raw == INT32_MIN) {
+
+    const int32_t text_len = static_cast<int32_t>(text.size());
+    // This usually avoids a count-only tokenization pass while keeping the
+    // exact-size retry for unusual tokenizers.
+    impl.session_.token_buffer.resize(static_cast<size_t>(text_len + 8));
+    int32_t n =
+        llama_tokenize(impl.loaded_.vocab, text.data(), text_len,
+                       reinterpret_cast<llama_token*>(impl.session_.token_buffer.data()),
+                       static_cast<int32_t>(impl.session_.token_buffer.size()), is_first, true);
+    if (n == INT32_MIN) {
         return std::unexpected(Error{ErrorCode::TokenizationFailed, "Tokenization overflow"});
     }
-    const int n = (raw < 0) ? -raw : raw;
+    if (n < 0) {
+        n = -n;
+        impl.session_.token_buffer.resize(static_cast<size_t>(n));
+        const int32_t filled = llama_tokenize(
+            impl.loaded_.vocab, text.data(), text_len,
+            reinterpret_cast<llama_token*>(impl.session_.token_buffer.data()), n, is_first, true);
+        if (filled < 0) {
+            return std::unexpected(Error{ErrorCode::TokenizationFailed, "Tokenization failed"});
+        }
+        n = filled;
+    }
+
     if (n == 0) {
+        impl.session_.token_buffer.clear();
         return std::vector<int>{};
     }
 
     impl.session_.token_buffer.resize(static_cast<size_t>(n));
-    if (llama_tokenize(impl.loaded_.vocab, text.data(), text.length(),
-                       reinterpret_cast<llama_token*>(impl.session_.token_buffer.data()),
-                       impl.session_.token_buffer.size(), is_first, true) < 0) {
-        return std::unexpected(Error{ErrorCode::TokenizationFailed, "Tokenization failed"});
-    }
     return impl.session_.token_buffer;
 }
 
