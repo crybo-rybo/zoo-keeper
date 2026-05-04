@@ -61,6 +61,10 @@ void AgentRuntime::set_system_prompt(std::string_view prompt) {
     (void)set_system_prompt_impl(std::string(prompt), std::nullopt);
 }
 
+Expected<void> AgentRuntime::try_set_system_prompt(std::string_view prompt) {
+    return set_system_prompt_impl(std::string(prompt), std::nullopt);
+}
+
 Expected<void> AgentRuntime::set_system_prompt(std::string_view prompt,
                                                std::chrono::nanoseconds timeout) {
     return set_system_prompt_impl(std::string(prompt), timeout);
@@ -93,6 +97,10 @@ HistorySnapshot AgentRuntime::get_history() const {
     return get_history_impl(std::nullopt).value_or(HistorySnapshot{});
 }
 
+Expected<HistorySnapshot> AgentRuntime::try_get_history() const {
+    return get_history_impl(std::nullopt);
+}
+
 Expected<HistorySnapshot> AgentRuntime::get_history(std::chrono::nanoseconds timeout) const {
     return get_history_impl(timeout);
 }
@@ -105,6 +113,10 @@ Expected<void> AgentRuntime::clear_history_impl(std::optional<std::chrono::nanos
 
 void AgentRuntime::clear_history() {
     (void)clear_history_impl(std::nullopt);
+}
+
+Expected<void> AgentRuntime::try_clear_history() {
+    return clear_history_impl(std::nullopt);
 }
 
 Expected<void> AgentRuntime::clear_history(std::chrono::nanoseconds timeout) {
@@ -147,7 +159,7 @@ Expected<void> AgentRuntime::register_tools(std::vector<tools::ToolDefinition> d
 }
 
 size_t AgentRuntime::tool_count() const noexcept {
-    return tool_registry_.size();
+    return tool_count_.load(std::memory_order_acquire);
 }
 
 void AgentRuntime::handle_command(Command& cmd) {
@@ -174,6 +186,7 @@ void AgentRuntime::handle_command(Command& cmd) {
                 }
 
                 refresh_tool_calling_state();
+                tool_count_.store(tool_registry_.size(), std::memory_order_release);
                 c.done->set_value({});
             },
             [this](RegisterToolsCmd& c) {
@@ -184,6 +197,7 @@ void AgentRuntime::handle_command(Command& cmd) {
                 }
 
                 refresh_tool_calling_state();
+                tool_count_.store(tool_registry_.size(), std::memory_order_release);
                 c.done->set_value({});
             },
         },

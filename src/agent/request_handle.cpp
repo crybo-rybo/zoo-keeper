@@ -32,6 +32,13 @@ template <internal::agent::RequestHandleResult Result> bool RequestHandle<Result
 }
 
 template <internal::agent::RequestHandleResult Result>
+void RequestHandle<Result>::cancel() const noexcept {
+    if (state_) {
+        state_->cancel();
+    }
+}
+
+template <internal::agent::RequestHandleResult Result>
 Expected<Result> RequestHandle<Result>::await_result() {
     if (!state_) {
         return std::unexpected(

@@ -37,19 +37,18 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
     // Set schema grammar, restore previous tool calling state on exit
     const bool had_tool_calling = tool_grammar_active_.load(std::memory_order_acquire);
 
-    if (!backend_->set_schema_grammar(grammar_str)) {
-        return std::unexpected(
-            Error{ErrorCode::ExtractionFailed, "Failed to initialize schema grammar"});
+    auto grammar_override =
+        ScopedGrammarOverride::activate(*backend_, grammar_str, [this, had_tool_calling] {
+            if (had_tool_calling) {
+                refresh_tool_calling_state();
+            } else {
+                backend_->clear_tool_grammar();
+                tool_grammar_active_.store(false, std::memory_order_release);
+            }
+        });
+    if (!grammar_override) {
+        return std::unexpected(grammar_override.error());
     }
-
-    ScopeExit grammar_guard([this, had_tool_calling] {
-        if (had_tool_calling) {
-            refresh_tool_calling_state();
-        } else {
-            backend_->clear_tool_grammar();
-            tool_grammar_active_.store(false, std::memory_order_release);
-        }
-    });
 
     GenerationStats stats(start_time);
     GenerationRunner generation_runner(*backend_, callback_dispatcher_);

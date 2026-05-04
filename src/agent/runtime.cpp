@@ -26,30 +26,29 @@ std::vector<Message> materialize_conversation(ConversationView messages) {
 } // namespace
 
 RequestHandle<TextResponse> AgentRuntime::chat(std::string_view user_message,
-                                               const GenerationOptions& options,
-                                               AsyncTextCallback callback) {
-    return chat(MessageView{Role::User, user_message}, options, std::move(callback));
+                                               GenerationOverride generation,
+                                               AsyncTokenCallback callback) {
+    return chat(MessageView{Role::User, user_message}, generation, std::move(callback));
 }
 
-RequestHandle<TextResponse> AgentRuntime::chat(MessageView message,
-                                               const GenerationOptions& options,
-                                               AsyncTextCallback callback) {
+RequestHandle<TextResponse> AgentRuntime::chat(MessageView message, GenerationOverride generation,
+                                               AsyncTokenCallback callback) {
     RequestPayload payload;
     payload.messages.push_back(Message::from_view(message));
     payload.history_mode = HistoryMode::Append;
-    payload.options = resolve_generation_options(options);
+    payload.options = resolve_generation_options(generation);
     payload.streaming_callback = std::move(callback);
     payload.result_kind = ResultKind::Text;
     return enqueue_request<TextResponse>(std::move(payload));
 }
 
 RequestHandle<TextResponse> AgentRuntime::complete(ConversationView messages,
-                                                   const GenerationOptions& options,
-                                                   AsyncTextCallback callback) {
+                                                   GenerationOverride generation,
+                                                   AsyncTokenCallback callback) {
     RequestPayload payload;
     payload.messages = materialize_conversation(messages);
     payload.history_mode = HistoryMode::Replace;
-    payload.options = resolve_generation_options(options);
+    payload.options = resolve_generation_options(generation);
     payload.streaming_callback = std::move(callback);
     payload.result_kind = ResultKind::Text;
 
@@ -63,16 +62,16 @@ RequestHandle<TextResponse> AgentRuntime::complete(ConversationView messages,
 
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         std::string_view user_message,
-                                                        const GenerationOptions& options,
-                                                        AsyncTextCallback callback) {
-    return extract(output_schema, MessageView{Role::User, user_message}, options,
+                                                        GenerationOverride generation,
+                                                        AsyncTokenCallback callback) {
+    return extract(output_schema, MessageView{Role::User, user_message}, generation,
                    std::move(callback));
 }
 
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         MessageView message,
-                                                        const GenerationOptions& options,
-                                                        AsyncTextCallback callback) {
+                                                        GenerationOverride generation,
+                                                        AsyncTokenCallback callback) {
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
         return make_immediate_error_handle<ExtractionResponse>(
@@ -82,7 +81,7 @@ RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& ou
     RequestPayload payload;
     payload.messages.push_back(Message::from_view(message));
     payload.history_mode = HistoryMode::Append;
-    payload.options = resolve_generation_options(options);
+    payload.options = resolve_generation_options(generation);
     payload.streaming_callback = std::move(callback);
     payload.extraction_schema = nlohmann::json(output_schema);
     payload.result_kind = ResultKind::Extraction;
@@ -91,8 +90,8 @@ RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& ou
 
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         ConversationView messages,
-                                                        const GenerationOptions& options,
-                                                        AsyncTextCallback callback) {
+                                                        GenerationOverride generation,
+                                                        AsyncTokenCallback callback) {
     auto params = tools::detail::normalize_schema(output_schema);
     if (!params) {
         return make_immediate_error_handle<ExtractionResponse>(
@@ -102,7 +101,7 @@ RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& ou
     RequestPayload payload;
     payload.messages = materialize_conversation(messages);
     payload.history_mode = HistoryMode::Replace;
-    payload.options = resolve_generation_options(options);
+    payload.options = resolve_generation_options(generation);
     payload.streaming_callback = std::move(callback);
     payload.extraction_schema = nlohmann::json(output_schema);
     payload.result_kind = ResultKind::Extraction;
@@ -119,12 +118,11 @@ void AgentRuntime::cancel(RequestId id) {
     request_slots_->cancel(id);
 }
 
-GenerationOptions
-AgentRuntime::resolve_generation_options(const GenerationOptions& overrides) const {
-    if (overrides.is_default()) {
+GenerationOptions AgentRuntime::resolve_generation_options(GenerationOverride generation) const {
+    if (!generation.options()) {
         return default_generation_options_;
     }
-    return overrides;
+    return *generation.options();
 }
 
 template <typename Result>
@@ -150,8 +148,8 @@ RequestHandle<Result> AgentRuntime::enqueue_request(RequestPayload&& payload) {
         return make_immediate_error_handle<Result>(reservation.error());
     }
 
-    auto state = std::make_shared<SlotRequestState<Result>>(request_slots_, reservation->slot,
-                                                            reservation->generation);
+    auto state = std::make_shared<SlotRequestState<Result>>(
+        request_slots_, reservation->id, reservation->slot, reservation->generation);
     RequestHandle<Result> handle{std::move(state), reservation->id};
 
     if (!request_mailbox_.push_request(QueuedRequest{reservation->slot, reservation->generation})) {
