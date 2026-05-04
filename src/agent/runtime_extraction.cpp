@@ -27,28 +27,11 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
 
     std::string grammar_str = tools::GrammarBuilder::build_schema(*params);
 
-    // Save/restore history for stateless (Replace) mode
-    std::optional<HistorySnapshot> original_history;
-    std::optional<ScopeExit> restore_history_guard;
-    std::optional<ScopeExit> trim_history_guard;
-
-    if (request.history_mode == HistoryMode::Replace) {
-        original_history = swap_history(*backend_, *request.messages);
-        restore_history_guard.emplace(
-            [this, &original_history] { backend_->swap_history(std::move(*original_history)); });
-    } else {
-        if (request.messages->size() != 1u) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidMessageSequence,
-                      "Stateful extraction requests must include exactly one message"});
-        }
-
-        auto add_result = backend_->add_message(request.messages->front().view());
-        if (!add_result) {
-            return std::unexpected(add_result.error());
-        }
-
-        trim_history_guard.emplace([this] { enforce_history_limit(); });
+    auto history_scope =
+        RequestHistoryScope::enter(*backend_, request.history_mode, *request.messages,
+                                   agent_config_.max_history_messages, "extraction");
+    if (!history_scope) {
+        return std::unexpected(history_scope.error());
     }
 
     // Set schema grammar, restore previous tool calling state on exit
@@ -68,37 +51,22 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
         }
     });
 
-    // Generate (single pass, no tool loop)
-    std::chrono::steady_clock::time_point first_token_time;
-    bool first_token_received = false;
-    int completion_tokens = 0;
-
-    auto callback = [&](std::string_view token) -> TokenAction {
-        if (!first_token_received) {
-            first_token_time = std::chrono::steady_clock::now();
-            first_token_received = true;
-        }
-        ++completion_tokens;
-        if (request.streaming_callback && *request.streaming_callback) {
-            callback_dispatcher_.dispatch(*request.streaming_callback, token);
-        }
-        return TokenAction::Continue;
-    };
-
+    GenerationStats stats(start_time);
+    GenerationRunner generation_runner(*backend_, callback_dispatcher_);
     auto cancellation_check = [&request]() {
         return request.cancelled && request.cancelled->load(std::memory_order_acquire);
     };
-    auto generated = backend_->generate_from_history(*request.options, TokenCallback(callback),
-                                                     cancellation_check);
-    callback_dispatcher_.drain();
-    if (!generated) {
-        return std::unexpected(generated.error());
+    auto pass = generation_runner.run(*request.options, request.streaming_callback,
+                                      CancellationCallback(cancellation_check), stats);
+    if (!pass) {
+        return std::unexpected(pass.error());
     }
+    auto generated = std::move(pass->generation);
 
     // Parse and validate extracted JSON
     nlohmann::json extracted;
     try {
-        extracted = nlohmann::json::parse(generated->text);
+        extracted = nlohmann::json::parse(generated.text);
     } catch (const nlohmann::json::parse_error& e) {
         return std::unexpected(
             Error{ErrorCode::ExtractionFailed,
@@ -112,31 +80,16 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
     }
 
     // Commit the assistant response to history
-    backend_->add_message(Message::assistant(generated->text).view());
+    backend_->add_message(Message::assistant(generated.text).view());
     backend_->finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
 
     ExtractionResponse response;
-    response.text = std::move(generated->text);
+    response.text = std::move(generated.text);
     response.data = std::move(extracted);
-    response.usage.prompt_tokens = generated->prompt_tokens;
-    response.usage.completion_tokens = completion_tokens;
-    response.usage.total_tokens = generated->prompt_tokens + completion_tokens;
-
-    response.metrics.latency_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-
-    if (first_token_received) {
-        response.metrics.time_to_first_token_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(first_token_time - start_time);
-        auto generation_time =
-            std::chrono::duration_cast<std::chrono::milliseconds>(end_time - first_token_time);
-        if (generation_time.count() > 0) {
-            response.metrics.tokens_per_second =
-                (completion_tokens * 1000.0) / generation_time.count();
-        }
-    }
+    response.usage = stats.usage();
+    response.metrics = stats.metrics(end_time);
 
     return response;
 }

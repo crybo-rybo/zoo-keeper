@@ -7,10 +7,12 @@
 #include "agent/runtime_helpers.hpp"
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <future>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -40,6 +42,7 @@ using zoo::internal::agent::AgentRuntime;
 using zoo::internal::agent::GenerationResult;
 using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::ParsedToolResponse;
+using zoo::internal::agent::RequestHistoryScope;
 using zoo::internal::agent::ScopeExit;
 
 struct UnsupportedRequestResult {};
@@ -269,6 +272,37 @@ TEST(AgentRuntimeTest, CancelBeforeProcessingBeginsFailsQueuedRequest) {
     EXPECT_EQ(second_result.error().code, ErrorCode::RequestCancelled);
 }
 
+TEST(AgentRuntimeTest, CancelDuringGenerationPropagatesRequestCancelled) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+
+    backend_ptr->push_generation([entered](TokenCallback,
+                                           const CancellationCallback& should_cancel) {
+        entered->set_value();
+        for (int attempt = 0; attempt < 100 && !should_cancel(); ++attempt) {
+            std::this_thread::sleep_for(5ms);
+        }
+        if (should_cancel()) {
+            return Expected<GenerationResult>(
+                std::unexpected(Error{ErrorCode::RequestCancelled, "cancelled by test"}));
+        }
+        return Expected<GenerationResult>(GenerationResult{"unexpected reply", 0, false, "", {}});
+    });
+
+    auto handle = runtime.chat("cancel me");
+    ASSERT_EQ(entered_future.wait_for(1s), std::future_status::ready);
+    runtime.cancel(handle.id());
+
+    auto result = handle.await_result(1s);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+}
+
 TEST(AgentRuntimeTest, AwaitResultTimeoutDoesNotConsumeHandle) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -360,6 +394,28 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
     EXPECT_EQ(streamed, "Once upon a time");
     EXPECT_EQ(result->usage.prompt_tokens, 7);
     EXPECT_EQ(result->usage.completion_tokens, 3);
+}
+
+TEST(AgentRuntimeTest, ChatStreamingCallbackFailureFailsRequest) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("boom"), TokenAction::Continue);
+        }
+        return Expected<GenerationResult>(GenerationResult{"boom", 1, false, "", {}});
+    });
+
+    auto handle = runtime.chat("trigger callback", GenerationOptions{},
+                               [](std::string_view) { throw std::runtime_error("callback boom"); });
+    auto result = handle.await_result();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InferenceFailed);
+    EXPECT_NE(result.error().message.find("callback boom"), std::string::npos);
 }
 
 TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
@@ -751,6 +807,50 @@ TEST(AgentRuntimeTest, ToolHandlerExceptionsBecomeExecutionFailedErrors) {
     ASSERT_TRUE(result->tool_trace.has_value());
     ASSERT_EQ(result->tool_trace->invocations.size(), 1u);
     EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::ExecutionFailed);
+}
+
+TEST(RequestHistoryScopeTest, ReplaceRestoresOriginalHistoryOnExit) {
+    FakeBackend backend;
+    ASSERT_TRUE(backend.add_message(Message::system("base prompt").view()).has_value());
+    ASSERT_TRUE(backend.add_message(Message::user("persistent user").view()).has_value());
+    const auto before = backend.get_history();
+
+    const std::vector<Message> scoped_messages = {Message::system("scoped prompt"),
+                                                  Message::user("scoped user")};
+    {
+        auto scope =
+            RequestHistoryScope::enter(backend, HistoryMode::Replace, scoped_messages, 64, "chat");
+        ASSERT_TRUE(scope.has_value()) << scope.error().to_string();
+        ASSERT_TRUE(backend.add_message(Message::assistant("scoped reply").view()).has_value());
+        const auto scoped = backend.get_history();
+        ASSERT_EQ(scoped.size(), 3u);
+        EXPECT_EQ(scoped[0].content, "scoped prompt");
+        EXPECT_EQ(scoped[2].content, "scoped reply");
+    }
+
+    EXPECT_EQ(backend.get_history(), before);
+}
+
+TEST(RequestHistoryScopeTest, AppendTrimsRetainedHistoryOnExit) {
+    FakeBackend backend;
+    backend.set_system_prompt("retain system");
+    ASSERT_TRUE(backend.add_message(Message::user("old user").view()).has_value());
+    ASSERT_TRUE(backend.add_message(Message::assistant("old reply").view()).has_value());
+
+    const std::vector<Message> request_messages = {Message::user("new user")};
+    {
+        auto scope =
+            RequestHistoryScope::enter(backend, HistoryMode::Append, request_messages, 2, "chat");
+        ASSERT_TRUE(scope.has_value()) << scope.error().to_string();
+        ASSERT_TRUE(backend.add_message(Message::assistant("new reply").view()).has_value());
+        ASSERT_EQ(backend.get_history().size(), 5u);
+    }
+
+    const auto history = backend.get_history();
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].role, Role::System);
+    EXPECT_EQ(history[1].content, "new user");
+    EXPECT_EQ(history[2].content, "new reply");
 }
 
 TEST(AgentRuntimeTest, ToolExecutionCompletesCleanlyBeforeRuntimeDestruction) {
