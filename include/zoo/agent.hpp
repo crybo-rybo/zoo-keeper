@@ -236,7 +236,7 @@ class Agent {
                                  std::optional<std::chrono::nanoseconds> timeout = {}) {
         std::string tool_name{name};
         std::string tool_description{description};
-        auto definition = tools::detail::make_tool_definition(
+        auto definition = tools::make_tool_definition(
             tool_name, tool_description,
             std::vector<std::string>(param_names.begin(), param_names.end()), std::move(func));
         if (!definition) {

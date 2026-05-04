@@ -72,9 +72,9 @@ void add_dist_sampler(llama_sampler* chain, const SamplingParams& sampling) {
 
 } // namespace
 
-bool Model::set_schema_grammar(const std::string& grammarstr) {
+bool Model::set_schema_grammar(const std::string& grammar_str) {
     auto previous_policy = impl_->session_.sampler_policy;
-    impl_->session_.sampler_policy = Impl::SamplerPolicy::schema(grammarstr);
+    impl_->session_.sampler_policy = Impl::SamplerPolicy::schema(grammar_str);
     if (!rebuild_sampler_with_schema_grammar(*impl_)) {
         impl_->session_.sampler_policy = std::move(previous_policy);
         return false;

@@ -108,25 +108,24 @@ TEST(CallbackDispatcherTest, DispatchReturnsStopAction) {
     EXPECT_EQ(dispatcher.dispatch(callback, "stop"), TokenAction::Stop);
 }
 
-TEST(CallbackDispatcherTest, ThrowingCallbackDoesNotTerminateProcess) {
+TEST(CallbackDispatcherTest, ThrowingVoidCallbackDoesNotTerminateProcess) {
     ASSERT_EXIT(
         [] {
             CallbackDispatcher dispatcher;
 
             AsyncTokenCallback failing = [](std::string_view) { throw std::runtime_error("boom"); };
-            try {
-                dispatcher.dispatch(failing, "x");
-            } catch (const std::runtime_error&) {
-            }
+            dispatcher.dispatch(failing, "x");
 
             bool recovered = false;
             AsyncTokenCallback succeeding = [&](std::string_view) { recovered = true; };
-            dispatcher.dispatch(succeeding, "y");
+            try {
+                dispatcher.dispatch(succeeding, "y");
+            } catch (const std::runtime_error&) {
+            }
 
             try {
                 dispatcher.drain();
-            } catch (...) {
-                std::exit(2);
+            } catch (const std::runtime_error&) {
             }
 
             std::exit(recovered ? 0 : 3);
@@ -134,24 +133,107 @@ TEST(CallbackDispatcherTest, ThrowingCallbackDoesNotTerminateProcess) {
         ::testing::ExitedWithCode(0), "");
 }
 
-TEST(CallbackDispatcherTest, ThrowingCallbackPropagatesToDispatchAndDoesNotPoisonQueue) {
+TEST(CallbackDispatcherTest, ActionCallbackExceptionPropagatesToDispatch) {
     CallbackDispatcher dispatcher;
 
     std::atomic<int> attempts{0};
 
-    AsyncTokenCallback failing = [&](std::string_view) {
+    AsyncTokenCallback failing = [&](std::string_view) -> TokenAction {
         attempts.fetch_add(1, std::memory_order_relaxed);
         throw std::runtime_error("boom");
     };
 
     EXPECT_THROW(dispatcher.dispatch(failing, "first"), std::runtime_error);
-
     EXPECT_EQ(attempts.load(std::memory_order_relaxed), 1);
+
+    bool recovered = false;
+    AsyncTokenCallback succeeding = [&](std::string_view) -> TokenAction {
+        recovered = true;
+        return TokenAction::Continue;
+    };
+    EXPECT_EQ(dispatcher.dispatch(succeeding, "next"), TokenAction::Continue);
+    EXPECT_TRUE(recovered);
+}
+
+TEST(CallbackDispatcherTest, VoidCallbackDispatchReturnsWithoutWaiting) {
+    CallbackDispatcher dispatcher;
+
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+    std::atomic<int> count{0};
+
+    AsyncTokenCallback callback = [&, release_future](std::string_view) mutable {
+        release_future.wait();
+        count.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_EQ(dispatcher.dispatch(callback, "x"), TokenAction::Continue);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_LT(elapsed, 50ms);
+    EXPECT_EQ(count.load(std::memory_order_relaxed), 0);
+
+    release.set_value();
+    dispatcher.drain();
+    EXPECT_EQ(count.load(std::memory_order_relaxed), 1);
+}
+
+TEST(CallbackDispatcherTest, ActionCallbackDispatchWaitsForCallback) {
+    CallbackDispatcher dispatcher;
+
+    AsyncTokenCallback callback = [](std::string_view) -> TokenAction {
+        std::this_thread::sleep_for(20ms);
+        return TokenAction::Stop;
+    };
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_EQ(dispatcher.dispatch(callback, "x"), TokenAction::Stop);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_GE(elapsed, 20ms);
+}
+
+TEST(CallbackDispatcherTest, VoidCallbackExceptionRethrowsAtDrain) {
+    CallbackDispatcher dispatcher;
+
+    AsyncTokenCallback failing = [](std::string_view) { throw std::runtime_error("boom"); };
+    EXPECT_EQ(dispatcher.dispatch(failing, "x"), TokenAction::Continue);
+
+    EXPECT_THROW(dispatcher.drain(), std::runtime_error);
 
     bool recovered = false;
     AsyncTokenCallback succeeding = [&](std::string_view) { recovered = true; };
     EXPECT_EQ(dispatcher.dispatch(succeeding, "next"), TokenAction::Continue);
+    dispatcher.drain();
     EXPECT_TRUE(recovered);
+}
+
+TEST(CallbackDispatcherTest, VoidCallbackExceptionRethrowsAtNextDispatch) {
+    CallbackDispatcher dispatcher;
+
+    std::promise<void> failed_signal;
+    auto failed_future = failed_signal.get_future();
+
+    AsyncTokenCallback failing = [&](std::string_view) {
+        struct Notify {
+            std::promise<void>* signal;
+            ~Notify() {
+                signal->set_value();
+            }
+        } notify{&failed_signal};
+        throw std::runtime_error("boom");
+    };
+    EXPECT_EQ(dispatcher.dispatch(failing, "x"), TokenAction::Continue);
+
+    ASSERT_EQ(failed_future.wait_for(2s), std::future_status::ready);
+
+    bool ran = false;
+    AsyncTokenCallback succeeding = [&](std::string_view) { ran = true; };
+    EXPECT_THROW(dispatcher.dispatch(succeeding, "y"), std::runtime_error);
+
+    dispatcher.drain();
+    EXPECT_TRUE(ran);
 }
 
 } // namespace

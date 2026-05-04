@@ -516,7 +516,10 @@ using CancellationCallback = FunctionRef<bool()>;
 /**
  * @brief Async streaming callback stored by the agent runtime.
  *
- * Callables returning `void` are adapted to `TokenAction::Continue`.
+ * Callables returning `void` are adapted to `TokenAction::Continue`. The
+ * underlying shape is preserved through `returns_action()` so the dispatcher
+ * can run void callbacks asynchronously while waiting on action-returning
+ * callbacks for their `TokenAction` result.
  */
 class AsyncTokenCallback {
   public:
@@ -537,15 +540,21 @@ class AsyncTokenCallback {
                 std::invoke(cb, token);
                 return TokenAction::Continue;
             };
+            returns_action_ = false;
         } else {
             callback_ = [cb = std::forward<Callback>(callback)](std::string_view token) mutable {
                 return static_cast<TokenAction>(std::invoke(cb, token));
             };
+            returns_action_ = true;
         }
     }
 
     [[nodiscard]] explicit operator bool() const noexcept {
         return static_cast<bool>(callback_);
+    }
+
+    [[nodiscard]] bool returns_action() const noexcept {
+        return returns_action_;
     }
 
     TokenAction operator()(std::string_view token) const {
@@ -554,6 +563,7 @@ class AsyncTokenCallback {
 
   private:
     std::function<TokenAction(std::string_view)> callback_;
+    bool returns_action_ = false;
 };
 
 using AsyncTextCallback = AsyncTokenCallback;
@@ -660,6 +670,11 @@ class GenerationOverride {
   public:
     GenerationOverride() noexcept = default;
 
+    /// Implicit conversion from `GenerationOptions` for source-compatibility with
+    /// pre-`GenerationOverride` overloads. A default-constructed `GenerationOptions{}`
+    /// (`is_default()` true) maps to `inherit_defaults()`; any non-default value maps
+    /// to `explicit_options()`. Use the static factories below when you need that
+    /// distinction made unambiguously at the call site.
     GenerationOverride(const GenerationOptions& options)
         : options_(options.is_default() ? std::nullopt
                                         : std::optional<GenerationOptions>(options)) {}
