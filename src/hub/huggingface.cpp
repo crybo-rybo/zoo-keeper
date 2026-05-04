@@ -44,6 +44,18 @@ Expected<std::string> require_downloaded_model_path(const common_download_model_
     return download.model_path;
 }
 
+Expected<void> validate_download_status(int status, const std::string& url) {
+    if (status < 0) {
+        return std::unexpected(Error{ErrorCode::DownloadFailed, "Download failed for: " + url});
+    }
+    if (status >= 400) {
+        return std::unexpected(
+            Error{ErrorCode::DownloadFailed,
+                  "Download returned HTTP " + std::to_string(status) + " for: " + url});
+    }
+    return {};
+}
+
 } // namespace
 
 struct HuggingFaceClient::Impl {
@@ -185,13 +197,8 @@ Expected<std::string> HuggingFaceClient::download_file(const std::string& url,
     try {
         const int status =
             common_download_file_single(url, destination_path, impl_->download_opts());
-        if (status < 0) {
-            return std::unexpected(Error{ErrorCode::DownloadFailed, "Download failed for: " + url});
-        }
-        if (status >= 400) {
-            return std::unexpected(
-                Error{ErrorCode::DownloadFailed,
-                      "Download returned HTTP " + std::to_string(status) + " for: " + url});
+        if (auto result = validate_download_status(status, url); !result) {
+            return std::unexpected(result.error());
         }
 
         if (auto validation = detail::validate_downloaded_file(destination_path); !validation) {
