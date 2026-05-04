@@ -115,10 +115,9 @@ Expected<void> validate_enum_values(const std::vector<nlohmann::json>& values, T
     return {};
 }
 
-Expected<std::vector<std::string>>
-collect_required_names(const nlohmann::json& schema, const nlohmann::json& properties,
-                       const std::string& tool_name,
-                       std::unordered_set<std::string>& required_lookup) {
+Expected<std::vector<std::string>> collect_required_names(const nlohmann::json& schema,
+                                                          const nlohmann::json& properties,
+                                                          const std::string& tool_name) {
     std::vector<std::string> required_names;
     auto required_it = schema.find("required");
     if (required_it == schema.end()) {
@@ -130,6 +129,7 @@ collect_required_names(const nlohmann::json& schema, const nlohmann::json& prope
                   "Tool schema for '" + tool_name + "' must use an array for 'required'"});
     }
 
+    std::unordered_set<std::string> seen;
     for (const auto& value : *required_it) {
         if (!value.is_string()) {
             return std::unexpected(
@@ -138,7 +138,7 @@ collect_required_names(const nlohmann::json& schema, const nlohmann::json& prope
         }
 
         const std::string required_name = value.get<std::string>();
-        if (!required_lookup.insert(required_name).second) {
+        if (!seen.insert(required_name).second) {
             return std::unexpected(
                 Error{ErrorCode::InvalidToolSchema,
                       "Tool schema for '" + tool_name +
@@ -191,11 +191,12 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
                                          "' must omit 'additionalProperties' or set it to false"});
     }
 
-    std::unordered_set<std::string> required_lookup;
-    auto required_names = collect_required_names(schema, *props_it, name, required_lookup);
+    auto required_names = collect_required_names(schema, *props_it, name);
     if (!required_names) {
         return std::unexpected(required_names.error());
     }
+    const std::unordered_set<std::string> required_lookup(required_names->begin(),
+                                                          required_names->end());
 
     std::unordered_map<std::string, ToolParameter> parameters_by_name;
     for (const auto& [param_name, property] : props_it->items()) {
