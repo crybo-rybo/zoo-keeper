@@ -91,31 +91,34 @@ class ToolLoopController {
 
     ToolDetection detect_tool_call(GenerationResult generated) const {
         ToolDetection detection;
-        if (use_native_tool_calling_ && generated.tool_call_detected) {
-            if (!generated.tool_calls.empty()) {
-                detection.response_text = std::move(generated.parsed_content);
-                detection.structured_tool_calls = std::move(generated.tool_calls);
-            } else {
-                auto parsed = backend_.parse_tool_response(generated.text);
-                detection.response_text = std::move(parsed.content);
-                detection.structured_tool_calls = std::move(parsed.tool_calls);
-            }
-
-            if (!detection.structured_tool_calls.empty()) {
-                const auto& first_tc = detection.structured_tool_calls.front();
-                tools::ToolCall tool_call;
-                tool_call.id = first_tc.id;
-                tool_call.name = first_tc.name;
-                try {
-                    tool_call.arguments = nlohmann::json::parse(first_tc.arguments_json);
-                } catch (const nlohmann::json::exception&) {
-                    tool_call.arguments = nlohmann::json::object();
-                }
-                detection.tool_call = std::move(tool_call);
-            }
-        } else {
+        if (!use_native_tool_calling_ || !generated.tool_call_detected) {
             detection.response_text = std::move(generated.text);
+            return detection;
         }
+
+        if (!generated.tool_calls.empty()) {
+            detection.response_text = std::move(generated.parsed_content);
+            detection.structured_tool_calls = std::move(generated.tool_calls);
+        } else {
+            auto parsed = backend_.parse_tool_response(generated.text);
+            detection.response_text = std::move(parsed.content);
+            detection.structured_tool_calls = std::move(parsed.tool_calls);
+        }
+
+        if (detection.structured_tool_calls.empty()) {
+            return detection;
+        }
+
+        const auto& first_tc = detection.structured_tool_calls.front();
+        tools::ToolCall tool_call;
+        tool_call.id = first_tc.id;
+        tool_call.name = first_tc.name;
+        try {
+            tool_call.arguments = nlohmann::json::parse(first_tc.arguments_json);
+        } catch (const nlohmann::json::exception&) {
+            tool_call.arguments = nlohmann::json::object();
+        }
+        detection.tool_call = std::move(tool_call);
         return detection;
     }
 

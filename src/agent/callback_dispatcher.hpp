@@ -123,6 +123,18 @@ class CallbackDispatcher {
         }
     }
 
+    void route_exception(const Entry& entry, std::unique_lock<std::mutex>& lock) {
+        if (entry.done) {
+            entry.done->set_exception(std::current_exception());
+            return;
+        }
+        lock.lock();
+        if (!failure_) {
+            failure_ = std::current_exception();
+        }
+        lock.unlock();
+    }
+
     void run() {
         std::unique_lock<std::mutex> lock(mutex_);
         while (true) {
@@ -141,31 +153,15 @@ class CallbackDispatcher {
                     }
                 } catch (const std::exception& e) {
                     ZOO_LOG("error", "streaming callback threw: %s", e.what());
-                    if (entry.done) {
-                        entry.done->set_exception(std::current_exception());
-                    } else {
-                        lock.lock();
-                        if (!failure_) {
-                            failure_ = std::current_exception();
-                        }
-                        lock.unlock();
-                    }
+                    route_exception(entry, lock);
                 } catch (...) {
                     ZOO_LOG("error", "streaming callback threw unknown exception");
-                    if (entry.done) {
-                        entry.done->set_exception(std::current_exception());
-                    } else {
-                        lock.lock();
-                        if (!failure_) {
-                            failure_ = std::current_exception();
-                        }
-                        lock.unlock();
-                    }
+                    route_exception(entry, lock);
                 }
 
                 lock.lock();
                 executing_ = false;
-                drain_cv_.notify_all();
+                drain_cv_.notify_one();
             }
 
             if (shutdown_) {

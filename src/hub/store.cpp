@@ -245,10 +245,10 @@ Expected<size_t> ModelResolver::find_index(std::span<const ModelEntry> entries,
     return std::unexpected(Error{ErrorCode::ModelNotFound, "No model found matching: " + query});
 }
 
-Expected<ModelEntry> ModelImporter::add_local_file(std::vector<ModelEntry>& entries,
-                                                   const CatalogRepository& repository,
-                                                   const std::string& file_path,
-                                                   std::vector<std::string> aliases) {
+Expected<ModelEntry>
+ModelImporter::add_local_file(std::vector<ModelEntry>& entries, const CatalogRepository& repository,
+                              const std::string& file_path, std::vector<std::string> aliases,
+                              std::string source_url, std::string huggingface_repo) {
     const auto abs_path = std::filesystem::absolute(file_path).string();
 
     if (auto result = validate_aliases_for_store(entries, aliases); !result) {
@@ -273,6 +273,8 @@ Expected<ModelEntry> ModelImporter::add_local_file(std::vector<ModelEntry>& entr
     entry.info = std::move(*info);
     entry.aliases = std::move(aliases);
     entry.added_at = now_iso8601();
+    entry.source_url = std::move(source_url);
+    entry.huggingface_repo = std::move(huggingface_repo);
 
     entries.push_back(entry);
 
@@ -353,13 +355,8 @@ Expected<ModelEntry> HubPullService::pull(HuggingFaceClient& client, const std::
         return std::unexpected(validation.error());
     }
 
-    auto entry = ModelImporter::add_local_file(entries, repository, local_path, std::move(aliases));
-    if (!entry) {
-        return std::unexpected(entry.error());
-    }
-
-    return persist_source_annotation(entries, repository, entry->id, std::move(source_url),
-                                     parsed->repo_id);
+    return ModelImporter::add_local_file(entries, repository, local_path, std::move(aliases),
+                                         std::move(source_url), parsed->repo_id);
 }
 
 } // namespace detail

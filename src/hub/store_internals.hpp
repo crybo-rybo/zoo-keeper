@@ -36,10 +36,10 @@ class ModelResolver {
 
 class ModelImporter {
   public:
-    [[nodiscard]] static Expected<ModelEntry> add_local_file(std::vector<ModelEntry>& entries,
-                                                             const CatalogRepository& repository,
-                                                             const std::string& file_path,
-                                                             std::vector<std::string> aliases);
+    [[nodiscard]] static Expected<ModelEntry>
+    add_local_file(std::vector<ModelEntry>& entries, const CatalogRepository& repository,
+                   const std::string& file_path, std::vector<std::string> aliases,
+                   std::string source_url = {}, std::string huggingface_repo = {});
 };
 
 class HubPullService {
