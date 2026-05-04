@@ -46,6 +46,7 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 | `src/agent/request_slots.hpp` | Slot-backed request state, cancellation, await/release |
 | `src/agent/callback_dispatcher.hpp` | Streaming callback dispatch |
 | `src/agent/command.hpp` | Typed control operations applied on the inference thread |
+| `src/agent/runtime_helpers.hpp` | Request history scope, generation runner, tool-loop controller, and shared runtime helpers |
 
 Keep responsibilities narrow. If a change affects queueing, cancellation, command routing, and request execution at once, it usually belongs in a smaller extracted unit instead.
 
@@ -63,15 +64,33 @@ Keep responsibilities narrow. If a change affects queueing, cancellation, comman
 | `src/core/model_sampling.cpp` | sampler construction and grammar updates |
 | `src/core/model_tool_calling.cpp` | tool-calling setup and response parsing |
 | `src/core/stream_filter.*` | streaming token filtering (e.g., tool-call trigger detection) |
-| `src/core/model_impl.hpp` | private implementation state behind the public header |
+| `src/core/model_impl.hpp` | private implementation state, llama handles, and sampler policy behind the public header |
 | `src/core/prompt_bookkeeping.hpp` | prompt rendering bookkeeping helpers |
-| `src/core/batch.hpp` | prefill batch chunking |
+| `src/core/batch.hpp` | RAII wrapper for llama batch lifetime |
 
 Contributor rules:
 
 - llama resource ownership stays model-private
 - prompt and KV-cache bookkeeping stays localized, not spread through unrelated files
 - no new public headers should be added for model internals unless the API truly needs them
+
+## Hub Internals
+
+`zoo::hub::ModelStore` stays the public facade for catalog operations, local
+imports, HuggingFace pulls, and one-line Model/Agent creation. Its private
+collaborators live under `src/hub/`:
+
+| File | Responsibility |
+|------|----------------|
+| `src/hub/store.cpp` | Public facade method implementations and private collaborator definitions |
+| `src/hub/store_internals.hpp` | Private catalog repository, resolver, importer, and pull-service declarations |
+| `src/hub/store_json.hpp` | Catalog JSON serialization |
+| `src/hub/inspector.cpp` | GGUF metadata inspection with private llama/GGUF resource ownership |
+| `src/hub/download_validation.hpp` | Downloaded-file validation helpers |
+| `src/hub/hf_cache_paths.hpp` | llama.cpp Hugging Face cache URL/path helpers |
+
+Catalog saves must remain temp-file-plus-rename operations; do not reintroduce
+direct truncating writes to `catalog.json`.
 
 ## Tooling Boundaries
 
@@ -94,11 +113,13 @@ The `AgentRuntime` implementation is split across five files by responsibility:
 |------|----------------|
 | `src/agent/runtime.cpp` | Public request submission: `chat()`, `extract()`, `cancel()` |
 | `src/agent/runtime_lifecycle.cpp` | Construction, start/stop, inference thread entry point, shutdown sequencing |
-| `src/agent/runtime_inference.cpp` | Inference-thread dispatch and the agentic tool loop (generate → detect → execute → re-generate) |
+| `src/agent/runtime_inference.cpp` | Inference-thread request dispatch and request-mode coordination |
 | `src/agent/runtime_commands.cpp` | Synchronous command lane: tool registration, history queries, config updates |
 | `src/agent/runtime_extraction.cpp` | Schema-constrained structured output extraction |
 
-Shared helpers (`ScopeExit`, `snapshot_from_messages`, `swap_history`) live in `src/agent/runtime_helpers.hpp`.
+Shared helpers such as `RequestHistoryScope`, `GenerationRunner`,
+`ToolLoopController`, `ScopeExit`, `snapshot_from_messages`, and `swap_history`
+live in `src/agent/runtime_helpers.hpp`.
 
 ## Documentation Split
 

@@ -101,7 +101,8 @@ auto hf = zoo::hub::HuggingFaceClient::create({.token = "hf_..."}).value();
 ## Model Store
 
 `ModelStore` manages a local catalog of downloaded GGUF models, persisted as
-JSON in the store directory (default: `~/.zoo-keeper/models/`).
+JSON in the store directory (default: `~/.zoo-keeper/models/`). Catalog saves
+write a temporary file and atomically rename it over `catalog.json`.
 
 The store supports alias-based lookup, auto-configuration from cached
 inspection metadata, and one-liner Model or Agent creation.
@@ -129,8 +130,8 @@ auto model = store->load_model("qwen3").value();
 ```
 
 Catalog operations: `add()`, `remove()`, `find()`, `list()`, `add_alias()`.
-Resolution order for `find()`: exact alias match, then name substring, then
-path match.
+Resolution order for `find()`: exact alias, exact model name, name substring,
+file path, then catalog ID.
 
 ## Error Codes
 

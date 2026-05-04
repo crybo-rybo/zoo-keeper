@@ -79,13 +79,13 @@ bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
         Impl::SamplerPolicy::native_tool_call(impl_->session_.tool_state->grammar);
 
     if (!impl_->session_.sampler_policy.grammar.empty()) {
-        if (!rebuild_sampler_with_tool_grammar()) {
+        if (!rebuild_sampler_with_tool_grammar(*impl_)) {
             impl_->session_.tool_state.reset();
             impl_->session_.sampler_policy = Impl::SamplerPolicy::plain();
             return false;
         }
     } else {
-        impl_->session_.sampler = create_sampler_chain();
+        impl_->session_.sampler = create_sampler_chain(*impl_);
         if (!impl_->session_.sampler) {
             impl_->session_.tool_state.reset();
             impl_->session_.sampler_policy = Impl::SamplerPolicy::plain();
@@ -144,7 +144,7 @@ void Model::clear_tool_grammar() noexcept {
 
     impl_->session_.tool_state.reset();
     impl_->session_.sampler_policy = Impl::SamplerPolicy::plain();
-    impl_->session_.sampler = create_sampler_chain();
+    impl_->session_.sampler = create_sampler_chain(*impl_);
 }
 
 // ---------------------------------------------------------------------------

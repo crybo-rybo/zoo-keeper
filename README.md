@@ -78,7 +78,7 @@ auto response = handle.await_result().value();
 |-----------|:---:|:---:|
 | Model loading and inference | Manual C API | `Model::load()` with validated config |
 | Async inference with streaming | Build your own | `Agent::chat()` returns `RequestHandle<T>` |
-| Request cancellation | Implement yourself | `agent->cancel(handle.id())` |
+| Request cancellation | Implement yourself | `handle.cancel()` or `agent->cancel(handle.id())` |
 | Chat history with KV cache sync | Manual bookkeeping | Built into `Model`, auto-trimmed |
 | Tool calling (llama.cpp PEG formats) | Parse text yourself | Template-driven detection + execution loop |
 | Type-safe tool registration | N/A | `register_tool("name", desc, params, callable)` |

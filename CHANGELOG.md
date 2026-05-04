@@ -7,6 +7,42 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- `RequestHandle<Result>::cancel()` for cancelling an async request through its
+  handle.
+- `AsyncTokenCallback`, which can return `TokenAction::Stop` from streaming
+  callbacks while keeping existing `void(std::string_view)` callbacks
+  source-compatible.
+- `GenerationOverride` for explicit per-call generation semantics: inherit
+  configured defaults or use exactly supplied `GenerationOptions`.
+- Expected-returning agent command helpers: `try_set_system_prompt()`,
+  `try_get_history()`, and `try_clear_history()`.
+- Public `zoo::tools::make_tool_definition(...)` helpers for batch tool
+  registration without depending on `zoo::tools::detail`.
+
+### Changed
+
+- `AgentRuntime` request processing is split into private history-scope,
+  generation-runner, and tool-loop helpers.
+- Core sampler and grammar setup now uses an explicit private policy for plain
+  text, native tool calls, and schema-constrained extraction.
+- Public `Model` headers now expose only the Pimpl boundary and no llama.cpp
+  implementation type names.
+- `ToolRegistry` documentation now states the low-level contract explicitly:
+  direct multi-threaded use requires external synchronization.
+- `ModelStore` is now a facade over private catalog, resolver, importer, and
+  pull-service collaborators.
+
+### Fixed
+
+- `Agent::tool_count()` no longer reads registry containers concurrently with
+  inference-thread tool registration.
+- Short-lived llama/GGUF resources are now scope-owned by private RAII wrappers
+  in the modified paths.
+- `ModelStore` catalog saves now use temporary-file write plus atomic rename to
+  avoid direct truncating writes.
+
 ## [1.1.3] - 2026-05-03
 
 ### Changed
