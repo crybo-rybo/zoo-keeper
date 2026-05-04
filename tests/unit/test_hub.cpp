@@ -459,6 +459,24 @@ TEST(ModelStoreCatalogTest, ResolverPrecedenceUsesAliasThenExactNameThenSubstrin
     EXPECT_EQ(*exact_idx, 1u);
 }
 
+TEST(ModelStoreCatalogTest, ResolverFallsBackToPathAndId) {
+    std::vector<zoo::hub::ModelEntry> entries;
+    entries.push_back(make_entry("model-a", "alpha", "/tmp/alpha.gguf"));
+    entries.push_back(make_entry("model-b", "beta", "/tmp/beta.gguf"));
+
+    auto path_idx = zoo::hub::detail::ModelResolver::find_index(entries, "/tmp/beta.gguf");
+    ASSERT_TRUE(path_idx.has_value()) << path_idx.error().to_string();
+    EXPECT_EQ(*path_idx, 1u);
+
+    auto id_idx = zoo::hub::detail::ModelResolver::find_index(entries, "model-a");
+    ASSERT_TRUE(id_idx.has_value()) << id_idx.error().to_string();
+    EXPECT_EQ(*id_idx, 0u);
+
+    auto missing = zoo::hub::detail::ModelResolver::find_index(entries, "missing");
+    ASSERT_FALSE(missing.has_value());
+    EXPECT_EQ(missing.error().code, zoo::ErrorCode::ModelNotFound);
+}
+
 TEST(ModelStoreCatalogTest, OpenRejectsDuplicateAliasesOnSameEntry) {
     TempDir temp_dir;
 

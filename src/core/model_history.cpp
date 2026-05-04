@@ -117,18 +117,11 @@ void Model::trim_history(size_t max_non_system_messages) {
     }
 
     size_t erase_end = impl_->session_.messages.size() - max_non_system_messages;
-    if (erase_end < system_offset) {
-        erase_end = system_offset;
-    }
 
     // Align to a user-message boundary so we don't start mid-exchange.
     while (erase_end < impl_->session_.messages.size() &&
            impl_->session_.messages[erase_end].role != Role::User) {
         ++erase_end;
-    }
-
-    if (erase_end <= system_offset) {
-        return;
     }
 
     for (size_t index = system_offset; index < erase_end; ++index) {

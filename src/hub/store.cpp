@@ -312,6 +312,60 @@ Expected<ModelEntry> HubPullService::persist_source_annotation(std::vector<Model
     return *it;
 }
 
+struct PulledModelSource {
+    std::string local_path;
+    std::string source_url;
+};
+
+std::string repo_id_with_tag(const HuggingFaceClient::ParsedIdentifier& parsed) {
+    std::string repo = parsed.repo_id;
+    if (parsed.tag) {
+        repo += ":" + *parsed.tag;
+    }
+    return repo;
+}
+
+Expected<PulledModelSource> download_explicit_pull_file(HuggingFaceClient& client,
+                                                        const std::string& identifier,
+                                                        const std::string& repo_id,
+                                                        const std::string& filename) {
+    auto url = client.resolve_download_url(repo_id, filename);
+    if (!url) {
+        return std::unexpected(url.error());
+    }
+
+    auto result = client.download_model(identifier);
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+
+    return PulledModelSource{std::move(*result), std::move(*url)};
+}
+
+Expected<PulledModelSource>
+download_repo_snapshot(HuggingFaceClient& client,
+                       const HuggingFaceClient::ParsedIdentifier& parsed) {
+    auto result = client.download_model(repo_id_with_tag(parsed));
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+
+    PulledModelSource source{std::move(*result), {}};
+    if (auto url = detail::source_url_from_hf_snapshot(parsed.repo_id, source.local_path)) {
+        source.source_url = std::move(*url);
+    }
+    return source;
+}
+
+Expected<PulledModelSource>
+download_pull_source(HuggingFaceClient& client, const std::string& identifier,
+                     const HuggingFaceClient::ParsedIdentifier& parsed) {
+    if (parsed.filename) {
+        return download_explicit_pull_file(client, identifier, parsed.repo_id, *parsed.filename);
+    }
+    return download_repo_snapshot(client, parsed);
+}
+
 Expected<ModelEntry> HubPullService::pull(HuggingFaceClient& client, const std::string& identifier,
                                           std::vector<std::string> aliases,
                                           std::vector<ModelEntry>& entries,
@@ -321,42 +375,18 @@ Expected<ModelEntry> HubPullService::pull(HuggingFaceClient& client, const std::
         return std::unexpected(parsed.error());
     }
 
-    std::string repo_with_tag = parsed->repo_id;
-    if (parsed->tag) {
-        repo_with_tag += ":" + *parsed->tag;
+    auto source = download_pull_source(client, identifier, *parsed);
+    if (!source) {
+        return std::unexpected(source.error());
     }
 
-    std::string local_path;
-    std::string source_url;
-    if (parsed->filename) {
-        auto url = client.resolve_download_url(parsed->repo_id, *parsed->filename);
-        if (!url) {
-            return std::unexpected(url.error());
-        }
-        source_url = *url;
-        auto result = client.download_model(identifier);
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-        local_path = *result;
-    } else {
-        auto result = client.download_model(repo_with_tag);
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-        local_path = *result;
-
-        if (auto url = detail::source_url_from_hf_snapshot(parsed->repo_id, local_path)) {
-            source_url = std::move(*url);
-        }
-    }
-
-    if (auto validation = detail::validate_downloaded_file(local_path); !validation) {
+    if (auto validation = detail::validate_downloaded_file(source->local_path); !validation) {
         return std::unexpected(validation.error());
     }
 
-    return ModelImporter::add_local_file(entries, repository, local_path, std::move(aliases),
-                                         std::move(source_url), parsed->repo_id);
+    return ModelImporter::add_local_file(entries, repository, source->local_path,
+                                         std::move(aliases), std::move(source->source_url),
+                                         parsed->repo_id);
 }
 
 } // namespace detail

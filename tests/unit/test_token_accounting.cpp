@@ -19,6 +19,14 @@ zoo::ModelConfig make_config() {
     return config;
 }
 
+int estimate_messages(zoo::core::Model& model, const std::vector<zoo::Message>& messages) {
+    int expected = 0;
+    for (const auto& message : messages) {
+        expected += ModelTestAccess::estimate_message_tokens(model, message);
+    }
+    return expected;
+}
+
 TEST(TokenAccountingTest, PlainMessageAccounting) {
     auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
 
@@ -116,6 +124,49 @@ TEST(TokenAccountingTest, ReplaceHistoryIncludesToolCalls) {
     model->replace_history(zoo::HistorySnapshot{messages});
 
     EXPECT_EQ(model->estimated_tokens(), expected);
+}
+
+TEST(TokenAccountingTest, TrimHistoryKeepsSystemPromptAndLatestExchange) {
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
+    std::vector<zoo::Message> messages = {
+        zoo::Message::system("system"),        zoo::Message::user("old question"),
+        zoo::Message::assistant("old answer"), zoo::Message::user("new question"),
+        zoo::Message::assistant("new answer"),
+    };
+    model->replace_history(zoo::HistorySnapshot{messages});
+
+    model->trim_history(2);
+
+    const auto history = model->get_history();
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].role, zoo::Role::System);
+    EXPECT_EQ(history[1].content, "new question");
+    EXPECT_EQ(history[2].content, "new answer");
+    EXPECT_EQ(model->estimated_tokens(), estimate_messages(*model, history.messages));
+}
+
+TEST(TokenAccountingTest, TrimHistoryStartsAtUserBoundary) {
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
+    std::vector<zoo::ToolCallInfo> calls = {{"call_1", "lookup", R"({"q":"old"})"}};
+    std::vector<zoo::Message> messages = {
+        zoo::Message::system("system"),
+        zoo::Message::user("old question"),
+        zoo::Message::assistant_with_tool_calls("old tool call", std::move(calls)),
+        zoo::Message::tool("old result", "call_1"),
+        zoo::Message::user("new question"),
+        zoo::Message::assistant("new answer"),
+    };
+    model->replace_history(zoo::HistorySnapshot{messages});
+
+    model->trim_history(3);
+
+    const auto history = model->get_history();
+    ASSERT_EQ(history.size(), 3u);
+    EXPECT_EQ(history[0].role, zoo::Role::System);
+    EXPECT_EQ(history[1].role, zoo::Role::User);
+    EXPECT_EQ(history[1].content, "new question");
+    EXPECT_EQ(history[2].content, "new answer");
+    EXPECT_EQ(model->estimated_tokens(), estimate_messages(*model, history.messages));
 }
 
 } // namespace

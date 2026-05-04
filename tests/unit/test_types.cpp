@@ -147,6 +147,29 @@ TEST(MessageTest, BorrowedMessageCanBeMaterialized) {
     EXPECT_EQ(owned.tool_calls[0].arguments_json, R"({"text":"hello"})");
 }
 
+TEST(MessageTest, MessageViewEqualityIncludesToolMetadata) {
+    const std::array<zoo::ToolCallView, 1> echo_call = {
+        zoo::ToolCallView{"call_1", "echo", R"({"text":"hello"})"}};
+    const std::array<zoo::ToolCallView, 1> search_call = {
+        zoo::ToolCallView{"call_1", "search", R"({"text":"hello"})"}};
+    const std::array<zoo::ToolCallView, 2> two_calls = {
+        zoo::ToolCallView{"call_1", "echo", R"({"text":"hello"})"},
+        zoo::ToolCallView{"call_2", "sum", R"({"a":1})"}};
+
+    const zoo::MessageView base{zoo::Role::Assistant, "hello", "tool-1", std::span(echo_call)};
+
+    EXPECT_EQ(base,
+              zoo::MessageView(zoo::Role::Assistant, "hello", "tool-1", std::span(echo_call)));
+    EXPECT_NE(base, zoo::MessageView(zoo::Role::User, "hello", "tool-1", std::span(echo_call)));
+    EXPECT_NE(base, zoo::MessageView(zoo::Role::Assistant, "bye", "tool-1", std::span(echo_call)));
+    EXPECT_NE(base,
+              zoo::MessageView(zoo::Role::Assistant, "hello", "tool-2", std::span(echo_call)));
+    EXPECT_NE(base,
+              zoo::MessageView(zoo::Role::Assistant, "hello", "tool-1", std::span(two_calls)));
+    EXPECT_NE(base,
+              zoo::MessageView(zoo::Role::Assistant, "hello", "tool-1", std::span(search_call)));
+}
+
 TEST(ConversationViewTest, SupportsBorrowedAndOwnedStorage) {
     const std::array<zoo::MessageView, 2> borrowed = {
         zoo::MessageView{zoo::Role::System, "Be concise."},

@@ -110,6 +110,18 @@ TEST_F(ToolRegistryTest, ManualSchemaRejectsUnsupportedKeywords) {
     EXPECT_NE(result.error().message.find("minimum"), std::string::npos);
 }
 
+TEST_F(ToolRegistryTest, ManualSchemaRejectsUnsupportedRootKeywords) {
+    json schema = {{"type", "object"}, {"properties", json::object()}, {"oneOf", json::array()}};
+
+    auto result =
+        registry.register_tool("root_keyword", "Schema with unsupported root keyword", schema,
+                               [](const json&) -> zoo::Expected<json> { return json::object(); });
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidToolSchema);
+    EXPECT_NE(result.error().message.find("oneOf"), std::string::npos);
+}
+
 TEST_F(ToolRegistryTest, ManualSchemaRejectsRefKeyword) {
     json schema = {{"type", "object"},
                    {"properties", {{"data", {{"$ref", "#/definitions/Data"}}}}},

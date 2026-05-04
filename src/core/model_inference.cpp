@@ -126,6 +126,64 @@ Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::
     }
 }
 
+StreamFilter make_stream_filter(const Model::Impl& impl, const TokenCallback& on_token) {
+    if (on_token && impl.session_.tool_state &&
+        impl.session_.sampler_policy.is_native_tool_call()) {
+        const auto& trigger_matcher = impl.session_.tool_state->trigger_matcher;
+        return StreamFilter(std::span<const std::string>(trigger_matcher.word_triggers()),
+                            &trigger_matcher);
+    }
+    return {};
+}
+
+bool consume_stop_suffix(std::string& generated_text, StopSequenceMatcher& stop_matcher,
+                         bool has_stop_sequences) {
+    if (!has_stop_sequences) {
+        return false;
+    }
+    const size_t match_len = stop_matcher.match_suffix(generated_text);
+    if (match_len == 0) {
+        return false;
+    }
+    generated_text.resize(generated_text.size() - match_len);
+    return true;
+}
+
+Expected<bool> emit_visible_chunk(const TokenCallback& on_token, StreamFilter& stream_filter,
+                                  std::string_view piece, const std::string& generated_text) {
+    if (!on_token || stream_filter.suppressing()) {
+        return false;
+    }
+
+    std::string visible_chunk = stream_filter.consume(piece, generated_text);
+    if (visible_chunk.empty()) {
+        return false;
+    }
+
+    auto action = invoke_token_callback(on_token, visible_chunk);
+    if (!action) {
+        return std::unexpected(action.error());
+    }
+    return *action == TokenAction::Stop;
+}
+
+Expected<void> flush_visible_chunk(const TokenCallback& on_token, StreamFilter& stream_filter) {
+    if (!on_token || stream_filter.suppressing()) {
+        return {};
+    }
+
+    std::string trailing = stream_filter.finalize();
+    if (trailing.empty()) {
+        return {};
+    }
+
+    auto action = invoke_token_callback(on_token, trailing);
+    if (!action) {
+        return std::unexpected(action.error());
+    }
+    return {};
+}
+
 } // namespace
 
 Expected<std::string> run_inference(Model::Impl& impl, const std::vector<int>& prompt_tokens,
@@ -137,13 +195,7 @@ Expected<std::string> run_inference(Model::Impl& impl, const std::vector<int>& p
     int token_count = 0;
     bool stopped_by_callback = false;
     StopSequenceMatcher stop_matcher{std::span<const std::string>(stop_sequences)};
-    StreamFilter stream_filter;
-    if (on_token && impl.session_.tool_state &&
-        impl.session_.sampler_policy.is_native_tool_call()) {
-        const auto& trigger_matcher = impl.session_.tool_state->trigger_matcher;
-        stream_filter = StreamFilter(std::span<const std::string>(trigger_matcher.word_triggers()),
-                                     &trigger_matcher);
-    }
+    StreamFilter stream_filter = make_stream_filter(impl, on_token);
 
     InferencePhase phase{InferenceCtx{impl.session_.ctx.get(), impl.session_.sampler.get(),
                                       impl.loaded_.vocab, impl.loaded_.context_size},
@@ -168,26 +220,18 @@ Expected<std::string> run_inference(Model::Impl& impl, const std::vector<int>& p
         generated_text.append(decoded->piece);
         ++token_count;
 
-        if (!stop_sequences.empty()) {
-            const size_t match_len = stop_matcher.match_suffix(generated_text);
-            if (match_len > 0) {
-                generated_text.resize(generated_text.size() - match_len);
-                break;
-            }
+        if (consume_stop_suffix(generated_text, stop_matcher, !stop_sequences.empty())) {
+            break;
         }
 
-        if (on_token && !stream_filter.suppressing()) {
-            std::string visible_chunk = stream_filter.consume(decoded->piece, generated_text);
-            if (!visible_chunk.empty()) {
-                auto action = invoke_token_callback(on_token, visible_chunk);
-                if (!action) {
-                    return std::unexpected(action.error());
-                }
-                if (*action == TokenAction::Stop) {
-                    stopped_by_callback = true;
-                    break;
-                }
-            }
+        auto callback_stop =
+            emit_visible_chunk(on_token, stream_filter, decoded->piece, generated_text);
+        if (!callback_stop) {
+            return std::unexpected(callback_stop.error());
+        }
+        if (*callback_stop) {
+            stopped_by_callback = true;
+            break;
         }
 
         if (token_count >= effective_max || current_pos >= impl.loaded_.context_size) {
@@ -199,13 +243,9 @@ Expected<std::string> run_inference(Model::Impl& impl, const std::vector<int>& p
         }
     }
 
-    if (on_token && !stream_filter.suppressing() && !stopped_by_callback) {
-        std::string trailing = stream_filter.finalize();
-        if (!trailing.empty()) {
-            auto action = invoke_token_callback(on_token, trailing);
-            if (!action) {
-                return std::unexpected(action.error());
-            }
+    if (!stopped_by_callback) {
+        if (auto flush = flush_visible_chunk(on_token, stream_filter); !flush) {
+            return std::unexpected(flush.error());
         }
     }
 

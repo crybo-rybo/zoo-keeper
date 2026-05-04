@@ -11,6 +11,7 @@
 #include "core/backend_init.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -95,6 +96,88 @@ int32_t read_gguf_u32_as_i32(const gguf_context* ctx, const char* key) {
     return 0;
 }
 
+std::string gguf_string_value(const gguf_context* ctx, int64_t index) {
+    if (const char* s = gguf_get_val_str(ctx, index)) {
+        return s;
+    }
+    return {};
+}
+
+std::string gguf_u32_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_u32(ctx, index));
+}
+
+std::string gguf_i32_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_i32(ctx, index));
+}
+
+std::string gguf_f32_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_f32(ctx, index));
+}
+
+std::string gguf_u64_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_u64(ctx, index));
+}
+
+std::string gguf_i64_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_i64(ctx, index));
+}
+
+std::string gguf_f64_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_f64(ctx, index));
+}
+
+std::string gguf_bool_value(const gguf_context* ctx, int64_t index) {
+    return gguf_get_val_bool(ctx, index) ? "true" : "false";
+}
+
+std::string gguf_u8_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_u8(ctx, index));
+}
+
+std::string gguf_i8_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_i8(ctx, index));
+}
+
+std::string gguf_u16_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_u16(ctx, index));
+}
+
+std::string gguf_i16_value(const gguf_context* ctx, int64_t index) {
+    return std::to_string(gguf_get_val_i16(ctx, index));
+}
+
+std::string format_gguf_metadata_value(const gguf_context* ctx, int64_t index) {
+    using Reader = std::string (*)(const gguf_context*, int64_t);
+    struct Formatter {
+        gguf_type type;
+        Reader read;
+    };
+
+    static constexpr std::array<Formatter, 12> kFormatters{{
+        {GGUF_TYPE_STRING, gguf_string_value},
+        {GGUF_TYPE_UINT32, gguf_u32_value},
+        {GGUF_TYPE_INT32, gguf_i32_value},
+        {GGUF_TYPE_FLOAT32, gguf_f32_value},
+        {GGUF_TYPE_UINT64, gguf_u64_value},
+        {GGUF_TYPE_INT64, gguf_i64_value},
+        {GGUF_TYPE_FLOAT64, gguf_f64_value},
+        {GGUF_TYPE_BOOL, gguf_bool_value},
+        {GGUF_TYPE_UINT8, gguf_u8_value},
+        {GGUF_TYPE_INT8, gguf_i8_value},
+        {GGUF_TYPE_UINT16, gguf_u16_value},
+        {GGUF_TYPE_INT16, gguf_i16_value},
+    }};
+
+    const auto type = gguf_get_kv_type(ctx, index);
+    const auto it = std::find_if(kFormatters.begin(), kFormatters.end(),
+                                 [type](const Formatter& item) { return item.type == type; });
+    if (it == kFormatters.end()) {
+        return "<array>";
+    }
+    return it->read(ctx, index);
+}
+
 void collect_all_metadata(const gguf_context* ctx, std::map<std::string, std::string>& metadata) {
     const int64_t n_kv = gguf_get_n_kv(ctx);
     for (int64_t i = 0; i < n_kv; ++i) {
@@ -103,52 +186,7 @@ void collect_all_metadata(const gguf_context* ctx, std::map<std::string, std::st
             continue;
         }
 
-        const auto type = gguf_get_kv_type(ctx, i);
-        std::string value;
-        switch (type) {
-        case GGUF_TYPE_STRING:
-            if (const char* s = gguf_get_val_str(ctx, i)) {
-                value = s;
-            }
-            break;
-        case GGUF_TYPE_UINT32:
-            value = std::to_string(gguf_get_val_u32(ctx, i));
-            break;
-        case GGUF_TYPE_INT32:
-            value = std::to_string(gguf_get_val_i32(ctx, i));
-            break;
-        case GGUF_TYPE_FLOAT32:
-            value = std::to_string(gguf_get_val_f32(ctx, i));
-            break;
-        case GGUF_TYPE_UINT64:
-            value = std::to_string(gguf_get_val_u64(ctx, i));
-            break;
-        case GGUF_TYPE_INT64:
-            value = std::to_string(gguf_get_val_i64(ctx, i));
-            break;
-        case GGUF_TYPE_FLOAT64:
-            value = std::to_string(gguf_get_val_f64(ctx, i));
-            break;
-        case GGUF_TYPE_BOOL:
-            value = gguf_get_val_bool(ctx, i) ? "true" : "false";
-            break;
-        case GGUF_TYPE_UINT8:
-            value = std::to_string(gguf_get_val_u8(ctx, i));
-            break;
-        case GGUF_TYPE_INT8:
-            value = std::to_string(gguf_get_val_i8(ctx, i));
-            break;
-        case GGUF_TYPE_UINT16:
-            value = std::to_string(gguf_get_val_u16(ctx, i));
-            break;
-        case GGUF_TYPE_INT16:
-            value = std::to_string(gguf_get_val_i16(ctx, i));
-            break;
-        default:
-            value = "<array>";
-            break;
-        }
-        metadata[key] = std::move(value);
+        metadata[key] = format_gguf_metadata_value(ctx, i);
     }
 }
 
