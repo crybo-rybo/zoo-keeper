@@ -88,8 +88,6 @@ Expected<std::string> render_prompt_delta(Model::Impl& impl) {
         delta = new_prompt;
     }
 
-    // Cache the full rendered prompt for finalization.
-    impl.session_.prompt_state.rendered_prompt = new_prompt;
     impl.session_.prompt_state.dirty = false;
 
     // If native tool calling is active, fully refresh the current

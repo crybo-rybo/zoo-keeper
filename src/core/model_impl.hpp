@@ -51,7 +51,6 @@ struct Model::Impl {
 
     struct PromptState {
         int committed_prompt_len = 0;
-        std::string rendered_prompt;
         bool dirty = true;
     };
 
