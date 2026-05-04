@@ -16,6 +16,36 @@
 
 namespace zoo::hub {
 
+namespace {
+
+Expected<common_params_model> build_model_download_params(const std::string& identifier) {
+    auto parsed = HuggingFaceClient::parse_identifier(identifier);
+    if (!parsed) {
+        return std::unexpected(parsed.error());
+    }
+
+    common_params_model model_params;
+    model_params.hf_repo = parsed->repo_id;
+    if (parsed->tag) {
+        model_params.hf_repo += ":" + *parsed->tag;
+    }
+    if (parsed->filename) {
+        model_params.hf_file = *parsed->filename;
+    }
+    return model_params;
+}
+
+Expected<std::string> require_downloaded_model_path(const common_download_model_result& download,
+                                                    const std::string& identifier) {
+    if (download.model_path.empty()) {
+        return std::unexpected(
+            Error{ErrorCode::DownloadFailed, "Failed to download model from: " + identifier});
+    }
+    return download.model_path;
+}
+
+} // namespace
+
 struct HuggingFaceClient::Impl {
     Config config;
 
@@ -118,31 +148,22 @@ Expected<std::string> HuggingFaceClient::resolve_download_url(const std::string&
 
 Expected<std::string> HuggingFaceClient::download_model(const std::string& repo_id_with_tag) {
     try {
-        auto parsed = parse_identifier(repo_id_with_tag);
-        if (!parsed) {
-            return std::unexpected(parsed.error());
+        auto model_params = build_model_download_params(repo_id_with_tag);
+        if (!model_params) {
+            return std::unexpected(model_params.error());
         }
 
-        common_params_model model_params;
-        model_params.hf_repo = parsed->repo_id;
-        if (parsed->tag) {
-            model_params.hf_repo += ":" + *parsed->tag;
-        }
-        if (parsed->filename) {
-            model_params.hf_file = *parsed->filename;
+        auto download = common_download_model(*model_params, impl_->download_opts());
+        auto model_path = require_downloaded_model_path(download, repo_id_with_tag);
+        if (!model_path) {
+            return std::unexpected(model_path.error());
         }
 
-        auto download = common_download_model(model_params, impl_->download_opts());
-        if (download.model_path.empty()) {
-            return std::unexpected(Error{ErrorCode::DownloadFailed,
-                                         "Failed to download model from: " + repo_id_with_tag});
-        }
-
-        if (auto validation = detail::validate_downloaded_file(download.model_path); !validation) {
+        if (auto validation = detail::validate_downloaded_file(*model_path); !validation) {
             return std::unexpected(validation.error());
         }
 
-        return download.model_path;
+        return *model_path;
     } catch (const std::exception& e) {
         return std::unexpected(
             Error{ErrorCode::DownloadFailed, "Download error: " + std::string(e.what())});
