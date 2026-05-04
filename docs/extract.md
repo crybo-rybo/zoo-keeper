@@ -41,14 +41,14 @@ template <typename Message>
 RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
     Message&& message,
-    const GenerationOptions& options = GenerationOptions{},
+    GenerationOverride generation = {},
     AsyncTokenCallback callback = {});
 
 // Stateless - use an explicit borrowed message sequence
 RequestHandle<ExtractionResponse> extract(
     const nlohmann::json& output_schema,
     ConversationView messages,
-    const GenerationOptions& options = GenerationOptions{},
+    GenerationOverride generation = {},
     AsyncTokenCallback callback = {});
 ```
 
@@ -75,7 +75,8 @@ const std::array<zoo::MessageView, 2> messages = {
     zoo::MessageView{zoo::Role::User, "Bob is a 42-year-old engineer."},
 };
 auto handle =
-    agent->extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)});
+    agent->extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)},
+                   zoo::GenerationOverride::inherit_defaults());
 ```
 
 ## Streaming
@@ -89,7 +90,7 @@ callback has received enough output.
 auto handle = agent->extract(
     schema,
     "Carol is 25.",
-    {},
+    zoo::GenerationOverride::inherit_defaults(),
     [](std::string_view token) {
         std::cout << token << std::flush;
         return zoo::TokenAction::Continue;

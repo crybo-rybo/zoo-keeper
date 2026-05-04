@@ -118,47 +118,46 @@ class Agent {
      * @brief Queues a user message for asynchronous processing.
      */
     RequestHandle<TextResponse> chat(std::string_view user_message,
-                                     const GenerationOptions& options = GenerationOptions{},
+                                     GenerationOverride generation = {},
                                      AsyncTokenCallback callback = {});
 
     /**
      * @brief Queues a structured single-message request for asynchronous processing.
      */
-    RequestHandle<TextResponse> chat(MessageView message,
-                                     const GenerationOptions& options = GenerationOptions{},
+    RequestHandle<TextResponse> chat(MessageView message, GenerationOverride generation = {},
                                      AsyncTokenCallback callback = {});
 
     /**
      * @brief Queues a stateless completion against the supplied full message history.
      */
     RequestHandle<TextResponse> complete(ConversationView messages,
-                                         const GenerationOptions& options = GenerationOptions{},
+                                         GenerationOverride generation = {},
                                          AsyncTokenCallback callback = {});
 
     /**
      * @brief Queues a structured extraction request (stateful).
      */
     template <internal::agent::ExtractMessage Message>
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, Message&& message,
-            const GenerationOptions& options = {}, AsyncTokenCallback callback = {}) {
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              Message&& message, GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {}) {
         if constexpr (std::same_as<std::remove_cvref_t<Message>, MessageView>) {
-            return extract_stateful(output_schema, message, options, std::move(callback));
+            return extract_stateful(output_schema, message, generation, std::move(callback));
         } else {
             return extract_stateful(
                 output_schema,
-                MessageView{Role::User, std::string_view{std::forward<Message>(message)}}, options,
-                std::move(callback));
+                MessageView{Role::User, std::string_view{std::forward<Message>(message)}},
+                generation, std::move(callback));
         }
     }
 
     /**
      * @brief Queues a structured extraction request (stateless).
      */
-    RequestHandle<ExtractionResponse>
-    extract(const nlohmann::json& output_schema, ConversationView messages,
-            const GenerationOptions& options = GenerationOptions{},
-            AsyncTokenCallback callback = {});
+    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                              ConversationView messages,
+                                              GenerationOverride generation = {},
+                                              AsyncTokenCallback callback = {});
 
     /**
      * @brief Requests cancellation of a queued or running request.
@@ -288,7 +287,7 @@ class Agent {
           std::unique_ptr<Impl> impl);
     RequestHandle<ExtractionResponse> extract_stateful(const nlohmann::json& output_schema,
                                                        MessageView message,
-                                                       const GenerationOptions& options,
+                                                       GenerationOverride generation,
                                                        AsyncTokenCallback callback);
     Expected<void> register_tool(tools::ToolDefinition definition,
                                  std::optional<std::chrono::nanoseconds> timeout = {});

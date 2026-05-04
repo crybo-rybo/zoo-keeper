@@ -31,7 +31,8 @@ int main(int argc, char** argv) {
     }
 
     auto& agent = *agent_result;
-    auto handle = agent->chat("Write a detailed travel guide for Iceland.", {},
+    auto handle = agent->chat("Write a detailed travel guide for Iceland.",
+                              zoo::GenerationOverride::inherit_defaults(),
                               [](std::string_view token) { std::cout << token << std::flush; });
 
     std::this_thread::sleep_for(250ms);

@@ -285,6 +285,12 @@ Expected<ToolDefinition> make_tool_definition(const std::string& name,
 
 } // namespace detail
 
+Expected<ToolDefinition> make_tool_definition(const std::string& name,
+                                              const std::string& description,
+                                              const nlohmann::json& schema, ToolHandler handler) {
+    return detail::make_tool_definition(name, description, schema, std::move(handler));
+}
+
 nlohmann::json ToolRegistry::build_schema_json(const ToolMetadata& metadata) {
     return nlohmann::json{{"type", "function"},
                           {"function",
@@ -295,7 +301,7 @@ nlohmann::json ToolRegistry::build_schema_json(const ToolMetadata& metadata) {
 
 Expected<void> ToolRegistry::register_tool(const std::string& name, const std::string& description,
                                            const nlohmann::json& schema, ToolHandler handler) {
-    auto definition = detail::make_tool_definition(name, description, schema, std::move(handler));
+    auto definition = make_tool_definition(name, description, schema, std::move(handler));
     if (!definition) {
         return std::unexpected(definition.error());
     }

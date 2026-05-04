@@ -67,12 +67,13 @@ class FakeBackend final : public AgentBackend {
         return {};
     }
 
-    Expected<GenerationResult> generate_from_history(const GenerationOptions&,
+    Expected<GenerationResult> generate_from_history(const GenerationOptions& options,
                                                      TokenCallback on_token,
                                                      CancellationCallback should_cancel) override {
         GenerationAction action;
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            last_options_ = options;
             if (generations_.empty()) {
                 return std::unexpected(
                     Error{ErrorCode::InferenceFailed, "No scripted generation available"});
@@ -81,6 +82,11 @@ class FakeBackend final : public AgentBackend {
             generations_.pop_front();
         }
         return action(on_token, should_cancel);
+    }
+
+    GenerationOptions last_generation_options() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return last_options_;
     }
 
     void finalize_response() override {}
@@ -179,6 +185,7 @@ class FakeBackend final : public AgentBackend {
     mutable std::mutex mutex_;
     std::deque<GenerationAction> generations_;
     std::vector<Message> history_;
+    GenerationOptions last_options_;
     bool tool_calling_supported_ = true;
 };
 
@@ -459,6 +466,61 @@ TEST(AgentRuntimeTest, ChatStreamingTokenCallbackCanStopGeneration) {
     EXPECT_EQ(result->text, "enough");
     EXPECT_EQ(streamed, "enough");
     EXPECT_EQ(result->usage.completion_tokens, 1);
+}
+
+TEST(AgentRuntimeTest, GenerationOverrideInheritsConfiguredDefaults) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    GenerationOptions defaults;
+    defaults.max_tokens = 17;
+    AgentRuntime runtime(make_model_config(), make_agent_config(), defaults, std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"ok", 0, false, "", {}});
+    });
+
+    auto result =
+        runtime.chat("inherit", zoo::GenerationOverride::inherit_defaults()).await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(backend_ptr->last_generation_options().max_tokens, 17);
+}
+
+TEST(AgentRuntimeTest, GenerationOverrideUsesExplicitNonDefaultOptions) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    GenerationOptions defaults;
+    defaults.max_tokens = 17;
+    AgentRuntime runtime(make_model_config(), make_agent_config(), defaults, std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"ok", 0, false, "", {}});
+    });
+
+    GenerationOptions explicit_options;
+    explicit_options.max_tokens = 3;
+    auto result =
+        runtime.chat("explicit", zoo::GenerationOverride::explicit_options(explicit_options))
+            .await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(backend_ptr->last_generation_options().max_tokens, 3);
+}
+
+TEST(AgentRuntimeTest, GenerationOverrideCanRequestBuiltInDefaults) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    GenerationOptions defaults;
+    defaults.max_tokens = 17;
+    AgentRuntime runtime(make_model_config(), make_agent_config(), defaults, std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"ok", 0, false, "", {}});
+    });
+
+    auto result =
+        runtime.chat("builtin", zoo::GenerationOverride::explicit_options(GenerationOptions{}))
+            .await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(backend_ptr->last_generation_options().max_tokens, -1);
 }
 
 TEST(AgentRuntimeTest, ChatStreamingCallbackFailureFailsRequest) {

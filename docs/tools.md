@@ -83,13 +83,12 @@ per-tool overhead:
 ```cpp
 std::vector<zoo::tools::ToolDefinition> defs;
 
-// Build definitions with the detail helpers or by hand:
-auto add_def = zoo::tools::detail::make_tool_definition(
+auto add_def = zoo::tools::make_tool_definition(
     "add", "Add two integers", {"a", "b"},
     [](int a, int b) { return a + b; });
 if (add_def) defs.push_back(std::move(*add_def));
 
-auto greet_def = zoo::tools::detail::make_tool_definition(
+auto greet_def = zoo::tools::make_tool_definition(
     "greet", "Greet a person", {"name"},
     [](std::string name) -> std::string { return "Hello, " + name + "!"; });
 if (greet_def) defs.push_back(std::move(*greet_def));
