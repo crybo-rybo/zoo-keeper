@@ -83,7 +83,7 @@ auto response = handle.await_result().value();
 | Tool calling (llama.cpp PEG formats) | Parse text yourself | Template-driven detection + execution loop |
 | Type-safe tool registration | N/A | `register_tool("name", desc, params, callable)` |
 | Tool argument validation | N/A | Automatic JSON Schema validation with retries |
-| Structured output extraction | Build grammar yourself | `agent->extract(prompt, schema)` |
+| Structured output extraction | Build grammar yourself | `agent->extract(schema, prompt)` |
 | Error handling | Null pointers, `-1` returns | `std::expected<T, Error>` with categorized codes |
 | Thread safety | Your problem | Agent owns inference thread; callers submit requests |
 | Streaming callbacks | Wire up yourself | Token callbacks on `chat()`, `complete()`, `extract()` |
@@ -103,10 +103,10 @@ Each layer depends only on the layers below it. Consumers can stop at whichever 
 |-------|-----------|-------------|-----------|
 | **Hub** *(optional)* | `zoo::hub` | GGUF inspection, HuggingFace downloads, local model store, auto-configuration | `GgufInspector`, `ModelStore`, `HuggingFaceClient` |
 | **Agent** | `zoo::Agent` | Async inference runtime with request queue, per-token streaming, cancellation, agentic tool loop, and structured extraction | `Agent`, `RequestHandle<T>`, `TextResponse`, `ExtractionResponse` |
-| **Tools** | `zoo::tools` | Tool registration, JSON Schema generation from C++ signatures, argument validation. Header-only with zero llama.cpp dependency | `ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator` |
+| **Tools** | `zoo::tools` | Tool registration, JSON Schema generation from C++ signatures, argument validation. Zero llama.cpp dependency | `ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator` |
 | **Core** | `zoo::core` | Direct synchronous llama.cpp wrapper — model loading, prompt rendering, generation, chat history, KV cache management | `Model`, `ModelConfig`, `GenerationOptions` |
 
-**Threading model:** The Agent owns a single inference thread. Callers submit requests via `chat()`, `complete()`, or `extract()` and receive a `RequestHandle<T>`. All model access is confined to the inference thread — no locks in the hot path.
+**Threading model:** The Agent owns a single inference thread. Callers submit requests via `chat()`, `complete()`, or `extract()` and receive a `RequestHandle<T>`. Model access is confined to that thread, streaming callbacks run on a callback dispatcher, and tool handlers run on a tool executor worker.
 
 ## Use Cases
 
@@ -139,7 +139,7 @@ or extra setup required.
 include(FetchContent)
 FetchContent_Declare(zoo-keeper
     GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
-    GIT_TAG        main
+    GIT_TAG        v1.1.4
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(zoo-keeper)
@@ -217,8 +217,9 @@ agent->register_tool("get_weather", "Get current weather", {"city"},
 Constrain model output to a JSON Schema using grammar-guided generation:
 
 ```cpp
-auto schema = R"({"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}}})";
-auto handle = agent->extract("Extract info: John is 30 years old", schema);
+nlohmann::json schema = nlohmann::json::parse(
+    R"({"type":"object","properties":{"name":{"type":"string"},"age":{"type":"integer"}}})");
+auto handle = agent->extract(schema, "Extract info: John is 30 years old");
 auto result = handle.await_result().value();
 
 // result.data == {"name": "John", "age": 30}

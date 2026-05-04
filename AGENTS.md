@@ -34,13 +34,13 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 
 - `include/zoo/` — public API boundary
   - `core/` — `Model`, `Config`, `Message`, `Response`, `types.hpp`
-  - `tools/` — `ToolRegistry`, `ToolCallParser`, `ErrorRecovery`
+  - `tools/` — `ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator`
   - `hub/` — optional GGUF inspection, HuggingFace, model store
-  - `internal/` — private headers (grammar, interceptor, batch, agent runtime)
   - `agent.hpp` — `Agent` async orchestrator
   - `zoo.hpp` — umbrella include
 - `src/core/` — all llama.cpp calls (`model*.cpp`)
 - `src/agent/` — Agent runtime and backend
+- `src/tools/` — non-template tool registry and grammar helpers
 - `src/hub/` — hub layer implementation (compiled when `ZOO_BUILD_HUB=ON`)
 - `tests/unit/` — GoogleTest suite; `tests/fixtures/` — reusable data
 - `examples/` — demo executables and sample config
@@ -53,7 +53,7 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 |-------|-----------|-----------|
 | 4 — Hub *(optional)* | `zoo::hub` | Layer 1 + llama.cpp (`ZOO_BUILD_HUB=ON`) |
 | 3 — Agent | `zoo::Agent` | Layer 1 + 2 |
-| 2 — Tools | `zoo::tools` | nothing (header-only, no llama.cpp) |
+| 2 — Tools | `zoo::tools` | nothing; no llama.cpp |
 | 1 — Core  | `zoo::core`  | llama.cpp only |
 
 ## Code style
@@ -65,8 +65,8 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 
 ## Testing
 
-- Unit tests = pure logic only (types, tools, validation, parsing)
-- Model/Agent testing = integration tests (requires real GGUF model)
+- Unit tests = pure logic and private runtime seams (types, tools, validation, parsing, agent orchestration)
+- Live Model/Agent testing = integration tests (requires real GGUF model)
 - Never `using namespace zoo;` in tests (clashes with `::testing`)
 - Fixtures in `tests/fixtures/`
 

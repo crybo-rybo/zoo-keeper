@@ -40,7 +40,8 @@ polling, and retrieving the completed response or error.
 - Request completion is observed through `RequestHandle<Result>::await_result()`.
 - Model state is owned by the inference thread while the agent is running.
 - Streaming token callbacks execute on the CallbackDispatcher thread. Tool
-  handlers execute on the inference thread.
+  handlers execute on a dedicated ToolExecutor worker while the tool loop waits
+  for their result.
 - Direct `ToolRegistry` use is single-threaded unless callers externally
   synchronize overlapping operations. `Agent` serializes registry mutation on
   its inference thread.

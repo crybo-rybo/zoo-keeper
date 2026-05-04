@@ -44,7 +44,7 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 | 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Zero llama.cpp dependency. Non-template implementation lives in `src/tools/registry.cpp` |
 | 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
 
-**Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `RequestHandle<TextResponse>`. All callbacks run on the inference thread. Model is protected by thread confinement to the inference thread.
+**Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `RequestHandle<TextResponse>`. Model access is protected by thread confinement to the inference thread. Streaming callbacks run on `CallbackDispatcher`, and user tool handlers run on `ToolExecutor` while the tool loop waits for their result.
 
 **Tool calling:** Model initializes chat templates via `common_chat_templates_init()` (from the llama.cpp `common` library). Prompt rendering uses `common_chat_templates_apply()`. Tool calling is template-driven: `Model::set_tool_calling()` detects the model's native format (29+ formats recognized) and activates a lazy grammar with format-specific triggers. Models without a recognized native tool calling format have tool calling disabled (`set_tool_calling()` returns `false`). Parsed tool calls are returned inside a `ParsedResponse` struct (containing `std::vector<OwnedToolCall>`) via `Model::parse_tool_response()`. The old hardcoded `<tool_call>` sentinel approach and generic fallback format have been removed.
 
@@ -63,8 +63,8 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 
 ## Testing
 
-- Unit tests cover pure logic only: types, tools, validation, parsing, grammar, interceptor, batch
-- Model/Agent testing requires integration tests with a real GGUF model
+- Unit tests cover pure logic and private runtime seams: types, tools, validation, parsing, grammar, batch, and agent-runtime orchestration
+- Live Model/Agent testing requires integration tests with a real GGUF model
 - Never `using namespace zoo;` in test files — `zoo::testing` clashes with `::testing` (gtest)
 - Test binary: `zoo_tests`, discovered via `gtest_discover_tests`
 
