@@ -190,6 +190,10 @@ class RequestSlots {
                 continue;
             }
 
+            if (slot.ready) {
+                continue;
+            }
+
             if (slot.payload.result_kind == ResultKind::Extraction) {
                 slot.result = Expected<ExtractionResponse>(std::unexpected(error));
             } else {
