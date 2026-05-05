@@ -8,9 +8,9 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Hub and integration test sources are scored by CRAP, so they must be built
-# (and tested) here for coverage to line up with complexity. Without
-# ZOO_INTEGRATION_MODEL set, integration tests compile but are skipped at run time.
+# Hub and integration sources are scored by CRAP, so build those targets here.
+# Set ZOO_INTEGRATION_MODEL to run live model coverage; without it, live tests
+# compile but skip and model-dependent functions may remain over threshold.
 cmake_flags=(
     -DZOO_BUILD_TESTS=ON
     -DZOO_BUILD_HUB=ON
