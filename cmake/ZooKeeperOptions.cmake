@@ -1,10 +1,6 @@
 include_guard(GLOBAL)
 
-if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-    set(ZOO_PROJECT_IS_TOP_LEVEL ON)
-else()
-    set(ZOO_PROJECT_IS_TOP_LEVEL OFF)
-endif()
+string(COMPARE EQUAL "${CMAKE_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}" ZOO_PROJECT_IS_TOP_LEVEL)
 
 option(ZOO_BUILD_TESTS "Build test suite" OFF)
 option(ZOO_BUILD_INTEGRATION_TESTS "Build integration test suite" OFF)
