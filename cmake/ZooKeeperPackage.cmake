@@ -11,7 +11,7 @@ set(ZOO_BUILD_GGML_BLAS_ENABLED "${GGML_BLAS}")
 set(ZOO_BUILD_BLAS_LIBRARIES "${BLAS_LIBRARIES}")
 set(ZOO_BUILD_BLAS_LINKER_FLAGS "${BLAS_LINKER_FLAGS}")
 configure_package_config_file(
-    ${PROJECT_SOURCE_DIR}/cmake/ZooKeeperBuildTreeConfig.cmake.in
+    ${CMAKE_CURRENT_LIST_DIR}/ZooKeeperBuildTreeConfig.cmake.in
     ${PROJECT_BINARY_DIR}/ZooKeeperBuildTreeConfig.cmake.in
     INSTALL_DESTINATION ${PROJECT_BINARY_DIR}
 )
@@ -25,7 +25,7 @@ if(NOT ZOO_ENABLE_INSTALL)
 endif()
 
 configure_package_config_file(
-    ${PROJECT_SOURCE_DIR}/cmake/ZooKeeperConfig.cmake.in
+    ${CMAKE_CURRENT_LIST_DIR}/ZooKeeperConfig.cmake.in
     ${PROJECT_BINARY_DIR}/cmake/ZooKeeperConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )
@@ -44,7 +44,7 @@ install(FILES
 
 zoo_collect_llama_pkgconfig_libs(ZOO_PKGCONFIG_LIBS)
 configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake/zoo-keeper.pc.in
+    ${CMAKE_CURRENT_LIST_DIR}/zoo-keeper.pc.in
     ${PROJECT_BINARY_DIR}/zoo-keeper.pc
     @ONLY
 )
