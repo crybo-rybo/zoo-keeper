@@ -1,6 +1,6 @@
 include_guard(GLOBAL)
 
-include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
+include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlama.cmake")
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/include/zoo/version.hpp.in

@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 include(CMakePackageConfigHelpers)
-include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
+include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlama.cmake")
 
 zoo_collect_llama_build_link_libraries(ZOO_BUILD_LLAMA_LINK_LIBRARIES)
 set(ZOO_BUILD_ZOO_LOCATION "$<TARGET_FILE:zoo>")

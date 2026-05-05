@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 include(FetchContent)
-include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
+include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlama.cmake")
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
