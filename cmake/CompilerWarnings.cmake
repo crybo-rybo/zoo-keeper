@@ -1,21 +1,17 @@
 include_guard(GLOBAL)
 
 function(zoo_set_warnings target visibility)
-    if(MSVC)
-        target_compile_options(${target} ${visibility} /W4)
-    else()
-        target_compile_options(${target} ${visibility} -Wall -Wextra -Wpedantic)
-    endif()
+    target_compile_options(${target} ${visibility}
+        "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic>"
+    )
 endfunction()
 
 function(zoo_enable_warnings_as_errors target)
-    if(ZOO_WARNINGS_AS_ERRORS)
-        if(MSVC)
-            target_compile_options(${target} PRIVATE /WX)
-        else()
-            target_compile_options(${target} PRIVATE -Werror)
-        endif()
-    endif()
+    target_compile_options(${target} PRIVATE
+        "$<$<AND:$<BOOL:${ZOO_WARNINGS_AS_ERRORS}>,$<CXX_COMPILER_ID:MSVC>>:/WX>"
+        "$<$<AND:$<BOOL:${ZOO_WARNINGS_AS_ERRORS}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-Werror>"
+    )
 endfunction()
 
 function(zoo_mark_llama_includes_as_system target)
@@ -32,13 +28,16 @@ function(zoo_mark_llama_includes_as_system target)
 endfunction()
 
 function(zoo_apply_owned_target_options target)
+    set_target_properties(${target} PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
     zoo_set_warnings(${target} PRIVATE)
     zoo_enable_sanitizers(${target})
+    zoo_enable_coverage(${target})
 endfunction()
 
 function(zoo_apply_strict_target_options target)
     zoo_apply_owned_target_options(${target})
     zoo_enable_warnings_as_errors(${target})
-    zoo_enable_coverage(${target})
     zoo_mark_llama_includes_as_system(${target})
 endfunction()

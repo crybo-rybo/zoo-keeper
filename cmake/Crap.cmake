@@ -24,20 +24,22 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_custom_target(crap
     COMMAND ${CMAKE_COMMAND}
-        "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/zoo_clear_gcda.cmake"
+        "-DBUILD_DIR=${PROJECT_BINARY_DIR}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/zoo_clear_gcda.cmake"
     COMMAND ${CMAKE_CTEST_COMMAND}
-        --test-dir "${CMAKE_BINARY_DIR}"
+        --test-dir "${PROJECT_BINARY_DIR}"
         --output-on-failure
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/scripts/crap_report.py"
-        "--build-dir"   "${CMAKE_BINARY_DIR}"
-        "--source-dir"  "${CMAKE_SOURCE_DIR}"
+    COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/scripts/crap_report.py"
+        "--build-dir"   "${PROJECT_BINARY_DIR}"
+        "--source-dir"  "${PROJECT_SOURCE_DIR}"
         "--threshold"   "${ZOO_CRAP_THRESHOLD}"
-    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    WORKING_DIRECTORY "${PROJECT_BINARY_DIR}"
     COMMENT "Computing CRAP scores (complexity × coverage)..."
     VERBATIM
 )
 
-if(TARGET zoo_tests)
-    add_dependencies(crap zoo_tests)
-endif()
+foreach(test_target IN ITEMS zoo_tests zoo_integration_tests)
+    if(TARGET ${test_target})
+        add_dependencies(crap ${test_target})
+    endif()
+endforeach()
