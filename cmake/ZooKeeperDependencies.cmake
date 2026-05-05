@@ -29,21 +29,11 @@ function(zoo_configure_llama_build_options)
     set(LLAMA_BUILD_COMMIT "${ZOO_LLAMA_TAG}" CACHE STRING "" FORCE)
 endfunction()
 
-function(zoo_add_llama_subdirectory source_dir binary_dir provider)
-    zoo_configure_llama_build_options()
-    add_subdirectory("${source_dir}" "${binary_dir}")
-    zoo_apply_llama_common_workarounds()
-    set(ZOO_LLAMA_SOURCE_DIR "${source_dir}" PARENT_SCOPE)
-    set(ZOO_LLAMA_PROVIDER "${provider}" PARENT_SCOPE)
-endfunction()
-
 set(ZOO_LLAMA_SOURCE_DIR "")
-set(ZOO_LLAMA_PROVIDER "")
 
 if(TARGET llama OR TARGET llama-common)
     if(TARGET llama AND TARGET llama-common)
-        set(ZOO_LLAMA_PROVIDER "parent project targets")
-        message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
+        message(STATUS "Zoo-Keeper: using llama.cpp from parent project targets")
     else()
         message(FATAL_ERROR
             "Zoo-Keeper requires both `llama` and `llama-common` targets when a parent "
@@ -60,8 +50,7 @@ else()
     FetchContent_MakeAvailable(llama_cpp)
     zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")
-    set(ZOO_LLAMA_PROVIDER "FetchContent archive (${ZOO_LLAMA_ARCHIVE_URL})")
-    message(STATUS "Zoo-Keeper: using llama.cpp from ${ZOO_LLAMA_PROVIDER}")
+    message(STATUS "Zoo-Keeper: using llama.cpp from FetchContent archive (${ZOO_LLAMA_ARCHIVE_URL})")
 endif()
 
 if(ZOO_BUILD_TESTS OR ZOO_BUILD_INTEGRATION_TESTS)
