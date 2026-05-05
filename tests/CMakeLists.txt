@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.18)
-
 if(NOT ZOO_BUILD_TESTS AND NOT ZOO_BUILD_INTEGRATION_TESTS)
     return()
 endif()
