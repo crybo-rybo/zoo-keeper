@@ -138,8 +138,8 @@ if (!result) {
 ```cpp
 auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Write a long essay"});
 
-// Cancel by request ID
-agent->cancel(handle.id());
+// Cancel through the request handle
+handle.cancel();
 
 auto result = handle.await_result();
 if (!result && result.error().code == zoo::ErrorCode::RequestCancelled) {

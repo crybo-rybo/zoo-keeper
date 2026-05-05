@@ -7,6 +7,8 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-05-04
+
 ### Added
 
 - `RequestHandle<Result>::cancel()` for cancelling an async request through its
@@ -20,15 +22,23 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `try_get_history()`, and `try_clear_history()`.
 - Public `zoo::tools::make_tool_definition(...)` helpers for batch tool
   registration without depending on `zoo::tools::detail`.
+- Optional CRAP score analysis through `ZOO_ENABLE_CRAP`, the `crap` CMake
+  target, and `scripts/crap.sh`.
 
 ### Changed
 
 - `AgentRuntime` request processing is split into private history-scope,
   generation-runner, and tool-loop helpers.
+- Tool handlers now run on a dedicated `ToolExecutor` worker thread. The tool
+  loop still waits for the handler result, but user tool code no longer runs on
+  the inference thread.
 - Core sampler and grammar setup now uses an explicit private policy for plain
   text, native tool calls, and schema-constrained extraction.
 - Public `Model` headers now expose only the Pimpl boundary and no llama.cpp
   implementation type names.
+- Non-template `ToolRegistry` and schema-normalization logic now live in
+  `src/tools/registry.cpp`, keeping the public header focused on templates and
+  declarations while retaining a llama.cpp-free tools layer.
 - `ToolRegistry` documentation now states the low-level contract explicitly:
   direct multi-threaded use requires external synchronization.
 - `ModelStore` is now a facade over private catalog, resolver, importer, and
@@ -287,7 +297,8 @@ return typed handles instead of immediate results.
 - C++23 required
 - Windows is not supported
 
-[Unreleased]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.0...v1.1.1

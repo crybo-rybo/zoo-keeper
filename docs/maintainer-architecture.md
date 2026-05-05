@@ -24,6 +24,7 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
   - the request mailbox
   - request tracking and cancellation state
   - the tool registry used during the tool loop
+  - the tool executor worker used for handler invocation
   - the backend seam used to talk to the model layer
 - Calling-thread operations that need model state are routed into the runtime instead of touching the model directly.
 
@@ -45,8 +46,9 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
 | `src/agent/request.hpp` | Request type definitions |
 | `src/agent/request_slots.hpp` | Slot-backed request state, cancellation, await/release |
 | `src/agent/callback_dispatcher.hpp` | Streaming callback dispatch |
+| `src/agent/tool_executor.hpp` | Dedicated worker for user-supplied tool handlers |
 | `src/agent/command.hpp` | Typed control operations applied on the inference thread |
-| `src/agent/runtime_helpers.hpp` | Request history scope, generation runner, tool-loop controller, and shared runtime helpers |
+| `src/agent/runtime_helpers.hpp` | Request history scope, generation runner, and shared runtime helpers |
 
 Keep responsibilities narrow. If a change affects queueing, cancellation, command routing, and request execution at once, it usually belongs in a smaller extracted unit instead.
 
@@ -97,7 +99,7 @@ direct truncating writes to `catalog.json`.
 - `include/zoo/tools/*` contains the supported public tool API.
 - `ToolRegistry` owns normalized metadata and invocation wiring.
 - Parser and validator operate on strings and JSON, not on model internals.
-- `src/tools/*` contains private grammar helpers for schema extraction. Tool-call interception is no longer part of the product code; native tool calling is handled by llama.cpp's `llama-common` layer.
+- `src/tools/*` contains non-template registry implementation and private grammar helpers for schema extraction. Tool-call interception is no longer part of the product code; native tool calling is handled by llama.cpp's `llama-common` layer.
 
 Maintain these invariants:
 
@@ -117,9 +119,11 @@ The `AgentRuntime` implementation is split across five files by responsibility:
 | `src/agent/runtime_commands.cpp` | Synchronous command lane: tool registration, history queries, config updates |
 | `src/agent/runtime_extraction.cpp` | Schema-constrained structured output extraction |
 
-Shared helpers such as `RequestHistoryScope`, `GenerationRunner`,
-`ToolLoopController`, `ScopeExit`, `snapshot_from_messages`, and `swap_history`
-live in `src/agent/runtime_helpers.hpp`.
+Shared helpers such as `RequestHistoryScope`, `GenerationRunner`, `ScopeExit`,
+`snapshot_from_messages`, and `swap_history` live in
+`src/agent/runtime_helpers.hpp`. `ToolLoopController` lives in
+`src/agent/runtime_inference.cpp`, where it can coordinate the backend,
+registry, `ToolExecutor`, and callback dispatcher.
 
 ## Documentation Split
 

@@ -2,7 +2,7 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
-## Unreleased
+## v1.1.3 → v1.1.4
 
 ### Async Request Controls
 
@@ -67,6 +67,13 @@ helper; the old detail name is still present for compatibility.
 Direct `ToolRegistry` use is single-threaded unless the caller externally
 synchronizes overlapping reads and writes. `Agent` owns its runtime registry on
 the inference thread and keeps `Agent::tool_count()` synchronized internally.
+
+### Tool Handler Threading
+
+Agent tool handlers now run on a dedicated `ToolExecutor` worker thread. The
+tool loop still waits for each handler result before continuing, so request
+ordering and tool-loop semantics are unchanged. The practical difference is
+that user-supplied tool code no longer executes on the inference thread.
 
 ### Hub Store Persistence
 
