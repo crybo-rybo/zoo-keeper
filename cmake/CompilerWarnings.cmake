@@ -32,6 +32,9 @@ function(zoo_mark_llama_includes_as_system target)
 endfunction()
 
 function(zoo_apply_owned_target_options target)
+    set_target_properties(${target} PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
     zoo_set_warnings(${target} PRIVATE)
     zoo_enable_sanitizers(${target})
 endfunction()

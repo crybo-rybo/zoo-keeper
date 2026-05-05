@@ -6,10 +6,6 @@ else()
     set(ZOO_PROJECT_IS_TOP_LEVEL OFF)
 endif()
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 option(ZOO_BUILD_TESTS "Build test suite" OFF)
 option(ZOO_BUILD_INTEGRATION_TESTS "Build integration test suite" OFF)
 option(ZOO_BUILD_EXAMPLES "Build examples" OFF)
