@@ -17,13 +17,7 @@ add_subdirectory(tests)
 add_subdirectory(examples)
 add_subdirectory(benchmarks)
 
-if(ZOO_BUILD_DOCS)
-    include(cmake/Doxygen.cmake)
-endif()
-
-if(ZOO_ENABLE_CRAP)
-    include(cmake/Crap.cmake)
-endif()
-
+include(cmake/Doxygen.cmake)
+include(cmake/Crap.cmake)
 include(cmake/ZooKeeperInstall.cmake)
 include(cmake/ZooKeeperPackage.cmake)
