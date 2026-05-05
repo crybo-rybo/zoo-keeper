@@ -3,9 +3,7 @@ include_guard(GLOBAL)
 function(zoo_set_warnings target visibility)
     target_compile_options(${target} ${visibility}
         "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
-        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
-        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
-        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
+        "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic>"
     )
 endfunction()
 
