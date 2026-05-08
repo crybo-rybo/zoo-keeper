@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <filesystem>
 #include <ggml.h>
 #include <gguf.h>
@@ -168,22 +169,6 @@ constexpr int kContextHardCap = 32768;
 constexpr int kContextFloor = 512;
 constexpr int kDefaultBatchCap = 2048;
 
-std::string quantization_from_file_type(int32_t file_type) {
-    static constexpr std::array<std::string_view, 41> kNames = {
-        "F32",    "F16",    "Q4_0",    "Q4_1",      "",       "",        "",
-        "Q8_0",   "Q5_0",   "Q5_1",    "Q2_K",      "Q3_K_S", "Q3_K_M",  "Q3_K_L",
-        "Q4_K_S", "Q4_K_M", "Q5_K_S",  "Q5_K_M",    "Q6_K",   "IQ2_XXS", "IQ2_XS",
-        "Q2_K_S", "IQ3_XS", "IQ3_XXS", "IQ1_S",     "IQ4_NL", "IQ3_S",   "IQ3_M",
-        "IQ2_S",  "IQ2_M",  "IQ4_XS",  "IQ1_M",     "BF16",   "",        "",
-        "",       "TQ1_0",  "TQ2_0",   "MXFP4_MOE", "NVFP4",  "Q1_0",
-    };
-
-    if (file_type < 0 || static_cast<size_t>(file_type) >= kNames.size()) {
-        return {};
-    }
-    return std::string(kNames[static_cast<size_t>(file_type)]);
-}
-
 uint64_t tensor_element_count(ggml_type type, size_t tensor_size_bytes) {
     const auto block_size = ggml_blck_size(type);
     const auto type_size = ggml_type_size(type);
@@ -195,11 +180,41 @@ uint64_t tensor_element_count(ggml_type type, size_t tensor_size_bytes) {
 }
 
 void read_tensor_stats(const gguf_context* ctx, ModelInfo& info) {
+    std::array<uint64_t, GGML_TYPE_COUNT> bytes_per_type = {};
     const int64_t n_tensors = gguf_get_n_tensors(ctx);
     for (int64_t i = 0; i < n_tensors; ++i) {
+        const auto type = gguf_get_tensor_type(ctx, i);
         const auto tensor_size = gguf_get_tensor_size(ctx, i);
         info.file_size_bytes += static_cast<uint64_t>(tensor_size);
-        info.parameter_count += tensor_element_count(gguf_get_tensor_type(ctx, i), tensor_size);
+        info.parameter_count += tensor_element_count(type, tensor_size);
+        if (type >= 0 && static_cast<size_t>(type) < GGML_TYPE_COUNT) {
+            bytes_per_type[static_cast<size_t>(type)] += tensor_size;
+        }
+    }
+
+    // Prefer quantized types for the display name; fall back to dominant float type.
+    uint64_t best = 0;
+    auto dominant = static_cast<ggml_type>(GGML_TYPE_COUNT);
+    for (int i = 0; i < GGML_TYPE_COUNT; ++i) {
+        const auto t = static_cast<ggml_type>(i);
+        if (ggml_is_quantized(t) && bytes_per_type[i] > best) {
+            best = bytes_per_type[i];
+            dominant = t;
+        }
+    }
+    if (dominant == static_cast<ggml_type>(GGML_TYPE_COUNT)) {
+        for (int i = 0; i < GGML_TYPE_COUNT; ++i) {
+            if (bytes_per_type[i] > best) {
+                best = bytes_per_type[i];
+                dominant = static_cast<ggml_type>(i);
+            }
+        }
+    }
+    if (dominant != static_cast<ggml_type>(GGML_TYPE_COUNT)) {
+        std::string name = ggml_type_name(dominant);
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        info.quantization = std::move(name);
     }
 }
 
@@ -207,7 +222,6 @@ void read_gguf_metadata(const gguf_context* ctx, ModelInfo& info) {
     info.name = read_gguf_string(ctx, "general.name");
     info.architecture = read_gguf_string(ctx, "general.architecture");
     info.description = read_gguf_string(ctx, "general.description");
-    info.quantization = quantization_from_file_type(read_gguf_u32_as_i32(ctx, "general.file_type"));
 
     if (!info.architecture.empty()) {
         info.context_length = read_arch_gguf_u32_as_i32(ctx, info.architecture, "context_length");
