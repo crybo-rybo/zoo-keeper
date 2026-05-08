@@ -53,11 +53,6 @@ class GgufInspector {
      * Equivalent to calling `auto_configure(info, *SystemProbe::probe())`.
      */
     static Expected<ModelConfig> auto_configure(const ModelInfo& info);
-
-    /**
-     * @brief Convenience overload that inspects a file and auto-configures in one step.
-     */
-    static Expected<ModelConfig> auto_configure(const std::string& file_path);
 };
 
 } // namespace zoo::core

@@ -17,9 +17,9 @@ namespace zoo::core {
  * @brief Capabilities of a single GPU device exposed by the ggml backend.
  */
 struct GpuInfo {
-    std::string name;              ///< Backend-reported device name.
-    uint64_t total_vram_bytes = 0; ///< Total VRAM reported by the device.
-    uint64_t free_vram_bytes = 0;  ///< Free VRAM at the moment of probing.
+    std::string name;
+    uint64_t total_vram_bytes = 0;
+    uint64_t free_vram_bytes = 0;
 
     bool operator==(const GpuInfo& other) const = default;
 };
@@ -31,11 +31,11 @@ struct GpuInfo {
  * `GgufInspector::auto_configure(info, sys)`.
  */
 struct SystemInfo {
-    uint64_t total_ram_bytes = 0;       ///< Physical RAM reported by the OS.
-    uint64_t available_ram_bytes = 0;   ///< Currently free/available RAM (best-effort).
+    uint64_t total_ram_bytes = 0;
+    uint64_t available_ram_bytes = 0;   ///< Best-effort; 0 if the platform query failed.
     uint32_t logical_cpu_count = 0;     ///< `std::thread::hardware_concurrency()`.
-    bool gpu_offload_supported = false; ///< `llama_supports_gpu_offload()`.
-    std::vector<GpuInfo> gpus;          ///< Enumerated GPU devices (may be empty).
+    bool gpu_offload_supported = false; ///< Mirrors `llama_supports_gpu_offload()`.
+    std::vector<GpuInfo> gpus;
 
     bool operator==(const SystemInfo& other) const = default;
 };

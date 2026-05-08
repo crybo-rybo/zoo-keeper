@@ -378,7 +378,7 @@ enum class ErrorCode {
     InvalidModelPath = 101,      ///< Missing or invalid model path.
     InvalidContextSize = 102,    ///< Invalid context window configuration.
     InvalidSamplingParams = 103, ///< Invalid sampling configuration.
-    AutoConfigureFailed = 105,   ///< Auto-configuration could not derive a usable ModelConfig.
+    InvalidBatchSize = 104,      ///< Invalid n_batch configuration.
 
     // Backend errors (200-299)
     BackendInitFailed = 200,     ///< llama.cpp backend initialization failed.
@@ -604,8 +604,7 @@ struct ModelConfig {
                 Error{ErrorCode::InvalidContextSize, "Context size must be positive"});
         }
         if (n_batch <= 0) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidContextSize, "n_batch must be positive"});
+            return std::unexpected(Error{ErrorCode::InvalidBatchSize, "n_batch must be positive"});
         }
         return {};
     }

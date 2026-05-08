@@ -18,19 +18,19 @@ namespace zoo::core {
  * `GgufInspector::auto_configure()` and the local model store.
  */
 struct ModelInfo {
-    std::string file_path;        ///< Absolute path to the inspected GGUF file.
-    std::string name;             ///< Value of the `general.name` metadata key.
-    std::string architecture;     ///< Value of the `general.architecture` metadata key.
-    std::string description;      ///< Human-readable model description (e.g. "7B Q4_K_M").
-    uint64_t parameter_count = 0; ///< Total number of model parameters.
-    uint64_t file_size_bytes = 0; ///< Total size of all tensor data in bytes.
-    int32_t embedding_dim = 0;    ///< Embedding/hidden dimension size.
-    int32_t layer_count = 0;      ///< Number of transformer layers.
-    int32_t head_count = 0;       ///< Number of attention heads (a.k.a. n_heads).
-    int32_t kv_head_count = 0;    ///< Number of KV heads (n_kv_heads); equals head_count for MHA.
-    int32_t context_length = 0;   ///< Training context length from metadata.
-    std::string quantization;     ///< Quantization type extracted from description or metadata.
-    std::map<std::string, std::string> metadata; ///< All raw GGUF key-value pairs as strings.
+    std::string file_path;
+    std::string name;         ///< Value of the `general.name` metadata key.
+    std::string architecture; ///< Value of the `general.architecture` metadata key.
+    std::string description;
+    uint64_t parameter_count = 0;
+    uint64_t file_size_bytes = 0; ///< Sum of tensor sizes, not the on-disk file size.
+    int32_t embedding_dim = 0;
+    int32_t layer_count = 0;
+    int32_t head_count = 0;
+    int32_t kv_head_count = 0;  ///< Equals head_count for MHA; smaller for GQA.
+    int32_t context_length = 0; ///< Training context length, not the runtime context.
+    std::string quantization;
+    std::map<std::string, std::string> metadata;
 
     bool operator==(const ModelInfo& other) const = default;
 };

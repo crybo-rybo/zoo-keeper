@@ -27,74 +27,68 @@ namespace {
 
 #if defined(__APPLE__)
 
-uint64_t probe_total_ram_bytes() {
-    uint64_t value = 0;
-    size_t size = sizeof(value);
-    if (sysctlbyname("hw.memsize", &value, &size, nullptr, 0) != 0) {
-        return 0;
-    }
-    return value;
-}
+void probe_ram_bytes(uint64_t& total_out, uint64_t& available_out) {
+    total_out = 0;
+    available_out = 0;
 
-uint64_t probe_available_ram_bytes() {
+    size_t size = sizeof(total_out);
+    if (sysctlbyname("hw.memsize", &total_out, &size, nullptr, 0) != 0) {
+        total_out = 0;
+    }
+
     vm_size_t page_size = 0;
     mach_port_t port = mach_host_self();
     if (host_page_size(port, &page_size) != KERN_SUCCESS) {
-        return 0;
+        return;
     }
     vm_statistics64_data_t stats{};
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
     if (host_statistics64(port, HOST_VM_INFO64, reinterpret_cast<host_info64_t>(&stats), &count) !=
         KERN_SUCCESS) {
-        return 0;
+        return;
     }
     const uint64_t free_pages =
         static_cast<uint64_t>(stats.free_count) + static_cast<uint64_t>(stats.inactive_count);
-    return free_pages * static_cast<uint64_t>(page_size);
+    available_out = free_pages * static_cast<uint64_t>(page_size);
 }
 
 #elif defined(__linux__)
 
-uint64_t parse_meminfo_kb(const std::string& key) {
+void probe_ram_bytes(uint64_t& total_out, uint64_t& available_out) {
+    total_out = 0;
+    available_out = 0;
     std::ifstream meminfo("/proc/meminfo");
     if (!meminfo.is_open()) {
-        return 0;
+        return;
     }
     std::string line;
-    while (std::getline(meminfo, line)) {
-        if (line.compare(0, key.size(), key) == 0) {
-            const auto colon = line.find(':');
-            if (colon == std::string::npos) {
-                return 0;
-            }
-            uint64_t value_kb = 0;
-            try {
-                value_kb = std::stoull(line.substr(colon + 1));
-            } catch (...) {
-                return 0;
-            }
-            return value_kb * 1024ULL;
+    while (std::getline(meminfo, line) && (total_out == 0 || available_out == 0)) {
+        uint64_t* target = nullptr;
+        if (total_out == 0 && line.compare(0, 9, "MemTotal:") == 0) {
+            target = &total_out;
+        } else if (available_out == 0 && line.compare(0, 13, "MemAvailable:") == 0) {
+            target = &available_out;
+        }
+        if (target == nullptr) {
+            continue;
+        }
+        const auto colon = line.find(':');
+        if (colon == std::string::npos) {
+            continue;
+        }
+        try {
+            *target = std::stoull(line.substr(colon + 1)) * 1024ULL;
+        } catch (...) {
+            // leave field at 0
         }
     }
-    return 0;
-}
-
-uint64_t probe_total_ram_bytes() {
-    return parse_meminfo_kb("MemTotal");
-}
-
-uint64_t probe_available_ram_bytes() {
-    return parse_meminfo_kb("MemAvailable");
 }
 
 #else
 
-uint64_t probe_total_ram_bytes() {
-    return 0;
-}
-
-uint64_t probe_available_ram_bytes() {
-    return 0;
+void probe_ram_bytes(uint64_t& total_out, uint64_t& available_out) {
+    total_out = 0;
+    available_out = 0;
 }
 
 #endif
@@ -107,18 +101,17 @@ std::vector<GpuInfo> enumerate_gpus() {
         if (dev == nullptr) {
             continue;
         }
-        if (ggml_backend_dev_type(dev) != GGML_BACKEND_DEVICE_TYPE_GPU) {
+        ggml_backend_dev_props props{};
+        ggml_backend_dev_get_props(dev, &props);
+        if (props.type != GGML_BACKEND_DEVICE_TYPE_GPU) {
             continue;
         }
         GpuInfo gpu;
-        if (const char* name = ggml_backend_dev_name(dev)) {
-            gpu.name = name;
+        if (props.name != nullptr) {
+            gpu.name = props.name;
         }
-        size_t free_bytes = 0;
-        size_t total_bytes = 0;
-        ggml_backend_dev_memory(dev, &free_bytes, &total_bytes);
-        gpu.free_vram_bytes = static_cast<uint64_t>(free_bytes);
-        gpu.total_vram_bytes = static_cast<uint64_t>(total_bytes);
+        gpu.free_vram_bytes = static_cast<uint64_t>(props.memory_free);
+        gpu.total_vram_bytes = static_cast<uint64_t>(props.memory_total);
         result.push_back(std::move(gpu));
     }
     return result;
@@ -130,8 +123,7 @@ Expected<SystemInfo> SystemProbe::probe() {
     ensure_backend_initialized();
 
     SystemInfo info;
-    info.total_ram_bytes = probe_total_ram_bytes();
-    info.available_ram_bytes = probe_available_ram_bytes();
+    probe_ram_bytes(info.total_ram_bytes, info.available_ram_bytes);
     info.logical_cpu_count = std::thread::hardware_concurrency();
     info.gpu_offload_supported = llama_supports_gpu_offload();
     if (info.gpu_offload_supported) {

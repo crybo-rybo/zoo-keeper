@@ -367,12 +367,4 @@ Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info) {
     return auto_configure(info, *sys);
 }
 
-Expected<ModelConfig> GgufInspector::auto_configure(const std::string& file_path) {
-    auto info = inspect(file_path);
-    if (!info) {
-        return std::unexpected(info.error());
-    }
-    return auto_configure(*info);
-}
-
 } // namespace zoo::core
