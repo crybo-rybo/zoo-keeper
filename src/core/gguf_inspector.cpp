@@ -4,38 +4,19 @@
  */
 
 #include "zoo/core/gguf_inspector.hpp"
-#include "core/backend_init.hpp"
 #include "zoo/core/system_probe.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
-#include <cstring>
 #include <filesystem>
+#include <ggml.h>
 #include <gguf.h>
-#include <llama.h>
-#include <log.h>
 #include <memory>
+#include <string_view>
 
 namespace zoo::core {
 
 namespace {
-
-class ScopedLlamaLogSilencer {
-  public:
-    ScopedLlamaLogSilencer() {
-        llama_log_get(&original_callback_, &original_user_data_);
-        llama_log_set([](enum ggml_log_level, const char*, void*) {}, nullptr);
-    }
-
-    ~ScopedLlamaLogSilencer() {
-        llama_log_set(original_callback_, original_user_data_);
-    }
-
-  private:
-    ggml_log_callback original_callback_ = nullptr;
-    void* original_user_data_ = nullptr;
-};
 
 struct GgufContextDeleter {
     void operator()(gguf_context* ctx) const noexcept {
@@ -45,25 +26,10 @@ struct GgufContextDeleter {
     }
 };
 
-struct VocabOnlyModelDeleter {
-    void operator()(llama_model* model) const noexcept {
-        if (model != nullptr) {
-            llama_model_free(model);
-        }
-    }
-};
-
 using GgufContextHandle = std::unique_ptr<gguf_context, GgufContextDeleter>;
-using VocabOnlyModelHandle = std::unique_ptr<llama_model, VocabOnlyModelDeleter>;
 
 GgufContextHandle make_gguf_context(const char* path, gguf_init_params params) {
     return GgufContextHandle(gguf_init_from_file(path, params));
-}
-
-VocabOnlyModelHandle load_vocab_only_model(const char* path) {
-    auto params = llama_model_default_params();
-    params.vocab_only = true;
-    return VocabOnlyModelHandle(llama_model_load_from_file(path, params));
 }
 
 std::string read_gguf_string(const gguf_context* ctx, const char* key) {
@@ -91,6 +57,15 @@ int32_t read_gguf_u32_as_i32(const gguf_context* ctx, const char* key) {
         return gguf_get_val_i32(ctx, id);
     }
     return 0;
+}
+
+int32_t read_arch_gguf_u32_as_i32(const gguf_context* ctx, std::string_view architecture,
+                                  std::string_view suffix) {
+    if (architecture.empty()) {
+        return 0;
+    }
+    const std::string key = std::string(architecture) + "." + std::string(suffix);
+    return read_gguf_u32_as_i32(ctx, key.c_str());
 }
 
 std::string gguf_string_value(const gguf_context* ctx, int64_t index) {
@@ -193,40 +168,73 @@ constexpr int kContextHardCap = 32768;
 constexpr int kContextFloor = 512;
 constexpr int kDefaultBatchCap = 2048;
 
+std::string quantization_from_file_type(int32_t file_type) {
+    static constexpr std::array<std::string_view, 41> kNames = {
+        "F32",    "F16",    "Q4_0",    "Q4_1",      "",       "",        "",
+        "Q8_0",   "Q5_0",   "Q5_1",    "Q2_K",      "Q3_K_S", "Q3_K_M",  "Q3_K_L",
+        "Q4_K_S", "Q4_K_M", "Q5_K_S",  "Q5_K_M",    "Q6_K",   "IQ2_XXS", "IQ2_XS",
+        "Q2_K_S", "IQ3_XS", "IQ3_XXS", "IQ1_S",     "IQ4_NL", "IQ3_S",   "IQ3_M",
+        "IQ2_S",  "IQ2_M",  "IQ4_XS",  "IQ1_M",     "BF16",   "",        "",
+        "",       "TQ1_0",  "TQ2_0",   "MXFP4_MOE", "NVFP4",  "Q1_0",
+    };
+
+    if (file_type < 0 || static_cast<size_t>(file_type) >= kNames.size()) {
+        return {};
+    }
+    return std::string(kNames[static_cast<size_t>(file_type)]);
+}
+
+uint64_t tensor_element_count(ggml_type type, size_t tensor_size_bytes) {
+    const auto block_size = ggml_blck_size(type);
+    const auto type_size = ggml_type_size(type);
+    if (block_size <= 0 || type_size == 0) {
+        return 0;
+    }
+    const auto blocks = static_cast<uint64_t>(tensor_size_bytes) / static_cast<uint64_t>(type_size);
+    return blocks * static_cast<uint64_t>(block_size);
+}
+
+void read_tensor_stats(const gguf_context* ctx, ModelInfo& info) {
+    const int64_t n_tensors = gguf_get_n_tensors(ctx);
+    for (int64_t i = 0; i < n_tensors; ++i) {
+        const auto tensor_size = gguf_get_tensor_size(ctx, i);
+        info.file_size_bytes += static_cast<uint64_t>(tensor_size);
+        info.parameter_count += tensor_element_count(gguf_get_tensor_type(ctx, i), tensor_size);
+    }
+}
+
 void read_gguf_metadata(const gguf_context* ctx, ModelInfo& info) {
     info.name = read_gguf_string(ctx, "general.name");
     info.architecture = read_gguf_string(ctx, "general.architecture");
+    info.description = read_gguf_string(ctx, "general.description");
+    info.quantization = quantization_from_file_type(read_gguf_u32_as_i32(ctx, "general.file_type"));
 
     if (!info.architecture.empty()) {
-        info.context_length =
-            read_gguf_u32_as_i32(ctx, (info.architecture + ".context_length").c_str());
+        info.context_length = read_arch_gguf_u32_as_i32(ctx, info.architecture, "context_length");
+        info.embedding_dim = read_arch_gguf_u32_as_i32(ctx, info.architecture, "embedding_length");
+        info.layer_count = read_arch_gguf_u32_as_i32(ctx, info.architecture, "block_count");
+        if (info.layer_count == 0) {
+            info.layer_count =
+                read_arch_gguf_u32_as_i32(ctx, info.architecture, "decoder_block_count");
+        }
+        info.head_count = read_arch_gguf_u32_as_i32(ctx, info.architecture, "attention.head_count");
+        info.kv_head_count =
+            read_arch_gguf_u32_as_i32(ctx, info.architecture, "attention.head_count_kv");
     }
     if (info.context_length == 0) {
         info.context_length = read_gguf_u32_as_i32(ctx, "llm.context_length");
     }
+    if (info.kv_head_count == 0 && info.head_count > 0) {
+        info.kv_head_count = info.head_count;
+    }
+    if (info.description.empty()) {
+        info.description = info.architecture;
+        if (!info.description.empty() && !info.quantization.empty()) {
+            info.description += " " + info.quantization;
+        }
+    }
 
     collect_all_metadata(ctx, info.metadata);
-}
-
-void read_vocab_model_info(const llama_model* model, ModelInfo& info) {
-    info.parameter_count = llama_model_n_params(model);
-    info.file_size_bytes = llama_model_size(model);
-    info.embedding_dim = static_cast<int32_t>(llama_model_n_embd(model));
-    info.layer_count = static_cast<int32_t>(llama_model_n_layer(model));
-    // n_head / n_head_kv index hparams by layer; only safe when at least one layer exists
-    // (vocab-only fixtures may have layer_count == 0).
-    if (info.layer_count > 0) {
-        info.head_count = static_cast<int32_t>(llama_model_n_head(model));
-        info.kv_head_count = static_cast<int32_t>(llama_model_n_head_kv(model));
-    }
-
-    if (info.context_length == 0) {
-        info.context_length = static_cast<int32_t>(llama_model_n_ctx_train(model));
-    }
-
-    char desc_buf[256] = {};
-    llama_model_desc(model, desc_buf, sizeof(desc_buf));
-    info.description = desc_buf;
 }
 
 // Derives quantization label from the model description (e.g. "7B Q4_K_M" → "Q4_K_M").
@@ -359,13 +367,7 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     auto absolute = std::filesystem::absolute(file_path, ec);
     info.file_path = ec ? file_path : absolute.string();
     read_gguf_metadata(gguf_ctx.get(), info);
-
-    // Phase 2: Vocab-only model load for derived statistics.
-    ensure_backend_initialized();
-    ScopedLlamaLogSilencer silenced_logs;
-    if (auto llama_model = load_vocab_only_model(file_path.c_str())) {
-        read_vocab_model_info(llama_model.get(), info);
-    }
+    read_tensor_stats(gguf_ctx.get(), info);
 
     derive_quantization(info);
     return info;

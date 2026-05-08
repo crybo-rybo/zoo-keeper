@@ -296,7 +296,7 @@ TEST(LoadModelConfigTest, AutoConfigureFailsForMissingFile) {
     EXPECT_EQ(config.error().code, zoo::ErrorCode::GgufReadFailed);
 }
 
-TEST(GgufInspectorTest, RestoresGlobalLoggerAfterInspect) {
+TEST(GgufInspectorTest, DoesNotChangeGlobalLoggerDuringInspect) {
     const auto model_path = fixture_vocab_model_path();
     ASSERT_TRUE(std::filesystem::exists(model_path)) << model_path.string();
 
@@ -305,6 +305,12 @@ TEST(GgufInspectorTest, RestoresGlobalLoggerAfterInspect) {
 
     auto result = zoo::core::GgufInspector::inspect(model_path.string());
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->architecture, "gpt2");
+    EXPECT_GT(result->context_length, 0);
+    EXPECT_GT(result->embedding_dim, 0);
+    EXPECT_GT(result->layer_count, 0);
+    EXPECT_GT(result->head_count, 0);
+    EXPECT_EQ(result->kv_head_count, result->head_count);
 
     ggml_log_callback current_callback = nullptr;
     void* current_user_data = nullptr;
