@@ -225,8 +225,12 @@ scripts/crap.sh
 # With a tighter threshold
 scripts/crap.sh -DZOO_CRAP_THRESHOLD=20
 
+# With live model coverage
+ZOO_INTEGRATION_MODEL=/absolute/path/to/model.gguf scripts/crap.sh
+
 # Manually
-scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_ENABLE_CRAP=ON
+scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON \
+    -DZOO_BUILD_INTEGRATION_TESTS=ON -DZOO_ENABLE_CRAP=ON
 cmake --build build --target crap
 ```
 
@@ -239,6 +243,10 @@ The `crap` target:
 3. Runs `lizard` over `src/` and `include/zoo/` for cyclomatic complexity
 4. Runs `gcovr` for per-line coverage data
 5. Computes and prints a CRAP score table sorted by score (highest first)
+
+Set `ZOO_INTEGRATION_MODEL` when running the release-quality CRAP gate. Without
+a live model, integration tests still build but live model coverage is skipped,
+so model-dependent functions can remain over the threshold.
 
 Functions exceeding the threshold are flagged with `<-- over threshold` and
 the process exits non-zero, making this suitable as a CI gate.

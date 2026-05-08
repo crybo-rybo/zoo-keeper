@@ -1,5 +1,9 @@
 include_guard(GLOBAL)
 
+if(NOT ZOO_BUILD_DOCS)
+    return()
+endif()
+
 find_package(Doxygen REQUIRED)
 find_program(ZOO_DOXYGEN_DOT_EXECUTABLE NAMES dot)
 

@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.18)
-
 if(NOT ZOO_BUILD_TESTS AND NOT ZOO_BUILD_INTEGRATION_TESTS)
     return()
 endif()
@@ -23,11 +21,8 @@ if(ZOO_BUILD_TESTS)
         unit/test_token_accounting.cpp
         unit/test_streaming_filter.cpp
         unit/test_callback_dispatcher.cpp
+        "$<$<BOOL:${ZOO_BUILD_HUB}>:${CMAKE_CURRENT_SOURCE_DIR}/unit/test_hub.cpp>"
     )
-
-    if(ZOO_BUILD_HUB)
-        list(APPEND ZOO_TEST_SOURCES unit/test_hub.cpp)
-    endif()
 
     add_executable(zoo_tests ${ZOO_TEST_SOURCES})
 

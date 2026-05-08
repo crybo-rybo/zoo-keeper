@@ -1,10 +1,12 @@
 include_guard(GLOBAL)
 
 function(zoo_enable_sanitizers target)
-    if(ZOO_ENABLE_SANITIZERS AND NOT MSVC)
-        target_compile_options(${target} PRIVATE
-            -fsanitize=address,undefined -fno-omit-frame-pointer)
-        target_link_options(${target} PRIVATE
-            -fsanitize=address,undefined)
-    endif()
+    set(_san "AND:$<BOOL:${ZOO_ENABLE_SANITIZERS}>,$<NOT:$<CXX_COMPILER_ID:MSVC>>")
+    target_compile_options(${target} PRIVATE
+        "$<$<${_san}>:-fsanitize=address,undefined>"
+        "$<$<${_san}>:-fno-omit-frame-pointer>"
+    )
+    target_link_options(${target} PUBLIC
+        "$<$<${_san}>:-fsanitize=address,undefined>"
+    )
 endfunction()

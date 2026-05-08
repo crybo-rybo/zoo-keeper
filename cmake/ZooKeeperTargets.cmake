@@ -1,6 +1,6 @@
 include_guard(GLOBAL)
 
-include(${PROJECT_SOURCE_DIR}/cmake/ZooKeeperLlama.cmake)
+include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlama.cmake")
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/include/zoo/version.hpp.in
@@ -26,6 +26,9 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/core/model_sampling.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_tool_calling.cpp
     ${PROJECT_SOURCE_DIR}/src/core/stream_filter.cpp
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/inspector.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/huggingface.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store.cpp>"
     ${PROJECT_SOURCE_DIR}/src/log_callback.cpp
 )
 target_include_directories(zoo PUBLIC
@@ -42,19 +45,12 @@ zoo_target_link_llama(zoo)
 set_property(TARGET zoo APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES "$<INSTALL_INTERFACE:ZooKeeper::nlohmann_json>"
 )
-
-if(ZOO_BUILD_HUB)
-    target_sources(zoo PRIVATE
-        ${PROJECT_SOURCE_DIR}/src/hub/inspector.cpp
-        ${PROJECT_SOURCE_DIR}/src/hub/huggingface.cpp
-        ${PROJECT_SOURCE_DIR}/src/hub/store.cpp
-    )
-    target_compile_definitions(zoo PUBLIC ZOO_HUB_ENABLED)
-endif()
-
-if(ZOO_ENABLE_LOGGING)
-    target_compile_definitions(zoo PRIVATE ZOO_LOGGING_ENABLED)
-endif()
+target_compile_definitions(zoo
+    PUBLIC
+        "$<$<BOOL:${ZOO_BUILD_HUB}>:ZOO_HUB_ENABLED>"
+    PRIVATE
+        "$<$<BOOL:${ZOO_ENABLE_LOGGING}>:ZOO_LOGGING_ENABLED>"
+)
 
 add_library(zoo_core INTERFACE)
 target_link_libraries(zoo_core INTERFACE zoo)
