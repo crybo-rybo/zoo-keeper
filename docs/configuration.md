@@ -29,9 +29,16 @@ zoo::GenerationOptions generation = json.at("generation").get<zoo::GenerationOpt
 |-------|------|---------|-------------|
 | `model_path` | `string` | required | Path to the GGUF model file |
 | `context_size` | `int` | `8192` | Requested context window size in tokens |
+| `n_batch` | `int` | `2048` | Batch size for prompt processing |
 | `n_gpu_layers` | `int` | `0` | Number of layers to offload to GPU |
 | `use_mmap` | `bool` | `true` | Memory-map the model file |
 | `use_mlock` | `bool` | `false` | Lock model pages in RAM |
+
+JSON config blocks may also contain `"auto_configure": true`. That key is
+recognized by the parser but is *not* applied during pure deserialization
+(`from_json`) — pass the `model` object through the explicit
+`zoo::load_model_config()` helper to inspect the GGUF file, probe the host
+hardware, and merge any explicit overrides on top of the auto-derived values.
 
 ### `zoo::AgentConfig`
 

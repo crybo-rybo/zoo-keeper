@@ -4,12 +4,14 @@
  */
 
 #include "zoo/core/gguf_inspector.hpp"
+#include "zoo/core/json.hpp"
 #include "zoo/core/model_info.hpp"
 #include "zoo/core/system_probe.hpp"
 #include "zoo/core/types.hpp"
 
 #include <gtest/gtest.h>
 #include <llama.h>
+#include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -229,6 +231,32 @@ TEST(AutoConfigTest, GqaModelGetsLargerContextThanMha) {
     EXPECT_GT(gqa_cfg->context_size, mha_cfg->context_size);
 }
 
+TEST(AutoConfigTest, ContextUsesAvailableRamWhenSet) {
+    auto info = make_synthetic_info(8ULL * kGiB, 32, 4096, 32768, 32, 8);
+    auto sys_total = make_system(64ULL * kGiB, false, 0);
+    auto sys_pressure = make_system(64ULL * kGiB, false, 0);
+    sys_pressure.available_ram_bytes = 12ULL * kGiB; // most RAM in use elsewhere
+
+    auto big = zoo::core::GgufInspector::auto_configure(info, sys_total);
+    auto pressured = zoo::core::GgufInspector::auto_configure(info, sys_pressure);
+    ASSERT_TRUE(big.has_value());
+    ASSERT_TRUE(pressured.has_value());
+
+    // Under memory pressure, the derived context window must shrink.
+    EXPECT_LT(pressured->context_size, big->context_size);
+}
+
+TEST(AutoConfigTest, GpuOffloadUsesFreeVramWhenSet) {
+    auto info = make_synthetic_info(4ULL * kGiB, 32, 4096, 8192);
+    auto sys = make_system(64ULL * kGiB, true, 24ULL * kGiB);
+    // Reserve most VRAM for other workloads.
+    sys.gpus.front().free_vram_bytes = 1ULL * kGiB;
+
+    auto config = zoo::core::GgufInspector::auto_configure(info, sys);
+    ASSERT_TRUE(config.has_value());
+    EXPECT_NE(config->n_gpu_layers, -1); // not full offload — VRAM is occupied
+}
+
 TEST(AutoConfigTest, ZeroLayerCountFallsBack) {
     auto info = make_synthetic_info(1ULL * kGiB, 0, 0, 4096);
     auto sys = make_system(32ULL * kGiB, true, 24ULL * kGiB);
@@ -240,6 +268,33 @@ TEST(AutoConfigTest, ZeroLayerCountFallsBack) {
 }
 
 // ---- Inspector regression coverage ----
+
+// ---- load_model_config(json) ----
+
+TEST(LoadModelConfigTest, ReturnsBaseConfigWhenAutoConfigureNotRequested) {
+    nlohmann::json j = {{"model_path", "/models/example.gguf"}, {"context_size", 4096}};
+
+    auto config = zoo::load_model_config(j);
+    ASSERT_TRUE(config.has_value());
+    EXPECT_EQ(config->model_path, "/models/example.gguf");
+    EXPECT_EQ(config->context_size, 4096);
+}
+
+TEST(LoadModelConfigTest, ReturnsBaseConfigWhenAutoConfigureFalse) {
+    nlohmann::json j = {{"model_path", "/models/example.gguf"}, {"auto_configure", false}};
+
+    auto config = zoo::load_model_config(j);
+    ASSERT_TRUE(config.has_value());
+    EXPECT_EQ(config->model_path, "/models/example.gguf");
+}
+
+TEST(LoadModelConfigTest, AutoConfigureFailsForMissingFile) {
+    nlohmann::json j = {{"model_path", "/does/not/exist.gguf"}, {"auto_configure", true}};
+
+    auto config = zoo::load_model_config(j);
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::GgufReadFailed);
+}
 
 TEST(GgufInspectorTest, RestoresGlobalLoggerAfterInspect) {
     const auto model_path = fixture_vocab_model_path();

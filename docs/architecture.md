@@ -8,10 +8,10 @@ fits their needs.
 
 | Layer | Primary Types | Responsibility |
 |-------|---------------|----------------|
-| Hub *(optional)* | `zoo::hub::GgufInspector`, `zoo::hub::HuggingFaceClient`, `zoo::hub::ModelStore` | GGUF inspection, HuggingFace downloads, local model cataloging |
+| Hub *(optional)* | `zoo::hub::HuggingFaceClient`, `zoo::hub::ModelStore` | HuggingFace downloads, local model cataloging |
 | Agent | `zoo::Agent`, `zoo::RequestHandle<Result>` | Async request submission, background inference, native tool orchestration |
 | Tools | `zoo::tools::ToolRegistry`, `zoo::tools::ToolCallParser`, `zoo::tools::ToolArgumentsValidator` | Tool registration, native tool-call parsing, schema validation |
-| Core | `zoo::core::Model` | Direct synchronous llama.cpp wrapper |
+| Core | `zoo::core::Model`, `zoo::core::GgufInspector`, `zoo::core::SystemProbe` | Direct synchronous llama.cpp wrapper, GGUF metadata read, hardware probe, hardware-aware auto-configuration |
 
 ## Usage Model
 

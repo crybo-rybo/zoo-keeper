@@ -193,6 +193,58 @@ constexpr int kContextHardCap = 32768;
 constexpr int kContextFloor = 512;
 constexpr int kDefaultBatchCap = 2048;
 
+void read_gguf_metadata(const gguf_context* ctx, ModelInfo& info) {
+    info.name = read_gguf_string(ctx, "general.name");
+    info.architecture = read_gguf_string(ctx, "general.architecture");
+
+    if (!info.architecture.empty()) {
+        info.context_length =
+            read_gguf_u32_as_i32(ctx, (info.architecture + ".context_length").c_str());
+    }
+    if (info.context_length == 0) {
+        info.context_length = read_gguf_u32_as_i32(ctx, "llm.context_length");
+    }
+
+    collect_all_metadata(ctx, info.metadata);
+}
+
+void read_vocab_model_info(const llama_model* model, ModelInfo& info) {
+    info.parameter_count = llama_model_n_params(model);
+    info.file_size_bytes = llama_model_size(model);
+    info.embedding_dim = static_cast<int32_t>(llama_model_n_embd(model));
+    info.layer_count = static_cast<int32_t>(llama_model_n_layer(model));
+    // n_head / n_head_kv index hparams by layer; only safe when at least one layer exists
+    // (vocab-only fixtures may have layer_count == 0).
+    if (info.layer_count > 0) {
+        info.head_count = static_cast<int32_t>(llama_model_n_head(model));
+        info.kv_head_count = static_cast<int32_t>(llama_model_n_head_kv(model));
+    }
+
+    if (info.context_length == 0) {
+        info.context_length = static_cast<int32_t>(llama_model_n_ctx_train(model));
+    }
+
+    char desc_buf[256] = {};
+    llama_model_desc(model, desc_buf, sizeof(desc_buf));
+    info.description = desc_buf;
+}
+
+// Derives quantization label from the model description (e.g. "7B Q4_K_M" → "Q4_K_M").
+void derive_quantization(ModelInfo& info) {
+    if (!info.quantization.empty()) {
+        return;
+    }
+    const auto pos = info.description.find_last_of(' ');
+    if (pos == std::string::npos) {
+        return;
+    }
+    const auto candidate = info.description.substr(pos + 1);
+    if (candidate.size() >= 2 &&
+        std::string_view("QFI").find(candidate[0]) != std::string_view::npos) {
+        info.quantization = candidate;
+    }
+}
+
 uint64_t per_token_kv_bytes(const ModelInfo& info) {
     if (info.layer_count <= 0 || info.embedding_dim <= 0) {
         return 0;
@@ -209,6 +261,22 @@ uint64_t per_token_kv_bytes(const ModelInfo& info) {
     return static_cast<uint64_t>(info.layer_count) * kv_dim * 4;
 }
 
+// Returns the RAM that should be assumed available for the KV cache. Prefers
+// MemAvailable when the platform reports it; otherwise falls back to total RAM.
+uint64_t usable_ram_bytes(const SystemInfo& sys) {
+    return sys.available_ram_bytes > 0 ? sys.available_ram_bytes : sys.total_ram_bytes;
+}
+
+// Sums per-GPU free VRAM, falling back to total VRAM when the backend does not
+// expose a current free figure.
+uint64_t aggregate_vram_bytes(const SystemInfo& sys) {
+    uint64_t total = 0;
+    for (const auto& gpu : sys.gpus) {
+        total += gpu.free_vram_bytes > 0 ? gpu.free_vram_bytes : gpu.total_vram_bytes;
+    }
+    return total;
+}
+
 int compute_context_size(const ModelInfo& info, const SystemInfo& sys) {
     const int training_ctx =
         info.context_length > 0 ? info.context_length : kFallbackTrainingContext;
@@ -216,9 +284,9 @@ int compute_context_size(const ModelInfo& info, const SystemInfo& sys) {
     int ctx_from_ram = kContextHardCap;
     const uint64_t per_token_kv = per_token_kv_bytes(info);
     if (per_token_kv > 0) {
+        const uint64_t ram = usable_ram_bytes(sys);
         const uint64_t reserved = info.file_size_bytes + kRamOverheadBytes;
-        const uint64_t kv_budget =
-            sys.total_ram_bytes > reserved ? (sys.total_ram_bytes - reserved) / 2 : 0;
+        const uint64_t kv_budget = ram > reserved ? (ram - reserved) / 2 : 0;
         if (kv_budget > 0) {
             const uint64_t derived = kv_budget / per_token_kv;
             ctx_from_ram = derived > static_cast<uint64_t>(kContextHardCap)
@@ -237,14 +305,11 @@ int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
     if (!sys.gpu_offload_supported || sys.gpus.empty()) {
         return 0;
     }
-    uint64_t total_vram = 0;
-    for (const auto& gpu : sys.gpus) {
-        total_vram += gpu.total_vram_bytes;
-    }
-    if (total_vram == 0 || info.file_size_bytes == 0) {
+    const uint64_t vram = aggregate_vram_bytes(sys);
+    if (vram == 0 || info.file_size_bytes == 0) {
         return 0;
     }
-    if (total_vram >= info.file_size_bytes + info.file_size_bytes / 5) {
+    if (vram >= info.file_size_bytes + info.file_size_bytes / 5) {
         return -1; // Full offload with ~20% headroom.
     }
     if (info.layer_count <= 0) {
@@ -254,14 +319,15 @@ int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
     if (bytes_per_layer == 0) {
         return 0;
     }
-    const int64_t fits = static_cast<int64_t>(total_vram / bytes_per_layer) - 2;
+    const int64_t fits = static_cast<int64_t>(vram / bytes_per_layer) - 2;
     return fits > 0 ? static_cast<int>(fits) : 0;
 }
 
 } // namespace
 
 Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
-    if (!std::filesystem::exists(file_path)) {
+    std::error_code ec;
+    if (!std::filesystem::exists(file_path, ec) || ec) {
         return std::unexpected(Error{ErrorCode::GgufReadFailed, "File not found: " + file_path});
     }
 
@@ -277,69 +343,18 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     }
 
     ModelInfo info;
-    info.file_path = std::filesystem::absolute(file_path).string();
-    info.name = read_gguf_string(gguf_ctx.get(), "general.name");
-    info.architecture = read_gguf_string(gguf_ctx.get(), "general.architecture");
-
-    // Try architecture-specific context length keys, then generic.
-    const std::string arch = info.architecture;
-    if (!arch.empty()) {
-        info.context_length =
-            read_gguf_u32_as_i32(gguf_ctx.get(), (arch + ".context_length").c_str());
-        if (info.context_length == 0) {
-            info.context_length =
-                read_gguf_u32_as_i32(gguf_ctx.get(), (arch + ".block_count").c_str());
-            // block_count isn't context_length; reset if we got it wrong.
-            info.context_length = 0;
-        }
-    }
-    if (info.context_length == 0) {
-        info.context_length = read_gguf_u32_as_i32(gguf_ctx.get(), "llm.context_length");
-    }
-
-    collect_all_metadata(gguf_ctx.get(), info.metadata);
+    auto absolute = std::filesystem::absolute(file_path, ec);
+    info.file_path = ec ? file_path : absolute.string();
+    read_gguf_metadata(gguf_ctx.get(), info);
 
     // Phase 2: Vocab-only model load for derived statistics.
     ensure_backend_initialized();
-
-    // Suppress llama.cpp log output during inspection.
     ScopedLlamaLogSilencer silenced_logs;
-
-    auto llama_model = load_vocab_only_model(file_path.c_str());
-    if (llama_model) {
-        info.parameter_count = llama_model_n_params(llama_model.get());
-        info.file_size_bytes = llama_model_size(llama_model.get());
-        info.embedding_dim = static_cast<int32_t>(llama_model_n_embd(llama_model.get()));
-        info.layer_count = static_cast<int32_t>(llama_model_n_layer(llama_model.get()));
-        // n_head / n_head_kv index hparams by layer; only safe when at least one layer exists
-        // (vocab-only fixtures may have layer_count == 0).
-        if (info.layer_count > 0) {
-            info.head_count = static_cast<int32_t>(llama_model_n_head(llama_model.get()));
-            info.kv_head_count = static_cast<int32_t>(llama_model_n_head_kv(llama_model.get()));
-        }
-
-        // Get the training context length if we couldn't get it from raw GGUF.
-        if (info.context_length == 0) {
-            info.context_length = static_cast<int32_t>(llama_model_n_ctx_train(llama_model.get()));
-        }
-
-        char desc_buf[256] = {};
-        llama_model_desc(llama_model.get(), desc_buf, sizeof(desc_buf));
-        info.description = desc_buf;
+    if (auto llama_model = load_vocab_only_model(file_path.c_str())) {
+        read_vocab_model_info(llama_model.get(), info);
     }
 
-    // Extract quantization from description (typically "7B Q4_K_M" -> "Q4_K_M").
-    if (info.quantization.empty() && !info.description.empty()) {
-        const auto pos = info.description.find_last_of(' ');
-        if (pos != std::string::npos && pos + 1 < info.description.size()) {
-            const auto candidate = info.description.substr(pos + 1);
-            if (candidate.size() >= 2 &&
-                (candidate[0] == 'Q' || candidate[0] == 'F' || candidate[0] == 'I')) {
-                info.quantization = candidate;
-            }
-        }
-    }
-
+    derive_quantization(info);
     return info;
 }
 

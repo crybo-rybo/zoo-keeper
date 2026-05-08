@@ -17,8 +17,10 @@
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #elif defined(__linux__)
+#include <charconv>
 #include <fstream>
 #include <string>
+#include <string_view>
 #endif
 
 namespace zoo::core {
@@ -54,32 +56,39 @@ void probe_ram_bytes(uint64_t& total_out, uint64_t& available_out) {
 
 #elif defined(__linux__)
 
+// Parses a `key: <num> kB` line from /proc/meminfo and returns bytes, or 0 on
+// any parse failure. Non-throwing: uses std::from_chars instead of std::stoull.
+uint64_t parse_meminfo_kb_line(std::string_view line) {
+    const auto colon = line.find(':');
+    if (colon == std::string_view::npos) {
+        return 0;
+    }
+    auto rest = line.substr(colon + 1);
+    const auto digit_start = rest.find_first_not_of(" \t");
+    if (digit_start == std::string_view::npos) {
+        return 0;
+    }
+    rest.remove_prefix(digit_start);
+    uint64_t kb = 0;
+    const auto* first = rest.data();
+    const auto* last = rest.data() + rest.size();
+    if (std::from_chars(first, last, kb).ec != std::errc{}) {
+        return 0;
+    }
+    return kb * 1024ULL;
+}
+
 void probe_ram_bytes(uint64_t& total_out, uint64_t& available_out) {
     total_out = 0;
     available_out = 0;
     std::ifstream meminfo("/proc/meminfo");
-    if (!meminfo.is_open()) {
-        return;
-    }
     std::string line;
-    while (std::getline(meminfo, line) && (total_out == 0 || available_out == 0)) {
-        uint64_t* target = nullptr;
-        if (total_out == 0 && line.compare(0, 9, "MemTotal:") == 0) {
-            target = &total_out;
-        } else if (available_out == 0 && line.compare(0, 13, "MemAvailable:") == 0) {
-            target = &available_out;
-        }
-        if (target == nullptr) {
-            continue;
-        }
-        const auto colon = line.find(':');
-        if (colon == std::string::npos) {
-            continue;
-        }
-        try {
-            *target = std::stoull(line.substr(colon + 1)) * 1024ULL;
-        } catch (...) {
-            // leave field at 0
+    while (std::getline(meminfo, line)) {
+        const std::string_view view(line);
+        if (view.starts_with("MemTotal:")) {
+            total_out = parse_meminfo_kb_line(view);
+        } else if (view.starts_with("MemAvailable:")) {
+            available_out = parse_meminfo_kb_line(view);
         }
     }
 }
