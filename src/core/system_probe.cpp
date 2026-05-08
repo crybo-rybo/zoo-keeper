@@ -49,8 +49,12 @@ void probe_ram_bytes(uint64_t& total_out, uint64_t& available_out) {
         KERN_SUCCESS) {
         return;
     }
-    const uint64_t free_pages =
-        static_cast<uint64_t>(stats.free_count) + static_cast<uint64_t>(stats.inactive_count);
+    // Available = free + inactive + purgeable. macOS's "Memory Available"
+    // (Activity Monitor) treats purgeable pages as reclaimable, and ignoring
+    // them under-reports headroom on systems with cache-heavy workloads.
+    const uint64_t free_pages = static_cast<uint64_t>(stats.free_count) +
+                                static_cast<uint64_t>(stats.inactive_count) +
+                                static_cast<uint64_t>(stats.purgeable_count);
     available_out = free_pages * static_cast<uint64_t>(page_size);
 }
 

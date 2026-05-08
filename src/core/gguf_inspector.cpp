@@ -230,6 +230,8 @@ void read_vocab_model_info(const llama_model* model, ModelInfo& info) {
 }
 
 // Derives quantization label from the model description (e.g. "7B Q4_K_M" → "Q4_K_M").
+// Requires a digit immediately after the Q/F/I prefix to avoid misclassifying
+// arbitrary trailing tokens like "Foo".
 void derive_quantization(ModelInfo& info) {
     if (!info.quantization.empty()) {
         return;
@@ -239,8 +241,14 @@ void derive_quantization(ModelInfo& info) {
         return;
     }
     const auto candidate = info.description.substr(pos + 1);
-    if (candidate.size() >= 2 &&
-        std::string_view("QFI").find(candidate[0]) != std::string_view::npos) {
+    if (candidate.size() < 2) {
+        return;
+    }
+    const bool has_quant_prefix =
+        std::string_view("QFI").find(candidate[0]) != std::string_view::npos;
+    const bool has_digit_after = static_cast<unsigned char>(candidate[1]) >= '0' &&
+                                 static_cast<unsigned char>(candidate[1]) <= '9';
+    if (has_quant_prefix && has_digit_after) {
         info.quantization = candidate;
     }
 }
@@ -319,8 +327,13 @@ int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
     if (bytes_per_layer == 0) {
         return 0;
     }
-    const int64_t fits = static_cast<int64_t>(vram / bytes_per_layer) - 2;
-    return fits > 0 ? static_cast<int>(fits) : 0;
+    // Reserve ~20% of the layers that would fit for KV cache + activations.
+    // KV at 32k context can be hundreds of MB; a flat 2-layer reserve is too
+    // thin for larger contexts and risks runtime OOM.
+    const int64_t fits = static_cast<int64_t>(vram / bytes_per_layer);
+    const int64_t headroom = std::max<int64_t>(2, fits / 5);
+    const int64_t usable = fits - headroom;
+    return usable > 0 ? static_cast<int>(usable) : 0;
 }
 
 } // namespace
@@ -370,7 +383,9 @@ Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info, const
     config.n_batch = std::min(config.context_size, kDefaultBatchCap);
     config.n_gpu_layers = compute_n_gpu_layers(info, sys);
     config.use_mmap = true;
-    config.use_mlock = sys.total_ram_bytes >= info.file_size_bytes * 5 / 2;
+    // Use available RAM (when known) so mlock doesn't starve other processes
+    // already consuming a large share of memory.
+    config.use_mlock = usable_ram_bytes(sys) >= info.file_size_bytes * 5 / 2;
     return config;
 }
 
