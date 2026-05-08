@@ -13,8 +13,8 @@ namespace zoo::core {
 /**
  * @brief Ensures the llama.cpp backend is initialized exactly once.
  *
- * Thread-safe via `std::call_once`. Both `core::Model` and `hub::GgufInspector`
- * call this before using llama.cpp APIs.
+ * Thread-safe via `std::call_once`. `core::Model`, `core::GgufInspector`,
+ * and `core::SystemProbe` call this before using llama.cpp APIs.
  */
 inline void ensure_backend_initialized() {
     static std::once_flag flag;

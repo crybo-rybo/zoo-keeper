@@ -1,16 +1,17 @@
 /**
- * @file inspector.hpp
- * @brief GGUF file inspection and automatic model configuration.
+ * @file gguf_inspector.hpp
+ * @brief GGUF file inspection and hardware-aware model configuration.
  */
 
 #pragma once
 
+#include "zoo/core/model_info.hpp"
+#include "zoo/core/system_probe.hpp"
 #include "zoo/core/types.hpp"
-#include "zoo/hub/types.hpp"
 
 #include <string>
 
-namespace zoo::hub {
+namespace zoo::core {
 
 /**
  * @brief Reads GGUF file metadata and generates sensible model configurations.
@@ -33,15 +34,23 @@ class GgufInspector {
     static Expected<ModelInfo> inspect(const std::string& file_path);
 
     /**
-     * @brief Generates a ModelConfig with sensible defaults from inspection metadata.
+     * @brief Generates a hardware-aware ModelConfig from inspection metadata
+     *        and a probe of the host system.
      *
-     * Auto-configuration logic:
-     * - `context_size` = min(training context, 8192) to avoid OOM
-     * - `n_gpu_layers` = -1 (offload all layers)
-     * - `use_mmap` = true, `use_mlock` = false
+     * Heuristics:
+     * - `context_size` is bounded by training context, KV-cache RAM budget,
+     *   and a v1 sanity ceiling of 32k.
+     * - `n_gpu_layers` reflects whether the model fits in available VRAM
+     *   (full offload, partial layer count, or CPU only).
+     * - `use_mmap` is always enabled.
+     * - `use_mlock` is enabled when total RAM comfortably exceeds model size.
+     */
+    static Expected<ModelConfig> auto_configure(const ModelInfo& info, const SystemInfo& sys);
+
+    /**
+     * @brief Convenience overload that probes the host system internally.
      *
-     * @param info Previously inspected model metadata.
-     * @return A populated ModelConfig ready for Model::load().
+     * Equivalent to calling `auto_configure(info, *SystemProbe::probe())`.
      */
     static Expected<ModelConfig> auto_configure(const ModelInfo& info);
 
@@ -51,4 +60,4 @@ class GgufInspector {
     static Expected<ModelConfig> auto_configure(const std::string& file_path);
 };
 
-} // namespace zoo::hub
+} // namespace zoo::core

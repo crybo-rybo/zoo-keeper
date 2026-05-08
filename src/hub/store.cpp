@@ -8,7 +8,7 @@
 #include "hub/hf_cache_paths.hpp"
 #include "hub/store_internals.hpp"
 #include "hub/store_json.hpp"
-#include "zoo/hub/inspector.hpp"
+#include "zoo/core/gguf_inspector.hpp"
 
 #include <algorithm>
 #include <array>
@@ -262,7 +262,7 @@ ModelImporter::add_local_file(std::vector<ModelEntry>& entries, const CatalogRep
         }
     }
 
-    auto info = GgufInspector::inspect(abs_path);
+    auto info = core::GgufInspector::inspect(abs_path);
     if (!info) {
         return std::unexpected(info.error());
     }
@@ -496,7 +496,7 @@ Expected<ModelConfig> ModelStore::model_config(const std::string& name_or_alias)
     if (!entry) {
         return std::unexpected(entry.error());
     }
-    return GgufInspector::auto_configure(entry->info);
+    return core::GgufInspector::auto_configure(entry->info);
 }
 
 Expected<std::unique_ptr<core::Model>>

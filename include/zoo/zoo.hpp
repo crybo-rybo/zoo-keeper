@@ -16,7 +16,10 @@
 #include "log.hpp"
 
 // Core types and model
+#include "core/gguf_inspector.hpp"
 #include "core/model.hpp"
+#include "core/model_info.hpp"
+#include "core/system_probe.hpp"
 #include "core/types.hpp"
 
 // Tool system
@@ -31,7 +34,6 @@
 // Hub layer (model lifecycle management) — optional
 #ifdef ZOO_HUB_ENABLED
 #include "hub/huggingface.hpp"
-#include "hub/inspector.hpp"
 #include "hub/store.hpp"
 #include "hub/types.hpp"
 #endif

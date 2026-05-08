@@ -21,6 +21,8 @@ if(ZOO_BUILD_TESTS)
         unit/test_token_accounting.cpp
         unit/test_streaming_filter.cpp
         unit/test_callback_dispatcher.cpp
+        unit/test_gguf_inspector.cpp
+        unit/test_system_probe.cpp
         "$<$<BOOL:${ZOO_BUILD_HUB}>:${CMAKE_CURRENT_SOURCE_DIR}/unit/test_hub.cpp>"
     )
 

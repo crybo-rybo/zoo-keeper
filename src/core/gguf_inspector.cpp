@@ -1,14 +1,11 @@
 /**
- * @file inspector.cpp
- * @brief GGUF file metadata inspection and auto-configuration.
- *
- * This file intentionally calls llama.cpp APIs directly (gguf.h and llama.h)
- * outside the core/model*.cpp convention. This is an approved exception for
- * the hub layer, which performs metadata-only reads without full model loading.
+ * @file gguf_inspector.cpp
+ * @brief GGUF file metadata inspection and hardware-aware auto-configuration.
  */
 
-#include "zoo/hub/inspector.hpp"
+#include "zoo/core/gguf_inspector.hpp"
 #include "core/backend_init.hpp"
+#include "zoo/core/system_probe.hpp"
 
 #include <algorithm>
 #include <array>
@@ -20,7 +17,7 @@
 #include <log.h>
 #include <memory>
 
-namespace zoo::hub {
+namespace zoo::core {
 
 namespace {
 
@@ -190,6 +187,77 @@ void collect_all_metadata(const gguf_context* ctx, std::map<std::string, std::st
     }
 }
 
+constexpr uint64_t kRamOverheadBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+constexpr int kFallbackTrainingContext = 8192;
+constexpr int kContextHardCap = 32768;
+constexpr int kContextFloor = 512;
+constexpr int kDefaultBatchCap = 2048;
+
+uint64_t per_token_kv_bytes(const ModelInfo& info) {
+    if (info.layer_count <= 0 || info.embedding_dim <= 0) {
+        return 0;
+    }
+    // KV per token = 2 (K+V) * layers * kv_dim * 2 (fp16) = 4 * layers * kv_dim.
+    // For GQA, kv_dim = head_dim * kv_head_count, where head_dim = embedding_dim / head_count.
+    // For MHA (or unknown head metadata), kv_dim = embedding_dim.
+    uint64_t kv_dim = static_cast<uint64_t>(info.embedding_dim);
+    if (info.head_count > 0 && info.kv_head_count > 0 && info.kv_head_count <= info.head_count) {
+        const uint64_t head_dim =
+            static_cast<uint64_t>(info.embedding_dim) / static_cast<uint64_t>(info.head_count);
+        kv_dim = head_dim * static_cast<uint64_t>(info.kv_head_count);
+    }
+    return static_cast<uint64_t>(info.layer_count) * kv_dim * 4;
+}
+
+int compute_context_size(const ModelInfo& info, const SystemInfo& sys) {
+    const int training_ctx =
+        info.context_length > 0 ? info.context_length : kFallbackTrainingContext;
+
+    int ctx_from_ram = kContextHardCap;
+    const uint64_t per_token_kv = per_token_kv_bytes(info);
+    if (per_token_kv > 0) {
+        const uint64_t reserved = info.file_size_bytes + kRamOverheadBytes;
+        const uint64_t kv_budget =
+            sys.total_ram_bytes > reserved ? (sys.total_ram_bytes - reserved) / 2 : 0;
+        if (kv_budget > 0) {
+            const uint64_t derived = kv_budget / per_token_kv;
+            ctx_from_ram = derived > static_cast<uint64_t>(kContextHardCap)
+                               ? kContextHardCap
+                               : static_cast<int>(derived);
+        } else {
+            ctx_from_ram = kContextFloor;
+        }
+    }
+
+    int chosen = std::min({training_ctx, ctx_from_ram, kContextHardCap});
+    return std::max(chosen, kContextFloor);
+}
+
+int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
+    if (!sys.gpu_offload_supported || sys.gpus.empty()) {
+        return 0;
+    }
+    uint64_t total_vram = 0;
+    for (const auto& gpu : sys.gpus) {
+        total_vram += gpu.total_vram_bytes;
+    }
+    if (total_vram == 0 || info.file_size_bytes == 0) {
+        return 0;
+    }
+    if (total_vram >= info.file_size_bytes + info.file_size_bytes / 5) {
+        return -1; // Full offload with ~20% headroom.
+    }
+    if (info.layer_count <= 0) {
+        return 0;
+    }
+    const uint64_t bytes_per_layer = info.file_size_bytes / static_cast<uint64_t>(info.layer_count);
+    if (bytes_per_layer == 0) {
+        return 0;
+    }
+    const int64_t fits = static_cast<int64_t>(total_vram / bytes_per_layer) - 2;
+    return fits > 0 ? static_cast<int>(fits) : 0;
+}
+
 } // namespace
 
 Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
@@ -232,7 +300,7 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     collect_all_metadata(gguf_ctx.get(), info.metadata);
 
     // Phase 2: Vocab-only model load for derived statistics.
-    core::ensure_backend_initialized();
+    ensure_backend_initialized();
 
     // Suppress llama.cpp log output during inspection.
     ScopedLlamaLogSilencer silenced_logs;
@@ -243,6 +311,12 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
         info.file_size_bytes = llama_model_size(llama_model.get());
         info.embedding_dim = static_cast<int32_t>(llama_model_n_embd(llama_model.get()));
         info.layer_count = static_cast<int32_t>(llama_model_n_layer(llama_model.get()));
+        // n_head / n_head_kv index hparams by layer; only safe when at least one layer exists
+        // (vocab-only fixtures may have layer_count == 0).
+        if (info.layer_count > 0) {
+            info.head_count = static_cast<int32_t>(llama_model_n_head(llama_model.get()));
+            info.kv_head_count = static_cast<int32_t>(llama_model_n_head_kv(llama_model.get()));
+        }
 
         // Get the training context length if we couldn't get it from raw GGUF.
         if (info.context_length == 0) {
@@ -269,7 +343,7 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     return info;
 }
 
-Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info) {
+Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info, const SystemInfo& sys) {
     if (info.file_path.empty()) {
         return std::unexpected(
             Error{ErrorCode::InvalidModelPath, "ModelInfo has no file_path set"});
@@ -277,21 +351,20 @@ Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info) {
 
     ModelConfig config;
     config.model_path = info.file_path;
-
-    // Cap context to 8192 by default to avoid OOM on smaller systems.
-    static constexpr int kDefaultMaxContext = 8192;
-    if (info.context_length > 0) {
-        config.context_size = std::min(info.context_length, kDefaultMaxContext);
-    } else {
-        config.context_size = kDefaultMaxContext;
-    }
-
-    // Offload all layers to GPU by default (-1 = all in llama.cpp).
-    config.n_gpu_layers = -1;
+    config.context_size = compute_context_size(info, sys);
+    config.n_batch = std::min(config.context_size, kDefaultBatchCap);
+    config.n_gpu_layers = compute_n_gpu_layers(info, sys);
     config.use_mmap = true;
-    config.use_mlock = false;
-
+    config.use_mlock = sys.total_ram_bytes >= info.file_size_bytes * 5 / 2;
     return config;
+}
+
+Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info) {
+    auto sys = SystemProbe::probe();
+    if (!sys) {
+        return std::unexpected(sys.error());
+    }
+    return auto_configure(info, *sys);
 }
 
 Expected<ModelConfig> GgufInspector::auto_configure(const std::string& file_path) {
@@ -302,4 +375,4 @@ Expected<ModelConfig> GgufInspector::auto_configure(const std::string& file_path
     return auto_configure(*info);
 }
 
-} // namespace zoo::hub
+} // namespace zoo::core

@@ -1,0 +1,13 @@
+{
+    "model": {
+        "model_path": "path/to/model.gguf",
+        "auto_configure": true
+    },
+    "generation": {
+        "sampling": {
+            "temperature": 0.7
+        }
+    },
+    "system_prompt": "You are a helpful assistant with access to tools.",
+    "tools": true
+}

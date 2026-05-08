@@ -42,7 +42,7 @@ Expected<void> initialize_model(Model::Impl& impl) {
 
     auto ctx_params = llama_context_default_params();
     ctx_params.n_ctx = static_cast<uint32_t>(impl.loaded_.model_config.context_size);
-    ctx_params.n_batch = static_cast<uint32_t>(impl.loaded_.model_config.context_size);
+    ctx_params.n_batch = static_cast<uint32_t>(impl.loaded_.model_config.n_batch);
     ctx_params.n_ubatch = 512;
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;

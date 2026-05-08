@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "gguf_inspector.hpp"
+#include "system_probe.hpp"
 #include "types.hpp"
 
 #include <array>
@@ -84,16 +86,15 @@ inline void from_json(const nlohmann::json& j, SamplingParams& params) {
 }
 
 inline void to_json(nlohmann::json& j, const ModelConfig& config) {
-    j = nlohmann::json{{"model_path", config.model_path},
-                       {"context_size", config.context_size},
-                       {"n_gpu_layers", config.n_gpu_layers},
-                       {"use_mmap", config.use_mmap},
-                       {"use_mlock", config.use_mlock}};
+    j = nlohmann::json{{"model_path", config.model_path}, {"context_size", config.context_size},
+                       {"n_batch", config.n_batch},       {"n_gpu_layers", config.n_gpu_layers},
+                       {"use_mmap", config.use_mmap},     {"use_mlock", config.use_mlock}};
 }
 
 inline void from_json(const nlohmann::json& j, ModelConfig& config) {
-    static constexpr std::array<const char*, 5> kAllowedKeys = {
-        "model_path", "context_size", "n_gpu_layers", "use_mmap", "use_mlock"};
+    static constexpr std::array<const char*, 7> kAllowedKeys = {
+        "model_path", "context_size", "n_batch",       "n_gpu_layers",
+        "use_mmap",   "use_mlock",    "auto_configure"};
 
     detail::reject_unknown_keys(j, "model config", kAllowedKeys);
 
@@ -103,8 +104,29 @@ inline void from_json(const nlohmann::json& j, ModelConfig& config) {
 
     ModelConfig parsed;
     j.at("model_path").get_to(parsed.model_path);
+
+    if (j.value("auto_configure", false)) {
+        auto info = core::GgufInspector::inspect(parsed.model_path);
+        if (!info) {
+            throw std::invalid_argument("auto_configure inspect failed: " +
+                                        info.error().to_string());
+        }
+        auto sys = core::SystemProbe::probe();
+        if (!sys) {
+            throw std::invalid_argument("auto_configure probe failed: " + sys.error().to_string());
+        }
+        auto base = core::GgufInspector::auto_configure(*info, *sys);
+        if (!base) {
+            throw std::invalid_argument("auto_configure failed: " + base.error().to_string());
+        }
+        parsed = *base;
+    }
+
     if (auto it = j.find("context_size"); it != j.end()) {
         it->get_to(parsed.context_size);
+    }
+    if (auto it = j.find("n_batch"); it != j.end()) {
+        it->get_to(parsed.n_batch);
     }
     if (auto it = j.find("n_gpu_layers"); it != j.end()) {
         it->get_to(parsed.n_gpu_layers);

@@ -378,6 +378,7 @@ enum class ErrorCode {
     InvalidModelPath = 101,      ///< Missing or invalid model path.
     InvalidContextSize = 102,    ///< Invalid context window configuration.
     InvalidSamplingParams = 103, ///< Invalid sampling configuration.
+    AutoConfigureFailed = 105,   ///< Auto-configuration could not derive a usable ModelConfig.
 
     // Backend errors (200-299)
     BackendInitFailed = 200,     ///< llama.cpp backend initialization failed.
@@ -411,10 +412,13 @@ enum class ErrorCode {
         600, ///< A supplied output schema is malformed or uses unsupported constructs.
     ExtractionFailed = 601, ///< Structured extraction from model output failed.
 
-    // Hub layer errors (700-799). Only reachable when the hub layer is enabled
+    // GGUF inspection errors (700-701). Always reachable — GgufInspector
+    // lives in core and is built into every configuration.
+    GgufReadFailed = 700,       ///< Could not open or parse a GGUF file for inspection.
+    GgufMetadataNotFound = 701, ///< An expected metadata key was missing from the GGUF file.
+
+    // Hub layer errors (702-799). Only reachable when the hub layer is enabled
     // via ZOO_BUILD_HUB=ON; always defined so callers can switch on them.
-    GgufReadFailed = 700,         ///< Could not open or parse a GGUF file for inspection.
-    GgufMetadataNotFound = 701,   ///< An expected metadata key was missing from the GGUF file.
     ModelNotFound = 702,          ///< No model matched the given name, alias, or path.
     ModelAlreadyExists = 703,     ///< A model with the same path is already registered.
     DownloadFailed = 704,         ///< HTTP download of a model file failed.
@@ -574,6 +578,7 @@ using AsyncTextCallback = AsyncTokenCallback;
 struct ModelConfig {
     std::string model_path;  ///< Filesystem path to the GGUF model.
     int context_size = 8192; ///< Requested context window size in tokens.
+    int n_batch = 2048;      ///< Maximum tokens decoded per llama_decode() call.
     int n_gpu_layers =
         0; ///< Number of layers to offload to GPU. Defaults to CPU-only for portability.
     bool use_mmap = true;   ///< Whether to memory-map the model file.
@@ -597,6 +602,10 @@ struct ModelConfig {
         if (context_size <= 0) {
             return std::unexpected(
                 Error{ErrorCode::InvalidContextSize, "Context size must be positive"});
+        }
+        if (n_batch <= 0) {
+            return std::unexpected(
+                Error{ErrorCode::InvalidContextSize, "n_batch must be positive"});
         }
         return {};
     }
