@@ -18,7 +18,7 @@ scripts/format.sh
 scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
 ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 
-# Hub layer (GGUF inspection, HuggingFace downloading, model store)
+# Hub layer (HuggingFace downloading, local model store)
 scripts/build.sh -DZOO_BUILD_HUB=ON
 
 # Sanitizers / coverage
@@ -39,10 +39,10 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 
 | Layer | Namespace | Role |
 |-------|-----------|------|
-| 4 | `zoo::hub` | **Optional.** GGUF inspection, HuggingFace downloading, local model store, auto-configuration. Requires `ZOO_BUILD_HUB=ON` |
+| 4 | `zoo::hub` | **Optional.** HuggingFace downloading + local model store. Requires `ZOO_BUILD_HUB=ON` |
 | 3 | `zoo::Agent` | Async orchestration: inference thread, request queue, streaming, agentic tool loop |
 | 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Zero llama.cpp dependency. Non-template implementation lives in `src/tools/registry.cpp` |
-| 1 | `zoo::core` | `Model` — direct synchronous llama.cpp wrapper. Owns all llama resources. Not thread-safe |
+| 1 | `zoo::core` | `Model` (sync llama.cpp wrapper), `GgufInspector` (metadata read), `SystemProbe` (RAM/CPU/GPU probe), hardware-aware `auto_configure`. JSON `auto_configure: true` enables zero-tuning model loads |
 
 **Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `RequestHandle<TextResponse>`. Model access is protected by thread confinement to the inference thread. Streaming callbacks run on `CallbackDispatcher`, and user tool handlers run on `ToolExecutor` while the tool loop waits for their result.
 
@@ -52,8 +52,8 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 
 ## Key Conventions
 
-- All llama.cpp calls live in `src/core/model*.cpp` — nowhere else
-- `model.hpp` uses forward declarations for llama types (no `llama.h` in public headers); `common_chat_templates` is also forward-declared there
+- All llama.cpp / gguf.h / ggml-backend.h calls live in `src/core/` — nowhere else (currently `model*.cpp`, `gguf_inspector.cpp`, `system_probe.cpp`)
+- Public headers in `include/zoo/core/` use forward declarations for llama types (no `llama.h`, `gguf.h`, or `ggml-backend.h` in public headers); `common_chat_templates` is forward-declared in `model.hpp`
 - Error handling uses `std::expected` (C++23), not exceptions
 - `role_to_string()` returns `const char*` (static storage) — safe for `llama_chat_message`
 - `ZOO_LOG` is a no-op when `ZOO_LOGGING_ENABLED` is not defined

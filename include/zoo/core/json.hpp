@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "gguf_inspector.hpp"
+#include "system_probe.hpp"
 #include "types.hpp"
 
 #include <array>
@@ -84,16 +86,44 @@ inline void from_json(const nlohmann::json& j, SamplingParams& params) {
 }
 
 inline void to_json(nlohmann::json& j, const ModelConfig& config) {
-    j = nlohmann::json{{"model_path", config.model_path},
-                       {"context_size", config.context_size},
-                       {"n_gpu_layers", config.n_gpu_layers},
-                       {"use_mmap", config.use_mmap},
-                       {"use_mlock", config.use_mlock}};
+    j = nlohmann::json{{"model_path", config.model_path}, {"context_size", config.context_size},
+                       {"n_batch", config.n_batch},       {"n_gpu_layers", config.n_gpu_layers},
+                       {"use_mmap", config.use_mmap},     {"use_mlock", config.use_mlock}};
 }
 
+namespace detail {
+
+// Applies explicit JSON overrides on top of an existing ModelConfig. Used by
+// both the pure deserializer and the auto-configure resolver.
+inline void apply_model_config_overrides(const nlohmann::json& j, ModelConfig& config) {
+    if (auto it = j.find("context_size"); it != j.end()) {
+        it->get_to(config.context_size);
+    }
+    if (auto it = j.find("n_batch"); it != j.end()) {
+        it->get_to(config.n_batch);
+    }
+    if (auto it = j.find("n_gpu_layers"); it != j.end()) {
+        it->get_to(config.n_gpu_layers);
+    }
+    if (auto it = j.find("use_mmap"); it != j.end()) {
+        it->get_to(config.use_mmap);
+    }
+    if (auto it = j.find("use_mlock"); it != j.end()) {
+        it->get_to(config.use_mlock);
+    }
+}
+
+} // namespace detail
+
+// Pure deserializer: never inspects files or probes hardware. The optional
+// `auto_configure` key is recognized so it does not fail validation, but it is
+// resolved only by the explicit `load_model_config()` helper below.
 inline void from_json(const nlohmann::json& j, ModelConfig& config) {
-    static constexpr std::array<const char*, 5> kAllowedKeys = {
-        "model_path", "context_size", "n_gpu_layers", "use_mmap", "use_mlock"};
+    // "auto_configure" is consumed by `load_model_config`, not here. Listed so
+    // strict key validation does not reject configs that opt into auto-config.
+    static constexpr std::array<const char*, 7> kAllowedKeys = {
+        "model_path", "context_size", "n_batch",       "n_gpu_layers",
+        "use_mmap",   "use_mlock",    "auto_configure"};
 
     detail::reject_unknown_keys(j, "model config", kAllowedKeys);
 
@@ -103,20 +133,53 @@ inline void from_json(const nlohmann::json& j, ModelConfig& config) {
 
     ModelConfig parsed;
     j.at("model_path").get_to(parsed.model_path);
-    if (auto it = j.find("context_size"); it != j.end()) {
-        it->get_to(parsed.context_size);
-    }
-    if (auto it = j.find("n_gpu_layers"); it != j.end()) {
-        it->get_to(parsed.n_gpu_layers);
-    }
-    if (auto it = j.find("use_mmap"); it != j.end()) {
-        it->get_to(parsed.use_mmap);
-    }
-    if (auto it = j.find("use_mlock"); it != j.end()) {
-        it->get_to(parsed.use_mlock);
-    }
+    detail::apply_model_config_overrides(j, parsed);
 
     config = std::move(parsed);
+}
+
+namespace detail {
+
+// Inspects a GGUF file and probes the host hardware to produce a ModelConfig.
+// Extracted from `load_model_config` so the entry point stays small enough to
+// unit test cheaply.
+inline Expected<ModelConfig> auto_configure_model_path(const std::string& model_path) {
+    auto info = core::GgufInspector::inspect(model_path);
+    if (!info) {
+        return std::unexpected(info.error());
+    }
+    auto sys = core::SystemProbe::probe();
+    if (!sys) {
+        return std::unexpected(sys.error());
+    }
+    return core::GgufInspector::auto_configure(*info, *sys);
+}
+
+} // namespace detail
+
+// Returns a `ModelConfig` from JSON, resolving `auto_configure: true` against
+// the host system if requested. Explicit JSON keys override the auto-derived
+// values. Performs I/O (GGUF inspection) and backend init (system probe), so
+// callers should treat it as an explicit configuration step rather than pure
+// parsing.
+inline Expected<ModelConfig> load_model_config(const nlohmann::json& j) {
+    if (!j.is_object() || !j.value("auto_configure", false)) {
+        return j.get<ModelConfig>();
+    }
+
+    // Auto-configure path: skip the regular deserializer (its derived values
+    // would be discarded) and resolve hardware-aware defaults from the GGUF
+    // file, then layer explicit overrides on top.
+    detail::require_object(j, "model config");
+    if (!j.contains("model_path")) {
+        throw std::invalid_argument("ModelConfig JSON must contain required key: model_path");
+    }
+    auto resolved = detail::auto_configure_model_path(j.at("model_path").get<std::string>());
+    if (!resolved) {
+        return std::unexpected(resolved.error());
+    }
+    detail::apply_model_config_overrides(j, *resolved);
+    return *resolved;
 }
 
 inline void to_json(nlohmann::json& j, const AgentConfig& config) {

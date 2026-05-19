@@ -26,7 +26,8 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/core/model_sampling.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_tool_calling.cpp
     ${PROJECT_SOURCE_DIR}/src/core/stream_filter.cpp
-    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/inspector.cpp>"
+    ${PROJECT_SOURCE_DIR}/src/core/gguf_inspector.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/system_probe.cpp
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/huggingface.cpp>"
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store.cpp>"
     ${PROJECT_SOURCE_DIR}/src/log_callback.cpp

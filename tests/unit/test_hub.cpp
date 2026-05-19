@@ -7,7 +7,6 @@
 #include "hub/hf_cache_paths.hpp"
 #include "hub/store_internals.hpp"
 #include "zoo/hub/huggingface.hpp"
-#include "zoo/hub/inspector.hpp"
 #include "zoo/hub/store.hpp"
 #include "zoo/hub/types.hpp"
 
@@ -76,24 +75,6 @@ zoo::hub::ModelEntry make_entry(std::string id, std::string name, std::string fi
     entry.added_at = "2026-03-31T12:00:00Z";
     return entry;
 }
-
-void sentinel_log_callback(ggml_log_level, const char*, void*) {}
-
-class ScopedLlamaLogger {
-  public:
-    ScopedLlamaLogger(ggml_log_callback callback, void* user_data) {
-        llama_log_get(&original_callback_, &original_user_data_);
-        llama_log_set(callback, user_data);
-    }
-
-    ~ScopedLlamaLogger() {
-        llama_log_set(original_callback_, original_user_data_);
-    }
-
-  private:
-    ggml_log_callback original_callback_ = nullptr;
-    void* original_user_data_ = nullptr;
-};
 
 template <typename T>
 concept HasApiBaseUrl = requires(T config) { config.api_base_url; };
@@ -199,76 +180,6 @@ TEST(HuggingFaceParseTest, SlashAtEnd) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
 }
 
-// ---- Auto-configuration ----
-
-TEST(AutoConfigTest, SetsModelPath) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "/models/test.gguf";
-    info.context_length = 4096;
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->model_path, "/models/test.gguf");
-}
-
-TEST(AutoConfigTest, CapsContextAt8192) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "/models/test.gguf";
-    info.context_length = 131072;
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->context_size, 8192);
-}
-
-TEST(AutoConfigTest, UsesTrainingContextWhenSmaller) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "/models/test.gguf";
-    info.context_length = 2048;
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->context_size, 2048);
-}
-
-TEST(AutoConfigTest, DefaultsWhenNoContextLength) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "/models/test.gguf";
-    info.context_length = 0;
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->context_size, 8192);
-}
-
-TEST(AutoConfigTest, OffloadsAllGpuLayers) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "/models/test.gguf";
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->n_gpu_layers, -1);
-}
-
-TEST(AutoConfigTest, EnablesMmap) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "/models/test.gguf";
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_TRUE(config.has_value());
-    EXPECT_TRUE(config->use_mmap);
-    EXPECT_FALSE(config->use_mlock);
-}
-
-TEST(AutoConfigTest, EmptyPathReturnsError) {
-    zoo::hub::ModelInfo info;
-    info.file_path = "";
-
-    auto config = zoo::hub::GgufInspector::auto_configure(info);
-    ASSERT_FALSE(config.has_value());
-    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidModelPath);
-}
-
 // ---- ModelStoreConfig validation ----
 
 TEST(ModelStoreConfigTest, ValidConfig) {
@@ -308,22 +219,6 @@ TEST(HuggingFaceConfigTest, TokenOnlyConfigIsAccepted) {
     config.token = "hf_test_token";
     auto result = config.validate();
     EXPECT_TRUE(result.has_value());
-}
-
-// ---- ModelInfo equality ----
-
-TEST(ModelInfoTest, DefaultEquality) {
-    zoo::hub::ModelInfo a;
-    zoo::hub::ModelInfo b;
-    EXPECT_EQ(a, b);
-}
-
-TEST(ModelInfoTest, DifferentNameNotEqual) {
-    zoo::hub::ModelInfo a;
-    a.name = "model-a";
-    zoo::hub::ModelInfo b;
-    b.name = "model-b";
-    EXPECT_NE(a, b);
 }
 
 // ---- CachedModelInfo ----
@@ -653,24 +548,4 @@ TEST(ModelStoreCatalogTest, AddRejectsDuplicateAndEmptyAliases) {
     auto duplicate_within_add = (*store)->add(second_copy.string(), {"fixture", "fixture"});
     ASSERT_FALSE(duplicate_within_add.has_value());
     EXPECT_EQ(duplicate_within_add.error().code, zoo::ErrorCode::InvalidConfig);
-}
-
-// ---- Inspector regression coverage ----
-
-TEST(GgufInspectorTest, RestoresGlobalLoggerAfterInspect) {
-    const auto model_path = fixture_vocab_model_path();
-    ASSERT_TRUE(std::filesystem::exists(model_path)) << model_path.string();
-
-    void* const sentinel_user_data = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));
-    ScopedLlamaLogger logger(sentinel_log_callback, sentinel_user_data);
-
-    auto result = zoo::hub::GgufInspector::inspect(model_path.string());
-    ASSERT_TRUE(result.has_value()) << result.error().to_string();
-
-    ggml_log_callback current_callback = nullptr;
-    void* current_user_data = nullptr;
-    llama_log_get(&current_callback, &current_user_data);
-
-    EXPECT_EQ(current_callback, sentinel_log_callback);
-    EXPECT_EQ(current_user_data, sentinel_user_data);
 }

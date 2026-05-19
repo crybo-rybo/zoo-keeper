@@ -75,7 +75,12 @@ static void from_json(const nlohmann::json& j, DemoConfig& config) {
 
     DemoConfig parsed;
     if (auto it = j.find("model"); it != j.end()) {
-        parsed.model = it->get<zoo::ModelConfig>();
+        auto resolved = zoo::load_model_config(*it);
+        if (!resolved) {
+            throw std::invalid_argument("Failed to load model config: " +
+                                        resolved.error().to_string());
+        }
+        parsed.model = std::move(*resolved);
     } else {
         throw std::invalid_argument("Demo config must contain a model block");
     }

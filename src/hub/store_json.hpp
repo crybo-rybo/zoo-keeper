@@ -9,9 +9,9 @@
 
 #include <nlohmann/json.hpp>
 
-namespace zoo::hub {
+namespace zoo::core {
 
-// --- ModelInfo ---
+// --- ModelInfo --- (in zoo::core for ADL since ModelInfo lives there)
 
 inline void to_json(nlohmann::json& j, const ModelInfo& info) {
     j = nlohmann::json{
@@ -23,6 +23,8 @@ inline void to_json(nlohmann::json& j, const ModelInfo& info) {
         {"file_size_bytes", info.file_size_bytes},
         {"embedding_dim", info.embedding_dim},
         {"layer_count", info.layer_count},
+        {"head_count", info.head_count},
+        {"kv_head_count", info.kv_head_count},
         {"context_length", info.context_length},
         {"quantization", info.quantization},
         {"metadata", info.metadata},
@@ -46,6 +48,10 @@ inline void from_json(const nlohmann::json& j, ModelInfo& info) {
         it->get_to(info.embedding_dim);
     if (auto it = j.find("layer_count"); it != j.end())
         it->get_to(info.layer_count);
+    if (auto it = j.find("head_count"); it != j.end())
+        it->get_to(info.head_count);
+    if (auto it = j.find("kv_head_count"); it != j.end())
+        it->get_to(info.kv_head_count);
     if (auto it = j.find("context_length"); it != j.end())
         it->get_to(info.context_length);
     if (auto it = j.find("quantization"); it != j.end())
@@ -53,6 +59,10 @@ inline void from_json(const nlohmann::json& j, ModelInfo& info) {
     if (auto it = j.find("metadata"); it != j.end())
         it->get_to(info.metadata);
 }
+
+} // namespace zoo::core
+
+namespace zoo::hub {
 
 // --- ModelEntry ---
 

@@ -1,45 +1,16 @@
 # Hub Layer
 
-The hub layer (`zoo::hub`) is an optional Layer 4 that provides GGUF file
-inspection, HuggingFace model downloading, and a local model catalog. It is
-only compiled when `ZOO_BUILD_HUB=ON`.
+The hub layer (`zoo::hub`) is an optional Layer 4 that adds HuggingFace model
+downloading and a local model catalog on top of the core library. It is only
+compiled when `ZOO_BUILD_HUB=ON`.
 
 ```bash
 scripts/build.sh -DZOO_BUILD_HUB=ON
 ```
 
-## GGUF Inspection
-
-`GgufInspector::inspect()` reads model metadata from a GGUF file without
-loading tensor weights. It uses a two-phase approach:
-
-1. `gguf_init_from_file()` for raw key-value metadata extraction
-2. `llama_model_load_from_file()` with `vocab_only=true` for derived
-   statistics (parameter count, file size, layer count)
-
-The result is a `ModelInfo` struct containing architecture, quantization type,
-context length, embedding dimensions, and all raw GGUF metadata as a
-string-to-string map.
-
-`GgufInspector::auto_configure()` generates a `ModelConfig` with sensible
-defaults from inspected metadata:
-
-- `context_size` = min(training context, 8192) to avoid OOM
-- `n_gpu_layers` = -1 (offload all layers)
-- `use_mmap` = true, `use_mlock` = false
-
-```cpp
-auto info = zoo::hub::GgufInspector::inspect("/path/to/model.gguf");
-if (!info) { /* handle error */ }
-
-std::cout << info->name << " (" << info->description << ")\n";
-std::cout << "Layers: " << info->layer_count << "\n";
-std::cout << "Context: " << info->context_length << "\n";
-
-// One-step: inspect + auto-configure
-auto config = zoo::hub::GgufInspector::auto_configure("/path/to/model.gguf");
-auto model = zoo::core::Model::load(*config).value();
-```
+GGUF metadata inspection and hardware-aware auto-configuration live in the
+core layer (`zoo::core::GgufInspector`, `zoo::core::SystemProbe`) so they are
+available without enabling the hub.
 
 ## HuggingFace Client
 
