@@ -12,9 +12,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "zoo/agent.hpp"
+#include "zoo/core/json.hpp"
 #include "zoo/core/model.hpp"
 
 namespace {
@@ -107,6 +109,33 @@ TEST(AgentIntegrationTest, CreatePropagatesModelLoadFailures) {
     auto result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::ModelLoadFailed);
+}
+
+TEST_F(LiveModelIntegrationTest, AutoConfiguredCpuOverrideLoadsModel) {
+    const nlohmann::json config_json = {{"model_path", model_path_.string()},
+                                        {"auto_configure", true},
+                                        {"context_size", 2048},
+                                        {"n_gpu_layers", 0}};
+
+    auto config_result = zoo::load_model_config(config_json);
+    ASSERT_TRUE(config_result.has_value()) << config_result.error().to_string();
+
+    const auto& model_config = *config_result;
+    EXPECT_EQ(model_config.context_size, 2048);
+    EXPECT_EQ(model_config.n_gpu_layers, 0);
+    EXPECT_GT(model_config.n_batch, 0);
+    EXPECT_LE(model_config.n_batch, model_config.context_size);
+
+    std::error_code ec;
+    const bool same_model = std::filesystem::equivalent(
+        std::filesystem::path{model_config.model_path}, model_path_, ec);
+    EXPECT_FALSE(ec) << ec.message();
+    EXPECT_TRUE(same_model) << "Expected auto-configured path to match " << model_path_.string()
+                            << ", got " << model_config.model_path;
+
+    auto cfg = config();
+    auto model_result = zoo::core::Model::load(model_config, cfg.generation);
+    ASSERT_TRUE(model_result.has_value()) << model_result.error().to_string();
 }
 
 TEST_F(LiveModelIntegrationTest, ModelGeneratesAndTracksHistory) {
