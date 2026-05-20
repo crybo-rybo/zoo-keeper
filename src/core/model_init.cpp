@@ -6,6 +6,7 @@
 #include "core/model_impl.hpp"
 #include "zoo/core/model.hpp"
 
+#include <array>
 #include <chat.h>
 #include <climits>
 #include <cstdint>
@@ -27,10 +28,17 @@ Expected<void> initialize_model(Model::Impl& impl) {
         nullptr);
     common_log_pause(common_log_main());
 
+    const bool cpu_only = impl.loaded_.model_config.n_gpu_layers == 0;
+    std::array<ggml_backend_dev_t, 1> cpu_only_devices{nullptr};
+
     auto model_params = llama_model_default_params();
     model_params.n_gpu_layers = impl.loaded_.model_config.n_gpu_layers;
     model_params.use_mmap = impl.loaded_.model_config.use_mmap;
     model_params.use_mlock = impl.loaded_.model_config.use_mlock;
+    if (cpu_only) {
+        // llama.cpp treats nullptr as "all devices"; use an explicit empty list for CPU-only.
+        model_params.devices = cpu_only_devices.data();
+    }
 
     auto llama_model = LlamaModelHandle(
         llama_model_load_from_file(impl.loaded_.model_config.model_path.c_str(), model_params));
@@ -47,6 +55,10 @@ Expected<void> initialize_model(Model::Impl& impl) {
     ctx_params.n_threads = -1;
     ctx_params.n_threads_batch = -1;
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+    if (cpu_only) {
+        ctx_params.offload_kqv = false;
+        ctx_params.op_offload = false;
+    }
     // F16 uses more memory than Q8, but avoids KV dequant overhead in decode.
     ctx_params.type_k = GGML_TYPE_F16;
     ctx_params.type_v = GGML_TYPE_F16;
