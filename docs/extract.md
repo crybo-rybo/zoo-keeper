@@ -11,6 +11,8 @@ payload from `response->data` if the request succeeds.
 
 ```cpp
 #include <zoo/zoo.hpp>
+#include <array>
+#include <iostream>
 
 nlohmann::json schema = {
     {"type", "object"},

@@ -24,11 +24,13 @@ Zoo-Keeper is a C++23 inference SDK built on [llama.cpp](https://github.com/gger
 Think of it this way: **llama.cpp is the engine. Zoo-Keeper is the SDK.**
 
 ```cpp
-// Five lines from zero to a running agent with tools
+// Minimal agent flow with a native C++ tool
+zoo::ModelConfig config{.model_path = "models/llama-3-8b.gguf"};
 auto agent = zoo::Agent::create(config).value();
 agent->set_system_prompt("You are a helpful assistant.");
-agent->register_tool("search", "Search the web", {"query"}, my_search_fn);
-auto handle = agent->chat("Find flights to Tokyo", {}, on_token);
+agent->register_tool("search", "Search local docs", {"query"},
+                     [](std::string query) { return "results for: " + query; });
+auto handle = agent->chat("Find flights to Tokyo");
 auto result = handle.await_result().value();
 ```
 
@@ -59,6 +61,7 @@ Zoo-Keeper closes that gap.
 <td>
 
 ```cpp
+zoo::ModelConfig config{.model_path = "models/llama-3-8b.gguf"};
 auto agent = zoo::Agent::create(config).value();
 agent->register_tool("add", "Add numbers",
     {"a", "b"}, [](int a, int b) { return a + b; });
@@ -201,7 +204,7 @@ Register any C++ callable and Zoo-Keeper generates the JSON Schema, detects tool
 ```cpp
 agent->register_tool("get_weather", "Get current weather", {"city"},
     [](std::string city) -> std::string {
-        return fetch_weather(city);  // Your code
+        return "Weather for " + city + ": clear";
     });
 
 // The agent automatically:

@@ -8,6 +8,16 @@ Zoo-Keeper only executes native tool calls emitted by the active model or
 template. If native tool calling is unavailable, the request stays on the text
 path and no synthetic alternate protocol is introduced.
 
+The examples below assume an initialized agent pointer or `std::unique_ptr`
+named `agent` and these headers:
+
+```cpp
+#include <zoo/zoo.hpp>
+
+#include <iostream>
+#include <vector>
+```
+
 ## Typed Registration
 
 Register any supported callable and Zoo-Keeper will derive the argument schema

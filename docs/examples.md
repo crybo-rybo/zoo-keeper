@@ -2,6 +2,19 @@
 
 Copy-paste snippets for common Zoo-Keeper patterns, plus the matching executables under `examples/`.
 
+The snippets below assume an initialized agent pointer or `std::unique_ptr`
+named `agent` unless the section says otherwise. Use these headers for the
+cookbook fragments:
+
+```cpp
+#include <zoo/zoo.hpp>
+
+#include <algorithm>
+#include <cctype>
+#include <ctime>
+#include <iostream>
+```
+
 ## Example Executables
 
 Build the example binaries with:
@@ -101,7 +114,8 @@ if (response) {
 ```cpp
 agent->register_tool("uppercase", "Convert text to uppercase", {"text"},
     [](std::string text) -> std::string {
-        std::transform(text.begin(), text.end(), text.begin(), ::toupper);
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         return text;
     });
 ```

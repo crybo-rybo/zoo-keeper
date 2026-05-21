@@ -336,6 +336,7 @@ Zoo-Keeper's.
 
 ```bash
 scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
+# edit examples/config.example.json so model.model_path points at a local GGUF
 ./build/examples/demo_chat examples/config.example.json
 ```
 

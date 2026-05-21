@@ -8,6 +8,15 @@ compiled when `ZOO_BUILD_HUB=ON`.
 scripts/build.sh -DZOO_BUILD_HUB=ON
 ```
 
+The C++ snippets below assume the hub layer is enabled and these headers are
+available:
+
+```cpp
+#include <zoo/zoo.hpp>
+
+#include <iostream>
+```
+
 GGUF metadata inspection and hardware-aware auto-configuration live in the
 core layer (`zoo::core::GgufInspector`, `zoo::core::SystemProbe`) so they are
 available without enabling the hub.
