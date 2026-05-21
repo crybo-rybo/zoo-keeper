@@ -280,7 +280,7 @@ include(FetchContent)
 FetchContent_Declare(
     zoo-keeper
     GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
-    GIT_TAG        v1.1.4
+    GIT_TAG        v1.1.5
 )
 FetchContent_MakeAvailable(zoo-keeper)
 
