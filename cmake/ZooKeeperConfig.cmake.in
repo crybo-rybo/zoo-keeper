@@ -15,16 +15,6 @@ if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
 endif()
 
 find_dependency(llama CONFIG)
-
-# llama.cpp ships llama-version.cmake instead of the standard
-# llama-config-version.cmake, so find_dependency can't enforce a version pin.
-# llama-config.cmake sets LLAMA_BUILD_NUMBER; check it directly.
-if(NOT "${LLAMA_BUILD_NUMBER}" STREQUAL "@ZOO_BUILD_LLAMA_BUILD_NUMBER@")
-    message(FATAL_ERROR "ZooKeeper was built against llama.cpp build "
-        "@ZOO_BUILD_LLAMA_BUILD_NUMBER@, but the installed llama package "
-        "reports '${LLAMA_BUILD_NUMBER}'. Reinstall a matching llama.cpp.")
-endif()
-
 find_dependency(nlohmann_json 3.11 CONFIG)
 
 if(NOT TARGET ZooKeeper::llama AND TARGET llama)

@@ -5,8 +5,6 @@
 
 #include "zoo/tools/registry.hpp"
 
-#include <cmath>
-#include <limits>
 #include <unordered_set>
 
 namespace zoo::tools {
@@ -57,24 +55,8 @@ Expected<ToolValueType> parse_tool_value_type(std::string_view value) {
 
 bool json_matches_type(const nlohmann::json& value, ToolValueType type) {
     switch (type) {
-    case ToolValueType::Integer: {
-        if (value.is_number_integer()) {
-            return true;
-        }
-        // Many LLMs serialize integer-valued arguments as floats ("3.0"). Accept
-        // a floating-point payload only when it is finite, has no fractional
-        // component, and fits losslessly in int64_t.
-        if (!value.is_number_float()) {
-            return false;
-        }
-        const double v = value.get<double>();
-        if (!std::isfinite(v) || std::trunc(v) != v) {
-            return false;
-        }
-        constexpr double kMin = -9.2233720368547758e18; // ~ INT64_MIN
-        constexpr double kMax = 9.2233720368547758e18;  // ~ INT64_MAX
-        return v >= kMin && v <= kMax;
-    }
+    case ToolValueType::Integer:
+        return value.is_number_integer();
     case ToolValueType::Number:
         return value.is_number();
     case ToolValueType::String:

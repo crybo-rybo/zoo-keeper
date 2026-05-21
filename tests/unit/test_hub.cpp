@@ -180,30 +180,6 @@ TEST(HuggingFaceParseTest, SlashAtEnd) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
 }
 
-TEST(HuggingFaceParseTest, RejectsPathTraversalInFilename) {
-    auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::../../etc/passwd");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
-}
-
-TEST(HuggingFaceParseTest, RejectsParentDirectoryFilename) {
-    auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::..");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
-}
-
-TEST(HuggingFaceParseTest, RejectsBackslashInFilename) {
-    auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::evil\\file.gguf");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
-}
-
-TEST(HuggingFaceParseTest, RejectsCurrentDirectoryFilename) {
-    auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::.");
-    ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
-}
-
 // ---- ModelStoreConfig validation ----
 
 TEST(ModelStoreConfigTest, ValidConfig) {

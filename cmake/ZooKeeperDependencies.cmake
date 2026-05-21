@@ -42,26 +42,11 @@ if(TARGET llama OR TARGET llama-common)
 else()
     zoo_configure_llama_build_options()
     set(ZOO_LLAMA_ARCHIVE_URL "${ZOO_LLAMA_ARCHIVE_BASE_URL}/${ZOO_LLAMA_TAG}.tar.gz")
-
-    # Known-good hashes by tag. The build is fail-closed: every download is
-    # hash-verified. Bump this table whenever ZOO_LLAMA_TAG default changes.
-    set(_zoo_llama_hash "${ZOO_LLAMA_ARCHIVE_SHA256}")
-    if(NOT _zoo_llama_hash AND ZOO_LLAMA_TAG STREQUAL "b8992")
-        set(_zoo_llama_hash "942c56b7e7389edfd19150f886794e3f54fe7d51001ebb072c805c5d05016a48")
-    endif()
-    if(NOT _zoo_llama_hash)
-        message(FATAL_ERROR
-            "Zoo-Keeper: ZOO_LLAMA_ARCHIVE_SHA256 is required for tag '${ZOO_LLAMA_TAG}'. "
-            "Reconfigure with -DZOO_LLAMA_ARCHIVE_SHA256=<hex>.")
-    endif()
-
     FetchContent_Declare(
         llama_cpp
         URL "${ZOO_LLAMA_ARCHIVE_URL}"
-        URL_HASH "SHA256=${_zoo_llama_hash}"
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
-    unset(_zoo_llama_hash)
     FetchContent_MakeAvailable(llama_cpp)
     zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")

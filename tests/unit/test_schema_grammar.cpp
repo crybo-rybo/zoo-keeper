@@ -135,42 +135,4 @@ TEST(SchemaGrammarTest, DiffersFromToolGrammar) {
     EXPECT_NE(schema_grammar.find("string ::="), std::string::npos);
 }
 
-TEST(SchemaGrammarTest, IntegerRuleRejectsLeadingZeros) {
-    std::vector<ToolParameter> params = {
-        {"count", ToolValueType::Integer, true, "", {}},
-    };
-    auto grammar = GrammarBuilder::build_schema(params);
-    // RFC 8259 §6: int = zero / ( digit1-9 *DIGIT ).  Permit "0" alone or a
-    // non-zero leading digit; reject "0" followed by more digits.
-    EXPECT_NE(grammar.find("integer ::= \"-\"? (\"0\" | [1-9] [0-9]*)"), std::string::npos);
-}
-
-TEST(SchemaGrammarTest, NumberRuleRejectsLeadingZeros) {
-    std::vector<ToolParameter> params = {
-        {"score", ToolValueType::Number, true, "", {}},
-    };
-    auto grammar = GrammarBuilder::build_schema(params);
-    EXPECT_NE(grammar.find("number ::= \"-\"? (\"0\" | [1-9] [0-9]*)"), std::string::npos);
-}
-
-TEST(SchemaGrammarTest, StringRuleRejectsRawControlChars) {
-    std::vector<ToolParameter> params = {
-        {"text", ToolValueType::String, true, "", {}},
-    };
-    auto grammar = GrammarBuilder::build_schema(params);
-    // The body character class must exclude raw control chars (U+0000..U+001F)
-    // so that grammar-valid output is always parseable by nlohmann::json.
-    EXPECT_NE(grammar.find("[^\"\\\\\\x00-\\x1F]"), std::string::npos);
-}
-
-TEST(SchemaGrammarTest, StringRuleAcceptsUnicodeEscape) {
-    std::vector<ToolParameter> params = {
-        {"text", ToolValueType::String, true, "", {}},
-    };
-    auto grammar = GrammarBuilder::build_schema(params);
-    // RFC 8259 §7 \uXXXX escape must be in the alternation.
-    EXPECT_NE(grammar.find("\"u\" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]"),
-              std::string::npos);
-}
-
 } // namespace

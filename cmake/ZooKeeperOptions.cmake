@@ -19,28 +19,12 @@ option(ZOO_ENABLE_CRAP "Compute CRAP scores (complexity × coverage) via lizard 
 set(ZOO_CRAP_THRESHOLD "30" CACHE STRING
     "CRAP score threshold — functions above this value cause a non-zero exit (default: 30)")
 
-if(ZOO_ENABLE_CRAP AND NOT ZOO_PROJECT_IS_TOP_LEVEL)
-    message(FATAL_ERROR
-        "ZOO_ENABLE_CRAP is a project-internal metric and must only be set when zoo-keeper "
-        "is the top-level project. Disable it when consuming zoo-keeper from a parent build.")
-endif()
-
 if(ZOO_ENABLE_CRAP)
     set(ZOO_BUILD_TESTS ON CACHE BOOL "Build test suite (implied by ZOO_ENABLE_CRAP)" FORCE)
     set(ZOO_ENABLE_COVERAGE ON CACHE BOOL "Coverage instrumentation (implied by ZOO_ENABLE_CRAP)" FORCE)
 endif()
-
-if(ZOO_ENABLE_COVERAGE AND ZOO_ENABLE_SANITIZERS)
-    message(FATAL_ERROR
-        "ZOO_ENABLE_COVERAGE and ZOO_ENABLE_SANITIZERS are mutually exclusive: the combination "
-        "produces gcov runtime errors. Enable one at a time.")
-endif()
-# When bumping ZOO_LLAMA_TAG below, update the SHA256 in cmake/ZooKeeperDependencies.cmake.
 set(ZOO_LLAMA_TAG "b8992" CACHE STRING
     "llama.cpp release tag used by FetchContent")
-set(ZOO_LLAMA_ARCHIVE_BASE_URL "https://github.com/ggml-org/llama.cpp/archive/refs/tags" CACHE STRING
+set(ZOO_LLAMA_ARCHIVE_BASE_URL "https://github.com/ggerganov/llama.cpp/archive/refs/tags" CACHE STRING
     "Base URL for llama.cpp release archives used by FetchContent")
-set(ZOO_LLAMA_ARCHIVE_SHA256 "" CACHE STRING
-    "SHA256 of the llama.cpp source archive. Inferred from ZOO_LLAMA_TAG when blank.")
-
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")

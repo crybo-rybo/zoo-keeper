@@ -139,12 +139,6 @@ class GrammarBuilder {
         if (type == ToolValueType::String) {
             return json_string_literal(value.get<std::string>());
         }
-        if (type == ToolValueType::Boolean) {
-            return literal(value.get<bool>() ? "true" : "false");
-        }
-        if (type == ToolValueType::Integer) {
-            return literal(std::to_string(value.get<int64_t>()));
-        }
         return literal(value.dump());
     }
 
@@ -165,20 +159,9 @@ class GrammarBuilder {
     }
 
     static std::string primitive_rules() {
-        // Integer / number rules reject leading zeros (matches JSON RFC 8259 §6).
-        // String rule rejects raw control characters (U+0000..U+001F) inside the
-        // unescaped body, and accepts the full RFC 8259 §7 escape set, including
-        // \uXXXX. Together these guarantee any grammar-valid output also parses
-        // via nlohmann::json::parse without error.
-        return "integer ::= \"-\"? (\"0\" | [1-9] [0-9]*)\n"
-               "number ::= \"-\"? (\"0\" | [1-9] [0-9]*) (\".\" [0-9]+)? "
-               "([eE] [+-]? [0-9]+)?\n"
-               "string ::= \"\\\"\" "
-               "( [^\"\\\\\\x00-\\x1F] "
-               "| \"\\\\\" ( [\"\\\\/bfnrt] "
-               "| \"u\" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] ) "
-               ")* "
-               "\"\\\"\"\n"
+        return "integer ::= \"-\"? [0-9]+\n"
+               "number ::= \"-\"? [0-9]+ (\".\" [0-9]+)? ([eE] [+-]? [0-9]+)?\n"
+               "string ::= \"\\\"\" [^\"\\\\]* (\"\\\\\" [^\\x00] [^\"\\\\]*)* \"\\\"\"\n"
                "boolean ::= \"true\" | \"false\"\n"
                "ws ::= [ \\t\\n]*\n";
     }

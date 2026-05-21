@@ -6,7 +6,7 @@ function(zoo_enable_sanitizers target)
         "$<$<${_san}>:-fsanitize=address,undefined>"
         "$<$<${_san}>:-fno-omit-frame-pointer>"
     )
-    target_link_options(${target} PRIVATE
+    target_link_options(${target} PUBLIC
         "$<$<${_san}>:-fsanitize=address,undefined>"
     )
 endfunction()
