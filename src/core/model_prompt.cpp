@@ -54,8 +54,7 @@ Expected<std::string> render_prompt_delta(Model::Impl& impl) {
         inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     }
 
-    // Thinking is disabled globally until zoo surfaces a first-class API for
-    // it. See docs/adr/007-thinking-disabled-by-default.md.
+    // Thinking is disabled globally until zoo surfaces a first-class API for it.
     inputs.enable_thinking = false;
 
     common_chat_params params;
@@ -132,7 +131,6 @@ void Model::finalize_response() {
         inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     }
 
-    // See docs/adr/007-thinking-disabled-by-default.md.
     inputs.enable_thinking = false;
 
     common_chat_params params;

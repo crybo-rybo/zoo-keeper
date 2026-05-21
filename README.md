@@ -139,7 +139,7 @@ or extra setup required.
 include(FetchContent)
 FetchContent_Declare(zoo-keeper
     GIT_REPOSITORY https://github.com/crybo-rybo/zoo-keeper.git
-    GIT_TAG        v1.1.4
+    GIT_TAG        v1.1.5
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(zoo-keeper)
