@@ -14,11 +14,7 @@ if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
     endif()
 endif()
 
-if("@ZOO_BUILD_LLAMA_BUILD_NUMBER@" STREQUAL "" OR "@ZOO_BUILD_LLAMA_BUILD_NUMBER@" STREQUAL "0")
-    find_dependency(llama CONFIG)
-else()
-    find_dependency(llama 0.0.@ZOO_BUILD_LLAMA_BUILD_NUMBER@ CONFIG)
-endif()
+find_dependency(llama CONFIG)
 find_dependency(nlohmann_json 3.11 CONFIG)
 
 if(NOT TARGET ZooKeeper::llama AND TARGET llama)

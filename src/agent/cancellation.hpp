@@ -58,8 +58,7 @@ class CompositeCancellation {
         if (agent_stop_->stopped()) {
             return true;
         }
-        return request_cancelled_ != nullptr &&
-               request_cancelled_->load(std::memory_order_acquire);
+        return request_cancelled_ != nullptr && request_cancelled_->load(std::memory_order_acquire);
     }
 
     [[nodiscard]] const CancellationToken& agent_stop() const noexcept {
