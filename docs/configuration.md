@@ -30,7 +30,7 @@ zoo::GenerationOptions generation = json.at("generation").get<zoo::GenerationOpt
 | `model_path` | `string` | required | Path to the GGUF model file |
 | `context_size` | `int` | `8192` | Requested context window size in tokens |
 | `n_batch` | `int` | `2048` | Batch size for prompt processing |
-| `n_gpu_layers` | `int` | `0` | Number of layers to offload to GPU |
+| `n_gpu_layers` | `int` | `0` | Number of layers to offload to GPU. `0` is strict CPU-only; `-1` requests full offload |
 | `use_mmap` | `bool` | `true` | Memory-map the model file |
 | `use_mlock` | `bool` | `false` | Lock model pages in RAM |
 
@@ -39,6 +39,10 @@ recognized by the parser but is *not* applied during pure deserialization
 (`from_json`) — pass the `model` object through the explicit
 `zoo::load_model_config()` helper to inspect the GGUF file, probe the host
 hardware, and merge any explicit overrides on top of the auto-derived values.
+Explicit keys in the same JSON object win over auto-derived values, so callers
+can use `"auto_configure": true` with overrides such as `"n_gpu_layers": 0` for
+portable CPU-only loading. See `examples/config.auto.example.json` for the
+minimal auto-configured example shape.
 
 ### `zoo::AgentConfig`
 

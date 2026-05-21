@@ -7,6 +7,32 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-05-21
+
+### Added
+
+- Hardware-aware model loading configuration through core GGUF inspection,
+  host system probing, and `zoo::load_model_config()` resolution for JSON
+  configs with `"auto_configure": true`.
+- Live integration coverage for auto-configured model loading with explicit
+  CPU-only overrides.
+
+### Changed
+
+- CMake target wiring now uses narrower generator-expression-based build
+  options for optional sources, tests, and owned targets.
+- CMake helper modules now self-gate and resolve sibling project paths from
+  their own list directories, improving FetchContent and package-consumer use.
+- GGUF quantization detection now derives from the dominant tensor type.
+
+### Fixed
+
+- `n_gpu_layers = 0` now enforces strict CPU-only model loading instead of
+  allowing llama.cpp's default device discovery to initialize GPU backends.
+- Agent runtime shutdown is hardened against request/callback races.
+- CRAP and coverage builds now resolve project paths consistently and propagate
+  coverage instrumentation link options.
+
 ## [1.1.4] - 2026-05-04
 
 ### Added
@@ -297,7 +323,8 @@ return typed handles instead of immediate results.
 - C++23 required
 - Windows is not supported
 
-[Unreleased]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.5...HEAD
+[1.1.5]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/crybo-rybo/zoo-keeper/compare/v1.1.1...v1.1.2

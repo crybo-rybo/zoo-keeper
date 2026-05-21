@@ -79,15 +79,16 @@ Contributor rules:
 ## Hub Internals
 
 `zoo::hub::ModelStore` stays the public facade for catalog operations, local
-imports, HuggingFace pulls, and one-line Model/Agent creation. Its private
-collaborators live under `src/hub/`:
+imports, HuggingFace pulls, and one-line Model/Agent creation. It reuses
+`zoo::core::GgufInspector` from `src/core/gguf_inspector.cpp` for metadata
+inspection and auto-configuration. Its private hub collaborators live under
+`src/hub/`:
 
 | File | Responsibility |
 |------|----------------|
 | `src/hub/store.cpp` | Public facade method implementations and private collaborator definitions |
 | `src/hub/store_internals.hpp` | Private catalog repository, resolver, importer, and pull-service declarations |
 | `src/hub/store_json.hpp` | Catalog JSON serialization |
-| `src/hub/inspector.cpp` | GGUF metadata inspection with private llama/GGUF resource ownership |
 | `src/hub/download_validation.hpp` | Downloaded-file validation helpers |
 | `src/hub/hf_cache_paths.hpp` | llama.cpp Hugging Face cache URL/path helpers |
 
