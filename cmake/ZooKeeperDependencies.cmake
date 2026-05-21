@@ -42,24 +42,29 @@ if(TARGET llama OR TARGET llama-common)
 else()
     zoo_configure_llama_build_options()
     set(ZOO_LLAMA_ARCHIVE_URL "${ZOO_LLAMA_ARCHIVE_BASE_URL}/${ZOO_LLAMA_TAG}.tar.gz")
-    if(ZOO_LLAMA_ARCHIVE_SHA256)
-        FetchContent_Declare(
-            llama_cpp
-            URL "${ZOO_LLAMA_ARCHIVE_URL}"
-            URL_HASH "SHA256=${ZOO_LLAMA_ARCHIVE_SHA256}"
-            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-        )
-    else()
-        message(WARNING
-            "Zoo-Keeper: ZOO_LLAMA_ARCHIVE_SHA256 is empty; the llama.cpp archive will be "
-            "fetched without integrity verification. Set -DZOO_LLAMA_ARCHIVE_SHA256=<hash> "
-            "for reproducible builds.")
-        FetchContent_Declare(
-            llama_cpp
-            URL "${ZOO_LLAMA_ARCHIVE_URL}"
-            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-        )
+
+    # Resolve the effective hash. Priority: explicit user override > baked-in
+    # default for the pinned default tag > FATAL_ERROR. The build is
+    # fail-closed: every download is hash-verified.
+    set(_zoo_llama_effective_hash "${ZOO_LLAMA_ARCHIVE_SHA256}")
+    if(NOT _zoo_llama_effective_hash AND ZOO_LLAMA_TAG STREQUAL ZOO_LLAMA_DEFAULT_TAG)
+        set(_zoo_llama_effective_hash "${ZOO_LLAMA_DEFAULT_SHA256}")
     endif()
+    if(NOT _zoo_llama_effective_hash)
+        message(FATAL_ERROR
+            "Zoo-Keeper: ZOO_LLAMA_ARCHIVE_SHA256 must be set when ZOO_LLAMA_TAG "
+            "(=${ZOO_LLAMA_TAG}) differs from the default (=${ZOO_LLAMA_DEFAULT_TAG}). "
+            "Compute the archive hash and reconfigure with "
+            "-DZOO_LLAMA_ARCHIVE_SHA256=<hex>, or restore the default tag.")
+    endif()
+
+    FetchContent_Declare(
+        llama_cpp
+        URL "${ZOO_LLAMA_ARCHIVE_URL}"
+        URL_HASH "SHA256=${_zoo_llama_effective_hash}"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    unset(_zoo_llama_effective_hash)
     FetchContent_MakeAvailable(llama_cpp)
     zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")

@@ -1380,7 +1380,7 @@ TEST(AgentRuntimeTest, StopReturnsBeforeLongRunningToolHandlerCompletes) {
     ASSERT_EQ(entered_future.wait_for(2s), std::future_status::ready);
 
     // Stop the runtime while the tool handler is still blocked. The inference
-    // thread must observe the stop_token and return RequestCancelled instead
+    // thread must observe the stop signal and return RequestCancelled instead
     // of blocking on the handler's future.
     auto stop_future = std::async(std::launch::async, [&] { runtime->stop(); });
     EXPECT_EQ(stop_future.wait_for(2s), std::future_status::ready)
@@ -1390,9 +1390,15 @@ TEST(AgentRuntimeTest, StopReturnsBeforeLongRunningToolHandlerCompletes) {
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 
-    // Release the handler so ~ToolExecutor can join the worker thread cleanly.
+    // The handler is still blocked inside the executor thread. Destroying the
+    // runtime (and therefore the ToolExecutor) must NOT wait for the handler
+    // to return: ~ToolExecutor detaches the worker thread instead of joining.
+    auto destroy_future = std::async(std::launch::async, [&] { runtime.reset(); });
+    EXPECT_EQ(destroy_future.wait_for(2s), std::future_status::ready)
+        << "~AgentRuntime must not block on a runaway tool handler";
+
+    // Finally release the handler so the detached worker can exit cleanly.
     release->set_value();
-    runtime.reset();
 }
 
 } // namespace

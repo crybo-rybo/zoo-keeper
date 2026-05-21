@@ -13,37 +13,52 @@
 #include <chrono>
 #include <condition_variable>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <queue>
 #include <thread>
+#include <utility>
 
 namespace zoo::internal::agent {
 
 /**
  * @brief Executes tool handlers on a dedicated worker thread.
  *
- * The inference thread calls submit() to hand off a handler invocation and
- * then waits on the returned future via `wait_for_result()`, which observes a
- * `CompositeCancellation` view of the agent-wide stop token and the per-request
- * cancellation flag. This keeps arbitrary user-supplied tool code off the
- * inference thread while preserving sequential tool-loop semantics.  If the
- * caller bails out via cancellation, the handler keeps running on the worker
- * thread until completion — the runtime's stop() does not interrupt it (we
- * cannot kill arbitrary C++ code) but is no longer gated by it.
+ * The inference thread calls `submit()` to hand off a handler invocation, then
+ * waits on the returned future via `wait_for_result()` while observing a
+ * `CompositeCancellation` of the agent-wide stop token and the per-request
+ * cancellation flag.
+ *
+ * Lifecycle. The worker thread holds a `shared_ptr<Shared>` covering every
+ * piece of state it touches (mutex, queue, shutdown flag). The destructor
+ * raises the shutdown flag, then **detaches** the worker thread instead of
+ * joining it. Consequence: `~ToolExecutor` returns immediately even when a
+ * user handler is still running, so `AgentRuntime` destruction never blocks
+ * on a runaway handler. The handler runs to completion in the background; the
+ * `Shared` state is cleaned up after the worker exits and drops its last
+ * reference. Submitted promises are `shared_ptr` and stay alive whether or
+ * not the original future is still being waited on, so the worker can always
+ * publish (or simply discard) its result safely.
  */
 class ToolExecutor {
   public:
-    ToolExecutor() : thread_([this] { run(); }) {}
+    ToolExecutor() : shared_(std::make_shared<Shared>()) {
+        std::thread worker([state = shared_] { run(state); });
+        thread_ = std::move(worker);
+    }
 
     ~ToolExecutor() {
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            shutdown_ = true;
+            std::lock_guard<std::mutex> lock(shared_->mutex);
+            shared_->shutdown = true;
         }
-        cv_.notify_one();
+        shared_->cv.notify_all();
+        // Detach rather than join: the worker thread may currently be inside a
+        // user handler that we cannot interrupt. The captured `state` shared_ptr
+        // keeps the Shared block alive until the worker actually exits.
         if (thread_.joinable()) {
-            thread_.join();
+            thread_.detach();
         }
     }
 
@@ -63,15 +78,15 @@ class ToolExecutor {
         auto promise = std::make_shared<std::promise<Expected<nlohmann::json>>>();
         auto future = promise->get_future();
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (shutdown_) {
+            std::lock_guard<std::mutex> lock(shared_->mutex);
+            if (shared_->shutdown) {
                 promise->set_value(std::unexpected(
                     Error{ErrorCode::AgentNotRunning, "Tool executor is shut down"}));
                 return future;
             }
-            queue_.push(Job{std::move(handler), std::move(args), std::move(promise)});
+            shared_->queue.push(Job{std::move(handler), std::move(args), std::move(promise)});
         }
-        cv_.notify_one();
+        shared_->cv.notify_one();
         return future;
     }
 
@@ -106,14 +121,21 @@ class ToolExecutor {
         std::shared_ptr<std::promise<Expected<nlohmann::json>>> promise;
     };
 
-    void run() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        while (true) {
-            cv_.wait(lock, [this] { return shutdown_ || !queue_.empty(); });
+    struct Shared {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::queue<Job> queue;
+        bool shutdown = false;
+    };
 
-            while (!queue_.empty()) {
-                auto job = std::move(queue_.front());
-                queue_.pop();
+    static void run(std::shared_ptr<Shared> state) {
+        std::unique_lock<std::mutex> lock(state->mutex);
+        while (true) {
+            state->cv.wait(lock, [&] { return state->shutdown || !state->queue.empty(); });
+
+            while (!state->queue.empty()) {
+                auto job = std::move(state->queue.front());
+                state->queue.pop();
                 lock.unlock();
 
                 Expected<nlohmann::json> result;
@@ -128,21 +150,24 @@ class ToolExecutor {
                     result = std::unexpected(Error{ErrorCode::ToolExecutionFailed,
                                                    "Tool handler threw unknown exception"});
                 }
-                job.promise->set_value(std::move(result));
+                // The promise is shared_ptr; setting the value is safe even if
+                // the original future was abandoned by a cancelled caller.
+                try {
+                    job.promise->set_value(std::move(result));
+                } catch (const std::future_error&) {
+                    // Promise already satisfied or broken — nothing to do.
+                }
 
                 lock.lock();
             }
 
-            if (shutdown_) {
+            if (state->shutdown) {
                 return;
             }
         }
     }
 
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::queue<Job> queue_;
-    bool shutdown_ = false;
+    std::shared_ptr<Shared> shared_;
     std::thread thread_;
 };
 

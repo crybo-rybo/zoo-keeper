@@ -15,6 +15,32 @@ if("@ZOO_BUILD_GGML_OPENMP_ENABLED@" STREQUAL "ON")
 endif()
 
 find_dependency(llama CONFIG)
+
+# Upstream llama.cpp installs its version file as `llama-version.cmake` rather
+# than the CMake-standard `llama-config-version.cmake`, so `find_dependency`
+# cannot enforce a version constraint directly. Instead, both `llama-config.cmake`
+# and `llama-version.cmake` set LLAMA_BUILD_NUMBER as a CMake variable; verify
+# it post-find and fail closed on a mismatch with the value ZooKeeper was built
+# against. The fallback include is defensive: it covers patched installs whose
+# config file omits the variable.
+if("@ZOO_BUILD_LLAMA_BUILD_NUMBER@" AND NOT "@ZOO_BUILD_LLAMA_BUILD_NUMBER@" STREQUAL "0")
+    if(NOT DEFINED LLAMA_BUILD_NUMBER)
+        set(_zk_llama_version_file "${llama_DIR}/llama-version.cmake")
+        if(EXISTS "${_zk_llama_version_file}")
+            include("${_zk_llama_version_file}")
+        endif()
+        unset(_zk_llama_version_file)
+    endif()
+    if(NOT DEFINED LLAMA_BUILD_NUMBER OR
+       NOT "${LLAMA_BUILD_NUMBER}" STREQUAL "@ZOO_BUILD_LLAMA_BUILD_NUMBER@")
+        message(FATAL_ERROR
+            "ZooKeeper was built against llama.cpp build "
+            "@ZOO_BUILD_LLAMA_BUILD_NUMBER@, but the installed llama package "
+            "reports build '${LLAMA_BUILD_NUMBER}'. Reinstall a matching "
+            "llama.cpp before consuming ZooKeeper.")
+    endif()
+endif()
+
 find_dependency(nlohmann_json 3.11 CONFIG)
 
 if(NOT TARGET ZooKeeper::llama AND TARGET llama)
