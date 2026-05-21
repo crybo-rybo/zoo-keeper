@@ -210,6 +210,21 @@ GenerationResult tool_call_generation(const std::string& tool_name, const nlohma
     return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true, "", {}};
 }
 
+GenerationResult
+multi_tool_call_generation(const std::vector<std::pair<std::string, nlohmann::json>>& calls) {
+    GenerationResult result;
+    result.tool_call_detected = true;
+    int id_counter = 0;
+    for (const auto& [name, args] : calls) {
+        zoo::OwnedToolCall tc;
+        tc.id = "call-" + std::to_string(++id_counter);
+        tc.name = name;
+        tc.arguments_json = args.dump();
+        result.tool_calls.push_back(std::move(tc));
+    }
+    return result;
+}
+
 nlohmann::json simple_extraction_schema() {
     return {{"type", "object"},
             {"properties", {{"name", {{"type", "string"}}}, {"age", {{"type", "integer"}}}}},
@@ -1282,6 +1297,102 @@ TEST(ScopeExitTest, MoveAssignmentTransfersSingleExecution) {
     }
 
     EXPECT_EQ(calls, 1);
+}
+
+TEST(AgentRuntimeTest, MultipleToolCallsPerTurnAreAllExecuted) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    std::atomic<int> tool_a_calls{0};
+    std::atomic<int> tool_b_calls{0};
+
+    auto def_a = zoo::tools::detail::make_tool_definition(
+        "tool_a", "first", std::vector<std::string>{"value"}, [&tool_a_calls](int v) {
+            ++tool_a_calls;
+            return v * 10;
+        });
+    ASSERT_TRUE(def_a.has_value()) << def_a.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*def_a)).has_value());
+
+    auto def_b = zoo::tools::detail::make_tool_definition(
+        "tool_b", "second", std::vector<std::string>{"value"}, [&tool_b_calls](int v) {
+            ++tool_b_calls;
+            return v + 1;
+        });
+    ASSERT_TRUE(def_b.has_value()) << def_b.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*def_b)).has_value());
+
+    // First turn: emit BOTH tool calls in a single assistant message.
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(multi_tool_call_generation({
+            {"tool_a", {{"value", 3}}},
+            {"tool_b", {{"value", 7}}},
+        }));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto result = runtime.chat("go", options).await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    EXPECT_EQ(tool_a_calls.load(), 1);
+    EXPECT_EQ(tool_b_calls.load(), 1);
+
+    ASSERT_TRUE(result->tool_trace.has_value());
+    ASSERT_EQ(result->tool_trace->invocations.size(), 2u);
+    EXPECT_EQ(result->tool_trace->invocations[0].name, "tool_a");
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
+    EXPECT_EQ(result->tool_trace->invocations[1].name, "tool_b");
+    EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
+}
+
+TEST(AgentRuntimeTest, StopReturnsBeforeLongRunningToolHandlerCompletes) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    auto runtime = std::make_unique<AgentRuntime>(make_model_config(), make_agent_config(),
+                                                  GenerationOptions{}, std::move(backend));
+
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    auto definition = zoo::tools::detail::make_tool_definition("blocker", "blocks until released",
+                                                               std::vector<std::string>{"value"},
+                                                               [entered, release_future](int v) {
+                                                                   entered->set_value();
+                                                                   release_future.wait();
+                                                                   return v;
+                                                               });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime->register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("blocker", {{"value", 1}}));
+    });
+
+    auto handle = runtime->chat("go");
+    ASSERT_EQ(entered_future.wait_for(2s), std::future_status::ready);
+
+    // Stop the runtime while the tool handler is still blocked. The inference
+    // thread must observe the stop_token and return RequestCancelled instead
+    // of blocking on the handler's future.
+    auto stop_future = std::async(std::launch::async, [&] { runtime->stop(); });
+    EXPECT_EQ(stop_future.wait_for(2s), std::future_status::ready)
+        << "stop() must not block on a long-running tool handler";
+
+    auto result = handle.await_result(2s);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+
+    // Release the handler so ~ToolExecutor can join the worker thread cleanly.
+    release->set_value();
+    runtime.reset();
 }
 
 } // namespace

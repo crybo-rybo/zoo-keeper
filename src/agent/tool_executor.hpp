@@ -5,10 +5,12 @@
 
 #pragma once
 
+#include "cancellation.hpp"
 #include "log.hpp"
 #include "zoo/core/types.hpp"
 #include "zoo/tools/types.hpp"
 
+#include <chrono>
 #include <condition_variable>
 #include <future>
 #include <mutex>
@@ -22,12 +24,13 @@ namespace zoo::internal::agent {
  * @brief Executes tool handlers on a dedicated worker thread.
  *
  * The inference thread calls submit() to hand off a handler invocation and
- * then blocks on the returned future. This keeps arbitrary user-supplied tool
- * code off the inference thread while preserving sequential tool-loop semantics.
- *
- * MVP: thread isolation only. The inference thread still blocks on the future,
- * so a slow handler delays the tool loop but does not block the command lane.
- * TODO(tool-timeouts): add per-tool timeout/cancellation once basic isolation is validated.
+ * then waits on the returned future via `wait_for_result()`, which observes a
+ * `CompositeCancellation` view of the agent-wide stop token and the per-request
+ * cancellation flag. This keeps arbitrary user-supplied tool code off the
+ * inference thread while preserving sequential tool-loop semantics.  If the
+ * caller bails out via cancellation, the handler keeps running on the worker
+ * thread until completion — the runtime's stop() does not interrupt it (we
+ * cannot kill arbitrary C++ code) but is no longer gated by it.
  */
 class ToolExecutor {
   public:
@@ -70,6 +73,30 @@ class ToolExecutor {
         }
         cv_.notify_one();
         return future;
+    }
+
+    /**
+     * @brief Waits on a submitted future while observing a cancellation view.
+     *
+     * If `cancel.cancelled()` becomes true while waiting, returns
+     * `RequestCancelled` without waiting for the handler to finish; the handler
+     * continues to completion on the worker thread, and its result is dropped.
+     * Otherwise returns the handler's result once the future is ready.
+     */
+    [[nodiscard]] static Expected<nlohmann::json>
+    wait_for_result(std::future<Expected<nlohmann::json>>& future,
+                    const CompositeCancellation& cancel,
+                    std::chrono::nanoseconds poll_interval = std::chrono::milliseconds(25)) {
+        while (true) {
+            if (cancel.cancelled()) {
+                return std::unexpected(Error{ErrorCode::RequestCancelled,
+                                             "Request cancelled while a tool handler was running"});
+            }
+            const auto status = future.wait_for(poll_interval);
+            if (status == std::future_status::ready) {
+                return future.get();
+            }
+        }
     }
 
   private:
