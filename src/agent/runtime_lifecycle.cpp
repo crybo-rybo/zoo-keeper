@@ -30,11 +30,6 @@ void AgentRuntime::stop() {
     }
 
     running_.store(false, std::memory_order_release);
-    // Signal the agent-wide cancellation token before shutting down the
-    // mailbox so that any in-flight tool-handler wait on the inference thread
-    // observes the stop signal and returns RequestCancelled immediately
-    // instead of blocking on the handler.
-    stop_token_.request_stop();
     request_mailbox_.shutdown();
     if (inference_thread_.joinable()) {
         inference_thread_.join();

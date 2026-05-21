@@ -1,15 +1,15 @@
 /**
  * @file tool_executor.hpp
- * @brief Offloads tool handler invocations to a dedicated worker thread.
+ * @brief Offloads tool handler invocations to a detached worker thread.
  */
 
 #pragma once
 
-#include "cancellation.hpp"
 #include "log.hpp"
 #include "zoo/core/types.hpp"
 #include "zoo/tools/types.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <future>
@@ -25,27 +25,22 @@ namespace zoo::internal::agent {
 /**
  * @brief Executes tool handlers on a dedicated worker thread.
  *
- * The inference thread calls `submit()` to hand off a handler invocation, then
- * waits on the returned future via `wait_for_result()` while observing a
- * `CompositeCancellation` of the agent-wide stop token and the per-request
- * cancellation flag.
+ * State that outlives the executor lives in a `shared_ptr<Shared>` captured
+ * by the worker. The destructor raises `shutdown` and detaches — it never
+ * joins, so `~AgentRuntime` cannot deadlock on a runaway user handler. The
+ * worker keeps Shared alive via its captured shared_ptr and exits naturally
+ * once the current handler returns. Submitted promises are shared_ptr, so
+ * publishing or discarding a result is safe regardless of whether the
+ * caller's future was abandoned by cancellation.
  *
- * Lifecycle. The worker thread holds a `shared_ptr<Shared>` covering every
- * piece of state it touches (mutex, queue, shutdown flag). The destructor
- * raises the shutdown flag, then **detaches** the worker thread instead of
- * joining it. Consequence: `~ToolExecutor` returns immediately even when a
- * user handler is still running, so `AgentRuntime` destruction never blocks
- * on a runaway handler. The handler runs to completion in the background; the
- * `Shared` state is cleaned up after the worker exits and drops its last
- * reference. Submitted promises are `shared_ptr` and stay alive whether or
- * not the original future is still being waited on, so the worker can always
- * publish (or simply discard) its result safely.
+ * `wait_for_result()` polls a `running` flag (the agent-wide stop signal) and
+ * an optional per-request `cancelled` flag, returning `RequestCancelled`
+ * without waiting for the handler when either fires.
  */
 class ToolExecutor {
   public:
     ToolExecutor() : shared_(std::make_shared<Shared>()) {
-        std::thread worker([state = shared_] { run(state); });
-        thread_ = std::move(worker);
+        std::thread(&ToolExecutor::run, shared_).detach();
     }
 
     ~ToolExecutor() {
@@ -54,12 +49,6 @@ class ToolExecutor {
             shared_->shutdown = true;
         }
         shared_->cv.notify_all();
-        // Detach rather than join: the worker thread may currently be inside a
-        // user handler that we cannot interrupt. The captured `state` shared_ptr
-        // keeps the Shared block alive until the worker actually exits.
-        if (thread_.joinable()) {
-            thread_.detach();
-        }
     }
 
     ToolExecutor(const ToolExecutor&) = delete;
@@ -67,12 +56,6 @@ class ToolExecutor {
     ToolExecutor(ToolExecutor&&) = delete;
     ToolExecutor& operator=(ToolExecutor&&) = delete;
 
-    /**
-     * @brief Submits a tool handler for execution on the worker thread.
-     *
-     * Returns a future that resolves to the handler's return value. If called
-     * after shutdown, the future resolves immediately with AgentNotRunning.
-     */
     [[nodiscard]] std::future<Expected<nlohmann::json>> submit(tools::ToolHandler handler,
                                                                nlohmann::json args) {
         auto promise = std::make_shared<std::promise<Expected<nlohmann::json>>>();
@@ -90,25 +73,21 @@ class ToolExecutor {
         return future;
     }
 
-    /**
-     * @brief Waits on a submitted future while observing a cancellation view.
-     *
-     * If `cancel.cancelled()` becomes true while waiting, returns
-     * `RequestCancelled` without waiting for the handler to finish; the handler
-     * continues to completion on the worker thread, and its result is dropped.
-     * Otherwise returns the handler's result once the future is ready.
-     */
+    /// Waits on `future` while polling cancellation flags. Returns
+    /// `RequestCancelled` immediately if either flag fires; the handler keeps
+    /// running on the worker thread and its result is dropped.
     [[nodiscard]] static Expected<nlohmann::json>
-    wait_for_result(std::future<Expected<nlohmann::json>>& future,
-                    const CompositeCancellation& cancel,
-                    std::chrono::nanoseconds poll_interval = std::chrono::milliseconds(25)) {
+    wait_for_result(std::future<Expected<nlohmann::json>>& future, const std::atomic<bool>& running,
+                    const std::atomic<bool>* request_cancelled,
+                    std::chrono::nanoseconds poll = std::chrono::milliseconds(25)) {
         while (true) {
-            if (cancel.cancelled()) {
+            if (!running.load(std::memory_order_acquire) ||
+                (request_cancelled != nullptr &&
+                 request_cancelled->load(std::memory_order_acquire))) {
                 return std::unexpected(Error{ErrorCode::RequestCancelled,
                                              "Request cancelled while a tool handler was running"});
             }
-            const auto status = future.wait_for(poll_interval);
-            if (status == std::future_status::ready) {
+            if (future.wait_for(poll) == std::future_status::ready) {
                 return future.get();
             }
         }
@@ -132,7 +111,6 @@ class ToolExecutor {
         std::unique_lock<std::mutex> lock(state->mutex);
         while (true) {
             state->cv.wait(lock, [&] { return state->shutdown || !state->queue.empty(); });
-
             while (!state->queue.empty()) {
                 auto job = std::move(state->queue.front());
                 state->queue.pop();
@@ -150,17 +128,9 @@ class ToolExecutor {
                     result = std::unexpected(Error{ErrorCode::ToolExecutionFailed,
                                                    "Tool handler threw unknown exception"});
                 }
-                // The promise is shared_ptr; setting the value is safe even if
-                // the original future was abandoned by a cancelled caller.
-                try {
-                    job.promise->set_value(std::move(result));
-                } catch (const std::future_error&) {
-                    // Promise already satisfied or broken — nothing to do.
-                }
-
+                job.promise->set_value(std::move(result));
                 lock.lock();
             }
-
             if (state->shutdown) {
                 return;
             }
@@ -168,7 +138,6 @@ class ToolExecutor {
     }
 
     std::shared_ptr<Shared> shared_;
-    std::thread thread_;
 };
 
 } // namespace zoo::internal::agent

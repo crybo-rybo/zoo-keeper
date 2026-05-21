@@ -7,7 +7,6 @@
 
 #include "backend.hpp"
 #include "callback_dispatcher.hpp"
-#include "cancellation.hpp"
 #include "mailbox.hpp"
 #include "request_slots.hpp"
 #include "tool_executor.hpp"
@@ -124,7 +123,6 @@ class AgentRuntime {
     std::shared_ptr<RequestSlots> request_slots_;
     mutable RuntimeMailbox request_mailbox_;
     std::thread inference_thread_;
-    CancellationToken stop_token_;
     std::atomic<bool> running_{true};
     std::atomic<bool> tool_grammar_active_{false};
     std::atomic<size_t> tool_count_{0};

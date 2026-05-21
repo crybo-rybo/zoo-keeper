@@ -35,22 +35,12 @@ if(ZOO_ENABLE_COVERAGE AND ZOO_ENABLE_SANITIZERS)
         "ZOO_ENABLE_COVERAGE and ZOO_ENABLE_SANITIZERS are mutually exclusive: the combination "
         "produces gcov runtime errors. Enable one at a time.")
 endif()
-# Known-good SHA256 for the pinned default ZOO_LLAMA_TAG. When the user does
-# not override either ZOO_LLAMA_TAG or ZOO_LLAMA_ARCHIVE_SHA256, this hash is
-# used automatically so the build is fail-closed against supply-chain
-# tampering. Bumping ZOO_LLAMA_DEFAULT_TAG REQUIRES updating
-# ZOO_LLAMA_DEFAULT_SHA256 too. See cmake/ZooKeeperDependencies.cmake for the
-# resolution logic.
-set(ZOO_LLAMA_DEFAULT_TAG "b8992")
-set(ZOO_LLAMA_DEFAULT_SHA256
-    "942c56b7e7389edfd19150f886794e3f54fe7d51001ebb072c805c5d05016a48")
-
-set(ZOO_LLAMA_TAG "${ZOO_LLAMA_DEFAULT_TAG}" CACHE STRING
+# When bumping ZOO_LLAMA_TAG below, update the SHA256 in cmake/ZooKeeperDependencies.cmake.
+set(ZOO_LLAMA_TAG "b8992" CACHE STRING
     "llama.cpp release tag used by FetchContent")
 set(ZOO_LLAMA_ARCHIVE_BASE_URL "https://github.com/ggml-org/llama.cpp/archive/refs/tags" CACHE STRING
     "Base URL for llama.cpp release archives used by FetchContent")
 set(ZOO_LLAMA_ARCHIVE_SHA256 "" CACHE STRING
-    "SHA256 of the llama.cpp source archive. Leave empty to inherit the \
-baked-in hash for the default ZOO_LLAMA_TAG; required when overriding the tag.")
+    "SHA256 of the llama.cpp source archive. Inferred from ZOO_LLAMA_TAG when blank.")
 
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")

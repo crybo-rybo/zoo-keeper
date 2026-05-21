@@ -5,10 +5,10 @@
 
 #include "agent/runtime.hpp"
 
-#include "agent/cancellation.hpp"
 #include "agent/runtime_helpers.hpp"
 #include "log.hpp"
 #include "zoo/tools/validation.hpp"
+#include <atomic>
 #include <chrono>
 #include <exception>
 #include <optional>
@@ -21,39 +21,64 @@ namespace zoo::internal::agent {
 
 namespace {
 
+[[nodiscard]] bool is_cancelled(const std::atomic<bool>& running, const ActiveRequest& request) {
+    return !running.load(std::memory_order_acquire) ||
+           (request.cancelled && request.cancelled->load(std::memory_order_acquire));
+}
+
+/// Drains the callback dispatcher and, if drain throws, folds the captured
+/// streaming-callback exception into `result` (only when `result` was a
+/// success, so we don't shadow a more informative upstream error).
+template <typename T>
+void fold_dispatcher_drain_into(CallbackDispatcher& dispatcher, Expected<T>& result) {
+    try {
+        dispatcher.drain();
+    } catch (const std::exception& e) {
+        if (result.has_value()) {
+            result = std::unexpected(Error{ErrorCode::InferenceFailed,
+                                           std::string("Streaming callback threw: ") + e.what()});
+        }
+    } catch (...) {
+        if (result.has_value()) {
+            result = std::unexpected(
+                Error{ErrorCode::InferenceFailed, "Streaming callback threw unknown exception"});
+        }
+    }
+}
+
 class ToolLoopController {
   public:
     ToolLoopController(AgentBackend& backend, const tools::ToolRegistry& tool_registry,
                        ToolExecutor& tool_executor, CallbackDispatcher& callback_dispatcher,
-                       const CancellationToken& stop_token, const AgentConfig& agent_config,
+                       const std::atomic<bool>& running, const AgentConfig& agent_config,
                        bool use_native_tool_calling)
         : backend_(backend), tool_registry_(tool_registry), tool_executor_(tool_executor),
-          callback_dispatcher_(callback_dispatcher), stop_token_(stop_token),
-          agent_config_(agent_config), use_native_tool_calling_(use_native_tool_calling) {}
+          callback_dispatcher_(callback_dispatcher), running_(running), agent_config_(agent_config),
+          use_native_tool_calling_(use_native_tool_calling) {}
 
     Expected<TextResponse> run(const ActiveRequest& request,
                                std::chrono::steady_clock::time_point start_time) {
         GenerationStats stats(start_time);
         GenerationRunner generation_runner(backend_, callback_dispatcher_);
-        CompositeCancellation cancel(stop_token_, request.cancelled);
+        auto cancellation_check = [&] { return is_cancelled(running_, request); };
 
         for (int iteration = 1; iteration <= agent_config_.max_tool_iterations; ++iteration) {
-            if (cancel.cancelled()) {
+            if (cancellation_check()) {
                 return std::unexpected(
                     Error{ErrorCode::RequestCancelled, "Request cancelled during tool loop"});
             }
 
-            auto cancellation_check = [&cancel]() { return cancel.cancelled(); };
             auto pass = generation_runner.run(*request.options, request.streaming_callback,
                                               CancellationCallback(cancellation_check), stats);
             if (!pass) {
                 return std::unexpected(pass.error());
             }
 
-            ToolDetection detection = detect_tool_calls(std::move(pass->generation));
-            if (!detection.structured_tool_calls.empty()) {
-                auto tool_result = execute_turn_tool_calls(detection, iteration, cancel,
-                                                           request.options->record_tool_trace);
+            auto [response_text, tool_calls] = detect_tool_calls(std::move(pass->generation));
+
+            if (!tool_calls.empty()) {
+                auto tool_result =
+                    execute_tool_calls(response_text, tool_calls, request, iteration);
                 if (!tool_result) {
                     return std::unexpected(tool_result.error());
                 }
@@ -61,7 +86,7 @@ class ToolLoopController {
                 continue;
             }
 
-            if (detection.response_text.empty() && any_tool_invoked_ &&
+            if (response_text.empty() && any_tool_invoked_ &&
                 iteration < agent_config_.max_tool_iterations) {
                 backend_.add_message(
                     Message::user("Please respond to the user with the tool result.").view());
@@ -69,7 +94,7 @@ class ToolLoopController {
                 continue;
             }
 
-            return finish_response(std::move(detection.response_text), stats,
+            return finish_response(std::move(response_text), stats,
                                    request.options->record_tool_trace);
         }
 
@@ -81,117 +106,99 @@ class ToolLoopController {
     }
 
   private:
-    struct ToolDetection {
+    struct DetectionResult {
         std::string response_text;
-        std::vector<ToolCallInfo> structured_tool_calls;
+        std::vector<ToolCallInfo> tool_calls;
     };
 
-    ToolDetection detect_tool_calls(GenerationResult generated) const {
-        ToolDetection detection;
+    DetectionResult detect_tool_calls(GenerationResult generated) const {
         if (!use_native_tool_calling_ || !generated.tool_call_detected) {
-            detection.response_text = std::move(generated.text);
-            return detection;
+            return {std::move(generated.text), {}};
         }
-
         if (!generated.tool_calls.empty()) {
-            detection.response_text = std::move(generated.parsed_content);
-            detection.structured_tool_calls = std::move(generated.tool_calls);
-        } else {
-            auto parsed = backend_.parse_tool_response(generated.text);
-            detection.response_text = std::move(parsed.content);
-            detection.structured_tool_calls = std::move(parsed.tool_calls);
+            return {std::move(generated.parsed_content), std::move(generated.tool_calls)};
         }
-        return detection;
+        auto parsed = backend_.parse_tool_response(generated.text);
+        return {std::move(parsed.content), std::move(parsed.tool_calls)};
     }
 
-    static tools::ToolCall to_runtime_tool_call(const ToolCallInfo& info) {
-        tools::ToolCall tool_call;
-        tool_call.id = info.id;
-        tool_call.name = info.name;
-        try {
-            tool_call.arguments = nlohmann::json::parse(info.arguments_json);
-        } catch (const nlohmann::json::exception&) {
-            tool_call.arguments = nlohmann::json::object();
-        }
-        return tool_call;
-    }
-
-    /// Executes every tool call emitted by a single assistant turn. The
-    /// assistant message (with all tool calls attached) is appended once; each
-    /// tool call then produces its own Tool message with the result. Validation
-    /// failures on one call do not abort sibling calls within the same turn.
-    Expected<void> execute_turn_tool_calls(const ToolDetection& detection, int iteration,
-                                           const CompositeCancellation& cancel,
-                                           bool record_tool_trace) {
-        backend_.add_message(Message::assistant_with_tool_calls(detection.response_text,
-                                                                detection.structured_tool_calls)
-                                 .view());
+    /// Executes every tool call from a single assistant turn. The assistant
+    /// message is appended once with all tool calls attached; one Tool message
+    /// is appended per call. A validation failure on one call does NOT abort
+    /// sibling calls within the same turn.
+    Expected<void> execute_tool_calls(const std::string& response_text,
+                                      const std::vector<ToolCallInfo>& tool_calls,
+                                      const ActiveRequest& request, int iteration) {
+        backend_.add_message(Message::assistant_with_tool_calls(response_text, tool_calls).view());
         backend_.finalize_response();
 
-        for (const auto& tc_info : detection.structured_tool_calls) {
-            if (cancel.cancelled()) {
+        const bool record_trace = request.options->record_tool_trace;
+        for (const auto& info : tool_calls) {
+            if (is_cancelled(running_, request)) {
                 return std::unexpected(Error{ErrorCode::RequestCancelled,
                                              "Request cancelled before tool call could run"});
             }
 
-            const tools::ToolCall tool_call = to_runtime_tool_call(tc_info);
-            std::string args_json = tc_info.arguments_json;
+            tools::ToolCall tool_call{info.id, info.name, nlohmann::json::object()};
+            try {
+                tool_call.arguments = nlohmann::json::parse(info.arguments_json);
+            } catch (const nlohmann::json::exception&) {
+                // arguments remain an empty object; validation will reject.
+            }
 
             if (auto validation = validator_.validate(tool_call, tool_registry_); !validation) {
-                if (auto fail = handle_validation_failure(tool_call, std::move(args_json),
-                                                          validation.error(), record_tool_trace);
-                    !fail) {
-                    return std::unexpected(fail.error());
+                if (auto r = handle_validation_failure(tool_call, info.arguments_json,
+                                                       validation.error(), record_trace);
+                    !r) {
+                    return std::unexpected(r.error());
                 }
                 continue;
             }
 
-            if (auto invoke = invoke_tool_handler(tool_call, std::move(args_json), iteration,
-                                                  cancel, record_tool_trace);
-                !invoke) {
-                return std::unexpected(invoke.error());
+            if (auto r =
+                    invoke_tool(tool_call, info.arguments_json, iteration, request, record_trace);
+                !r) {
+                return std::unexpected(r.error());
             }
         }
-
         return {};
     }
 
-    Expected<void> invoke_tool_handler(const tools::ToolCall& tool_call, std::string args_json,
-                                       int iteration, const CompositeCancellation& cancel,
-                                       bool record_tool_trace) {
+    Expected<void> invoke_tool(const tools::ToolCall& tool_call, std::string args_json,
+                               int iteration, const ActiveRequest& request, bool record_trace) {
         ZOO_LOG("info", "invoking tool '%s' (iteration %d, native_tc=%d)", tool_call.name.c_str(),
                 iteration, use_native_tool_calling_);
 
         auto handler = tool_registry_.find_handler(tool_call.name);
-        Expected<nlohmann::json> invoke_result;
+        Expected<nlohmann::json> result;
         if (handler) {
             auto future = tool_executor_.submit(std::move(*handler), tool_call.arguments);
-            invoke_result = ToolExecutor::wait_for_result(future, cancel);
+            result = ToolExecutor::wait_for_result(future, running_, request.cancelled);
         } else {
-            invoke_result = std::unexpected(
+            result = std::unexpected(
                 Error{ErrorCode::ToolNotFound, "Tool not found: " + tool_call.name});
         }
 
-        if (!invoke_result && invoke_result.error().code == ErrorCode::RequestCancelled) {
-            return std::unexpected(invoke_result.error());
+        if (!result && result.error().code == ErrorCode::RequestCancelled) {
+            return std::unexpected(result.error());
         }
 
-        std::string tool_result_str;
+        std::string tool_msg;
         std::optional<std::string> result_json;
         std::optional<Error> tool_error;
         ToolInvocationStatus status = ToolInvocationStatus::Succeeded;
-        if (invoke_result) {
-            tool_result_str = invoke_result->dump();
-            result_json = tool_result_str;
+        if (result) {
+            tool_msg = result->dump();
+            result_json = tool_msg;
         } else {
-            tool_result_str = "Error: " + invoke_result.error().message;
-            tool_error = invoke_result.error();
+            tool_msg = "Error: " + result.error().message;
+            tool_error = result.error();
             status = ToolInvocationStatus::ExecutionFailed;
         }
 
-        backend_.add_message(Message::tool(std::move(tool_result_str), tool_call.id).view());
+        backend_.add_message(Message::tool(std::move(tool_msg), tool_call.id).view());
         any_tool_invoked_ = true;
-        if (record_tool_trace) {
+        if (record_trace) {
             tool_invocations_.push_back(
                 ToolInvocation{tool_call.id, tool_call.name, std::move(args_json), status,
                                std::move(result_json), std::move(tool_error)});
@@ -201,7 +208,7 @@ class ToolLoopController {
 
     Expected<void> handle_validation_failure(const tools::ToolCall& tool_call,
                                              std::string args_json, Error validation_error,
-                                             bool record_tool_trace) {
+                                             bool record_trace) {
         int& retry_count = retry_count_for(tool_call.name);
         if (retry_count >= agent_config_.max_tool_retries) {
             ZOO_LOG("error", "tool retries exhausted for '%s': %s", tool_call.name.c_str(),
@@ -215,11 +222,12 @@ class ToolLoopController {
         ZOO_LOG("warn", "tool '%s' validation failed (retry %d/%d): %s", tool_call.name.c_str(),
                 retry_count, agent_config_.max_tool_retries, validation_error.message.c_str());
 
-        std::string error_content = "Error: " + validation_error.message;
         backend_.add_message(
-            Message::tool(error_content + "\nPlease correct the arguments.", tool_call.id).view());
+            Message::tool("Error: " + validation_error.message + "\nPlease correct the arguments.",
+                          tool_call.id)
+                .view());
         any_tool_invoked_ = true;
-        if (record_tool_trace) {
+        if (record_trace) {
             tool_invocations_.push_back(ToolInvocation{
                 tool_call.id, tool_call.name, std::move(args_json),
                 ToolInvocationStatus::ValidationFailed, std::nullopt, std::move(validation_error)});
@@ -238,16 +246,15 @@ class ToolLoopController {
     }
 
     Expected<TextResponse> finish_response(std::string response_text, const GenerationStats& stats,
-                                           bool record_tool_trace) {
+                                           bool record_trace) {
         const auto end_time = std::chrono::steady_clock::now();
-
         backend_.add_message(Message::assistant(response_text).view());
         backend_.finalize_response();
         callback_dispatcher_.drain();
 
         TextResponse response;
         response.text = std::move(response_text);
-        if (record_tool_trace && !tool_invocations_.empty()) {
+        if (record_trace && !tool_invocations_.empty()) {
             response.tool_trace = ToolTrace{std::move(tool_invocations_)};
         }
         response.usage = stats.usage();
@@ -259,7 +266,7 @@ class ToolLoopController {
     const tools::ToolRegistry& tool_registry_;
     ToolExecutor& tool_executor_;
     CallbackDispatcher& callback_dispatcher_;
-    const CancellationToken& stop_token_;
+    const std::atomic<bool>& running_;
     const AgentConfig& agent_config_;
     bool use_native_tool_calling_;
     tools::ToolArgumentsValidator validator_;
@@ -297,29 +304,6 @@ void AgentRuntime::inference_loop() {
     }
 }
 
-namespace {
-
-/// Drains the callback dispatcher, swallowing any captured exception.  The
-/// inference thread invokes this before resolving the slot so that no
-/// dispatcher entry can outlive the slot's streaming callback (which is owned
-/// by the request payload and is destroyed when the awaiting thread releases
-/// the slot).  Streaming-callback exceptions are converted into a runtime
-/// error by the caller when appropriate.
-[[nodiscard]] std::optional<Error>
-drain_dispatcher_swallowing_errors(CallbackDispatcher& dispatcher) noexcept {
-    try {
-        dispatcher.drain();
-        return std::nullopt;
-    } catch (const std::exception& e) {
-        return Error{ErrorCode::InferenceFailed,
-                     std::string("Streaming callback threw: ") + e.what()};
-    } catch (...) {
-        return Error{ErrorCode::InferenceFailed, "Streaming callback threw unknown exception"};
-    }
-}
-
-} // namespace
-
 void AgentRuntime::handle_request(QueuedRequest request) {
     const auto active_request = request_slots_->active_request(request);
     if (!active_request.has_value()) {
@@ -333,57 +317,40 @@ void AgentRuntime::handle_request(QueuedRequest request) {
         return;
     }
 
-    const ResultKind result_kind = active_request->result_kind;
-    if (result_kind == ResultKind::Extraction) {
-        Expected<ExtractionResponse> result =
-            std::unexpected(Error{ErrorCode::InferenceFailed, "Inference did not run"});
-        try {
-            result = process_extraction_request(*active_request);
-        } catch (const std::exception& e) {
-            ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
-            result = std::unexpected(
-                Error{ErrorCode::InferenceFailed, std::string("Unhandled exception: ") + e.what()});
-        } catch (...) {
-            ZOO_LOG("error", "unknown exception in inference thread");
-            result = std::unexpected(
-                Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
-        }
-        // CRITICAL: drain the dispatcher before resolving the slot — see note
-        // below the text-result branch.
-        if (auto drain_error = drain_dispatcher_swallowing_errors(callback_dispatcher_)) {
-            if (result.has_value()) {
-                result = std::unexpected(std::move(*drain_error));
-            }
-        }
-        request_slots_->resolve_extraction(request.slot, request.generation, std::move(result));
-        return;
-    }
-
-    Expected<TextResponse> result =
-        std::unexpected(Error{ErrorCode::InferenceFailed, "Inference did not run"});
+    // Drain the dispatcher BEFORE resolving the slot. Streaming callbacks
+    // live inside the slot payload, which is destroyed when the awaiting
+    // thread releases the slot; an entry still queued at resolve time would
+    // dereference freed memory. drain() also rethrows any captured
+    // streaming-callback exception, which the helper folds into the result.
     try {
-        result = process_request(*active_request);
+        if (active_request->result_kind == ResultKind::Extraction) {
+            auto result = process_extraction_request(*active_request);
+            fold_dispatcher_drain_into(callback_dispatcher_, result);
+            request_slots_->resolve_extraction(request.slot, request.generation, std::move(result));
+        } else {
+            auto result = process_request(*active_request);
+            fold_dispatcher_drain_into(callback_dispatcher_, result);
+            request_slots_->resolve_text(request.slot, request.generation, std::move(result));
+        }
     } catch (const std::exception& e) {
         ZOO_LOG("error", "unhandled exception in inference: %s", e.what());
-        result = std::unexpected(
+        try {
+            callback_dispatcher_.drain();
+        } catch (...) {
+        }
+        request_slots_->resolve_error(
+            request.slot, request.generation,
             Error{ErrorCode::InferenceFailed, std::string("Unhandled exception: ") + e.what()});
     } catch (...) {
         ZOO_LOG("error", "unknown exception in inference thread");
-        result = std::unexpected(
+        try {
+            callback_dispatcher_.drain();
+        } catch (...) {
+        }
+        request_slots_->resolve_error(
+            request.slot, request.generation,
             Error{ErrorCode::InferenceFailed, "Unknown exception in inference thread"});
     }
-
-    // CRITICAL: drain the dispatcher before resolving the slot. Streaming
-    // entries hold a raw pointer to the request's AsyncTokenCallback, which
-    // lives inside slot.payload. Once we resolve the slot, the awaiting thread
-    // may call await/release at any moment and destroy that payload — any
-    // dispatcher entry still pending at that point would be a use-after-free.
-    if (auto drain_error = drain_dispatcher_swallowing_errors(callback_dispatcher_)) {
-        if (result.has_value()) {
-            result = std::unexpected(std::move(*drain_error));
-        }
-    }
-    request_slots_->resolve_text(request.slot, request.generation, std::move(result));
 }
 
 Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& request) {
@@ -404,7 +371,7 @@ Expected<TextResponse> AgentRuntime::process_request(const ActiveRequest& reques
             static_cast<unsigned long>(request.id), has_tools, use_native_tool_calling);
 
     ToolLoopController tool_loop(*backend_, tool_registry_, tool_executor_, callback_dispatcher_,
-                                 stop_token_, agent_config_, use_native_tool_calling);
+                                 running_, agent_config_, use_native_tool_calling);
     return tool_loop.run(request, start_time);
 }
 
