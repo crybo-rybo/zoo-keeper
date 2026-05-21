@@ -42,11 +42,24 @@ if(TARGET llama OR TARGET llama-common)
 else()
     zoo_configure_llama_build_options()
     set(ZOO_LLAMA_ARCHIVE_URL "${ZOO_LLAMA_ARCHIVE_BASE_URL}/${ZOO_LLAMA_TAG}.tar.gz")
-    FetchContent_Declare(
-        llama_cpp
-        URL "${ZOO_LLAMA_ARCHIVE_URL}"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
+    if(ZOO_LLAMA_ARCHIVE_SHA256)
+        FetchContent_Declare(
+            llama_cpp
+            URL "${ZOO_LLAMA_ARCHIVE_URL}"
+            URL_HASH "SHA256=${ZOO_LLAMA_ARCHIVE_SHA256}"
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+    else()
+        message(WARNING
+            "Zoo-Keeper: ZOO_LLAMA_ARCHIVE_SHA256 is empty; the llama.cpp archive will be "
+            "fetched without integrity verification. Set -DZOO_LLAMA_ARCHIVE_SHA256=<hash> "
+            "for reproducible builds.")
+        FetchContent_Declare(
+            llama_cpp
+            URL "${ZOO_LLAMA_ARCHIVE_URL}"
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+    endif()
     FetchContent_MakeAvailable(llama_cpp)
     zoo_apply_llama_common_workarounds()
     set(ZOO_LLAMA_SOURCE_DIR "${llama_cpp_SOURCE_DIR}")

@@ -18,12 +18,12 @@ Goal: a smaller, more coherent codebase with no transitional ballast, no use-aft
 1. **`stop()` deadlocks on a long-running tool handler.** `~AgentRuntime` joins the inference thread, which is blocked on `ToolExecutor::submit(...).get()`. User code can hang the destructor indefinitely. (`src/agent/tool_executor.hpp:30,58`, `src/agent/runtime_inference.cpp:149`)
 2. **Streaming-callback use-after-free.** `CallbackDispatcher::dispatch_async` enqueues entries holding raw `AsyncTokenCallback*` into the request slot. On the error-rethrow path the slot can be cleared while the dispatcher thread still holds the pointer. (`src/agent/callback_dispatcher.hpp:111-124`)
 3. **Only the first tool call per assistant turn is executed.** `runtime_inference.cpp:108-122` invokes `structured_tool_calls.front()` only; remaining calls are stored in history without execution, breaking multi-call models (Llama-3.1 JSON, Hermes, Qwen3 XML) across turns.
-4. **GBNF grammar accepts ill-formed JSON.** Raw control chars allowed inside strings; integers allow leading zeros (`src/tools/grammar.hpp:163-167`). Model output can be grammar-valid but reject from `nlohmann::json::parse`.
-5. **`JsonSchema integer` rejects `3.0`-shaped values** (`src/tools/registry.cpp:58-59`). Many LLMs serialize integers as floats; silently fails validation.
-6. **Build supply chain: llama.cpp archive fetched without `URL_HASH`** (`cmake/ZooKeeperDependencies.cmake:45-49`). GitHub-generated tarballs are not byte-stable.
-7. **Sanitizer/coverage flags leak through `INTERFACE_LINK_OPTIONS`** to FetchContent consumers (`cmake/Sanitizers.cmake:9-11`, `cmake/Coverage.cmake:7-9`, `cmake/ZooKeeperPackage.cmake:9`).
-8. **`find_dependency(llama CONFIG)` is unversioned** (`cmake/ZooKeeperConfig.cmake.in:17`) — installed package silently satisfied by mismatched llama versions.
-9. **Path traversal via HuggingFace filename component** (`src/hub/huggingface.cpp:91-154`) — `owner/repo::../../etc/passwd` is accepted.
+4. ~~**GBNF grammar accepts ill-formed JSON.** Raw control chars allowed inside strings; integers allow leading zeros (`src/tools/grammar.hpp:163-167`). Model output can be grammar-valid but reject from `nlohmann::json::parse`.~~ **DONE** — primitive rules now reject leading zeros and raw control chars; `\uXXXX` escape added; numeric enum literal canonicalized.
+5. ~~**`JsonSchema integer` rejects `3.0`-shaped values** (`src/tools/registry.cpp:58-59`). Many LLMs serialize integers as floats; silently fails validation.~~ **DONE** — `json_matches_type(Integer)` accepts finite floats with no fractional part within int64 range.
+6. ~~**Build supply chain: llama.cpp archive fetched without `URL_HASH`** (`cmake/ZooKeeperDependencies.cmake:45-49`). GitHub-generated tarballs are not byte-stable.~~ **DONE** — opt-in `ZOO_LLAMA_ARCHIVE_SHA256` wired as `URL_HASH`; archive base URL switched to `ggml-org`.
+7. ~~**Sanitizer/coverage flags leak through `INTERFACE_LINK_OPTIONS`** to FetchContent consumers (`cmake/Sanitizers.cmake:9-11`, `cmake/Coverage.cmake:7-9`, `cmake/ZooKeeperPackage.cmake:9`).~~ **DONE** — both moved to `PRIVATE`.
+8. ~~**`find_dependency(llama CONFIG)` is unversioned** (`cmake/ZooKeeperConfig.cmake.in:17`) — installed package silently satisfied by mismatched llama versions.~~ **DONE** — version pin `0.0.${LLAMA_BUILD_NUMBER}` plumbed through the package config.
+9. ~~**Path traversal via HuggingFace filename component** (`src/hub/huggingface.cpp:91-154`) — `owner/repo::../../etc/passwd` is accepted.~~ **DONE** — `parse_identifier` rejects `..`, `.`, NUL, and any `/`/`\\` in the filename component.
 
 ### MED severity (selected)
 - "Transitional" `Message`/`ToolCallInfo` aliases are the entrenched canon (~40 sites).

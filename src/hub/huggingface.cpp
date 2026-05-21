@@ -88,6 +88,37 @@ HuggingFaceClient::~HuggingFaceClient() = default;
 HuggingFaceClient::HuggingFaceClient(HuggingFaceClient&&) noexcept = default;
 HuggingFaceClient& HuggingFaceClient::operator=(HuggingFaceClient&&) noexcept = default;
 
+namespace {
+
+// Reject filename components that could be interpreted as path traversal, NUL
+// injection, or absolute-path targets when later joined into a cache directory.
+// HuggingFace file identifiers are always a single path segment, so any '/',
+// backslash, or ".." segment is illegitimate.
+Expected<void> validate_filename_component(std::string_view filename) {
+    if (filename.empty()) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidModelIdentifier, "Filename component must not be empty"});
+    }
+    if (filename == "." || filename == "..") {
+        return std::unexpected(
+            Error{ErrorCode::InvalidModelIdentifier,
+                  "Filename component '" + std::string(filename) + "' is not allowed"});
+    }
+    if (filename.find('\0') != std::string_view::npos) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidModelIdentifier, "Filename contains a NUL byte"});
+    }
+    if (filename.find('/') != std::string_view::npos ||
+        filename.find('\\') != std::string_view::npos) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidModelIdentifier,
+                  "Filename component must not contain path separators: " + std::string(filename)});
+    }
+    return {};
+}
+
+} // namespace
+
 Expected<HuggingFaceClient::ParsedIdentifier>
 HuggingFaceClient::parse_identifier(std::string_view identifier) {
     if (identifier.empty()) {
@@ -103,10 +134,8 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
     if (double_sep != std::string_view::npos) {
         auto repo_part = identifier.substr(0, double_sep);
         auto filename = identifier.substr(double_sep + 2);
-        if (filename.empty()) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidModelIdentifier,
-                      "Empty filename after '::' in: " + std::string(identifier)});
+        if (auto validate = validate_filename_component(filename); !validate) {
+            return std::unexpected(validate.error());
         }
         result.filename = std::string(filename);
         try {

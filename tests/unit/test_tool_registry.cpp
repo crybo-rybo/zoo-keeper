@@ -8,6 +8,7 @@
 #include <chrono>
 #include <future>
 #include <gtest/gtest.h>
+#include <limits>
 #include <thread>
 
 using json = nlohmann::json;
@@ -357,9 +358,23 @@ TEST(JsonMatchesTypeTest, IntegerMatchesInteger) {
     EXPECT_TRUE(detail::json_matches_type(json(42), zoo::tools::ToolValueType::Integer));
 }
 
-TEST(JsonMatchesTypeTest, FloatDoesNotMatchInteger) {
-    // JSON floats are not integers
+TEST(JsonMatchesTypeTest, FractionalFloatDoesNotMatchInteger) {
+    // JSON floats with a fractional component are not integers
     EXPECT_FALSE(detail::json_matches_type(json(3.14), zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, FloatShapedIntegerMatchesInteger) {
+    // Many LLMs emit integer-valued arguments as floats ("3.0"); accept them.
+    EXPECT_TRUE(detail::json_matches_type(json(3.0), zoo::tools::ToolValueType::Integer));
+    EXPECT_TRUE(detail::json_matches_type(json(-42.0), zoo::tools::ToolValueType::Integer));
+    EXPECT_TRUE(detail::json_matches_type(json(0.0), zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, NonFiniteFloatDoesNotMatchInteger) {
+    EXPECT_FALSE(detail::json_matches_type(json(std::numeric_limits<double>::quiet_NaN()),
+                                           zoo::tools::ToolValueType::Integer));
+    EXPECT_FALSE(detail::json_matches_type(json(std::numeric_limits<double>::infinity()),
+                                           zoo::tools::ToolValueType::Integer));
 }
 
 TEST(JsonMatchesTypeTest, IntegerMatchesNumber) {
