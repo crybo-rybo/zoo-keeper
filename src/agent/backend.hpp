@@ -12,35 +12,20 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <zoo/core/model.hpp>
 #include <zoo/core/types.hpp>
 
 namespace zoo::internal::agent {
 
 /**
  * @brief Result of a single generation pass started from existing history.
- *
- * Mirrors `core::Model::GenerationResult` without depending on model.hpp.
  */
-struct GenerationResult {
-    std::string text;                ///< Raw generated text for the pass.
-    int prompt_tokens = 0;           ///< Number of prompt tokens rendered for the pass.
-    bool tool_call_detected = false; ///< Whether tool calling detected a tool call in the output.
-
-    /// Visible content after stripping tool-call syntax (empty when no tool calling).
-    std::string parsed_content;
-    /// Structured tool calls extracted from the output (empty when none detected).
-    std::vector<ToolCallInfo> tool_calls;
-};
+using GenerationResult = core::Model::GenerationResult;
 
 /**
  * @brief Parsed tool response from model output.
- *
- * Mirrors `core::Model::ParsedResponse` for the backend interface.
  */
-struct ParsedToolResponse {
-    std::string content;
-    std::vector<ToolCallInfo> tool_calls;
-};
+using ParsedToolResponse = core::Model::ParsedResponse;
 
 /**
  * @brief Minimal model surface consumed by the agent runtime.

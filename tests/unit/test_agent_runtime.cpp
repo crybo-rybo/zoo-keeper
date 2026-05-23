@@ -54,6 +54,8 @@ static_assert(requires { typename RequestHandle<TextResponse>; });
 static_assert(requires { typename RequestHandle<ExtractionResponse>; });
 static_assert(!zoo::internal::agent::RequestHandleResult<UnsupportedRequestResult>);
 static_assert(!std::is_move_assignable_v<ScopeExit<std::function<void()>>>);
+static_assert(std::is_same_v<GenerationResult, zoo::core::Model::GenerationResult>);
+static_assert(std::is_same_v<ParsedToolResponse, zoo::core::Model::ParsedResponse>);
 
 class FakeBackend final : public AgentBackend {
   public:
