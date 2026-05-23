@@ -33,9 +33,7 @@ void defer_thread_join(std::thread worker) {
     if (!worker.joinable()) {
         return;
     }
-    std::thread([worker = std::move(worker)]() mutable {
-        worker.join();
-    }).detach();
+    std::thread([worker = std::move(worker)]() mutable { worker.join(); }).detach();
 }
 
 } // namespace
@@ -94,17 +92,17 @@ ToolExecutor::Handle ToolExecutor::submit(tools::ToolHandler handler, nlohmann::
 
     auto control = std::make_shared<JobControl>();
     try {
-        control->worker = std::thread([control, promise, handler = std::move(handler),
-                                       args = std::move(args)]() mutable {
-            auto result = invoke_tool_handler(handler, args);
-            {
-                std::lock_guard lock(control->mutex);
-                if (control->abandoned) {
-                    return;
+        control->worker = std::thread(
+            [control, promise, handler = std::move(handler), args = std::move(args)]() mutable {
+                auto result = invoke_tool_handler(handler, args);
+                {
+                    std::lock_guard lock(control->mutex);
+                    if (control->abandoned) {
+                        return;
+                    }
                 }
-            }
-            promise->set_value(std::move(result));
-        });
+                promise->set_value(std::move(result));
+            });
     } catch (const std::exception& e) {
         ZOO_LOG("error", "failed to start tool handler thread: %s", e.what());
         promise->set_value(std::unexpected(
