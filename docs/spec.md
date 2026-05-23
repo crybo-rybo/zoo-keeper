@@ -42,6 +42,11 @@ The supported surface is:
 `Message` and `ToolCallInfo` are stable source-compatible aliases retained for
 existing consumers and examples.
 
+`ToolCallView` and `ToolCallSpan` are retained as request-scoped borrowed APIs
+for adapters that already hold structured assistant tool-call metadata. Borrowed
+tool-call strings and span elements must outlive the immediate API call; retained
+history uses `OwnedToolCall`.
+
 Everything under `src/` is intentionally private, including source-local private
 headers used by the agent and core runtime.
 

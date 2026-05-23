@@ -139,7 +139,7 @@ TEST(MessageTest, ViewReflectsOwnedMessageWithoutCopyingFields) {
     EXPECT_EQ(view.tool_calls()[0].name, "sum");
 }
 
-TEST(MessageTest, BorrowedMessageCanBeMaterialized) {
+TEST(MessageTest, BorrowedToolCallViewsMaterializeIntoOwnedMessage) {
     const std::array<zoo::ToolCallView, 1> tool_calls = {
         zoo::ToolCallView{"call_2", "echo", R"({"text":"hello"})"}};
     const zoo::MessageView view{zoo::Role::Assistant, "hello", std::span(tool_calls)};

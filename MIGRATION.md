@@ -322,6 +322,11 @@ for retained messages and structured tool calls. The older `Message` and
 `ToolCallInfo` names remain stable source-compatible aliases, so existing
 consumers do not need to rename them.
 
+`ToolCallView` and `ToolCallSpan` remain supported for request-scoped borrowed
+tool-call metadata, such as adapters from another chat message representation.
+Those views must not outlive the API call; use `OwnedToolCall` for retained or
+async storage.
+
 ```cpp
 // Before: scoped history passed owning Message values directly.
 std::vector<zoo::Message> history = {

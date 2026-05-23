@@ -131,6 +131,12 @@ The synchronous llama.cpp wrapper for direct, single-threaded inference.
 
 `MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type; `Message` remains a stable alias for it. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::get_history()` return.
 
+Assistant `MessageView` values may carry borrowed `ToolCallView` records via
+`ToolCallSpan`. This is intended for request-scoped adapters that already have
+structured tool-call metadata. The referenced strings and span elements must
+outlive the immediate API call; Zoo-Keeper materializes request-scoped messages
+into `OwnedMessage`/`OwnedToolCall` storage before asynchronous runtime use.
+
 Use `HistorySnapshot::view()` when you want to pass retained history back into a request-scoped API without copying the messages again.
 
 ### Response Types
