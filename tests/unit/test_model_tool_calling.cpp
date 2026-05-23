@@ -77,6 +77,19 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     EXPECT_FALSE(ModelTestAccess::tool_state(*model)->parser_params.parser.empty());
 }
 
+TEST(ModelToolCallingTest, ClearToolGrammarRestoresPlainSamplerPolicy) {
+    auto model = ModelTestAccess::make(make_config(), zoo::GenerationOptions{});
+
+    ModelTestAccess::set_sampler_policy(
+        *model, ModelTestAccess::SamplerPolicy::native_tool_call("grammar"));
+    ASSERT_NE(ModelTestAccess::sampler_policy(*model).mode, ModelTestAccess::GrammarMode::Plain);
+
+    EXPECT_NO_THROW(model->clear_tool_grammar());
+
+    EXPECT_EQ(ModelTestAccess::sampler_policy(*model).mode, ModelTestAccess::GrammarMode::Plain);
+    EXPECT_EQ(ModelTestAccess::tool_state(*model), nullptr);
+}
+
 TEST(ModelGenerationOverrideTest, InheritDefaultsUsesConfiguredDefaults) {
     zoo::GenerationOptions defaults;
     defaults.max_tokens = 21;

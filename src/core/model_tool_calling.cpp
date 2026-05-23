@@ -137,7 +137,7 @@ Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
 // clear_tool_grammar
 // ---------------------------------------------------------------------------
 
-void Model::clear_tool_grammar() noexcept {
+void Model::clear_tool_grammar() {
     if (impl_->session_.sampler_policy.mode == Impl::SamplerPolicy::Mode::Plain) {
         return;
     }

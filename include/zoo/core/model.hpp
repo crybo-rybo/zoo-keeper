@@ -124,7 +124,7 @@ class Model {
     bool set_schema_grammar(const std::string& grammar_str);
 
     /// Disables any active grammar/tool calling and restores the default sampler chain.
-    void clear_tool_grammar() noexcept;
+    void clear_tool_grammar();
 
     [[nodiscard]] bool has_tool_calling() const noexcept;
     [[nodiscard]] bool has_schema_grammar() const noexcept;
