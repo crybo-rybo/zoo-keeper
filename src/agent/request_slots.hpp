@@ -143,6 +143,16 @@ class RequestSlots {
         }
     }
 
+    void cancel_all() {
+        for (auto& slot_ptr : slots_) {
+            Slot& slot = *slot_ptr;
+            std::lock_guard<std::mutex> slot_lock(slot.mutex);
+            if (slot.occupied && !slot.ready) {
+                slot.cancelled.store(true, std::memory_order_release);
+            }
+        }
+    }
+
     void resolve_text(uint32_t slot_index, uint32_t generation, Expected<TextResponse> result) {
         resolve(slot_index, generation, std::move(result));
     }

@@ -1,6 +1,6 @@
 /**
  * @file tool_executor.hpp
- * @brief Offloads tool handler invocations to a dedicated worker thread.
+ * @brief Offloads tool handler invocations away from the inference thread.
  */
 
 #pragma once
@@ -9,39 +9,29 @@
 #include "zoo/core/types.hpp"
 #include "zoo/tools/types.hpp"
 
-#include <condition_variable>
+#include <atomic>
+#include <exception>
 #include <future>
-#include <mutex>
+#include <memory>
 #include <nlohmann/json.hpp>
-#include <queue>
+#include <string>
 #include <thread>
+#include <utility>
 
 namespace zoo::internal::agent {
 
 /**
- * @brief Executes tool handlers on a dedicated worker thread.
+ * @brief Executes tool handlers off the inference thread.
  *
- * The inference thread calls submit() to hand off a handler invocation and
- * then blocks on the returned future. This keeps arbitrary user-supplied tool
- * code off the inference thread while preserving sequential tool-loop semantics.
- *
- * MVP: thread isolation only. The inference thread still blocks on the future,
- * so a slow handler delays the tool loop but does not block the command lane.
- * TODO(tool-timeouts): add per-tool timeout/cancellation once basic isolation is validated.
+ * Each submitted handler owns its callable, arguments, and promise. The caller
+ * can abandon the returned future during cancellation or shutdown without
+ * waiting for user code that may be blocked indefinitely.
  */
 class ToolExecutor {
   public:
-    ToolExecutor() : thread_([this] { run(); }) {}
-
+    ToolExecutor() = default;
     ~ToolExecutor() {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            shutdown_ = true;
-        }
-        cv_.notify_one();
-        if (thread_.joinable()) {
-            thread_.join();
-        }
+        shutdown_.store(true, std::memory_order_release);
     }
 
     ToolExecutor(const ToolExecutor&) = delete;
@@ -50,73 +40,47 @@ class ToolExecutor {
     ToolExecutor& operator=(ToolExecutor&&) = delete;
 
     /**
-     * @brief Submits a tool handler for execution on the worker thread.
+     * @brief Submits a tool handler for execution.
      *
-     * Returns a future that resolves to the handler's return value. If called
-     * after shutdown, the future resolves immediately with AgentNotRunning.
+     * Returns a future that resolves to the handler's return value. If called after shutdown or if
+     * the worker cannot be started, the future resolves immediately with an error.
      */
     [[nodiscard]] std::future<Expected<nlohmann::json>> submit(tools::ToolHandler handler,
                                                                nlohmann::json args) {
         auto promise = std::make_shared<std::promise<Expected<nlohmann::json>>>();
         auto future = promise->get_future();
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (shutdown_) {
-                promise->set_value(std::unexpected(
-                    Error{ErrorCode::AgentNotRunning, "Tool executor is shut down"}));
-                return future;
-            }
-            queue_.push(Job{std::move(handler), std::move(args), std::move(promise)});
+        if (shutdown_.load(std::memory_order_acquire)) {
+            promise->set_value(
+                std::unexpected(Error{ErrorCode::AgentNotRunning, "Tool executor is shut down"}));
+            return future;
         }
-        cv_.notify_one();
+
+        try {
+            std::thread([handler = std::move(handler), args = std::move(args),
+                         promise = std::move(promise)]() mutable {
+                try {
+                    promise->set_value(handler(args));
+                } catch (const std::exception& e) {
+                    ZOO_LOG("error", "tool handler threw: %s", e.what());
+                    promise->set_value(
+                        std::unexpected(Error{ErrorCode::ToolExecutionFailed,
+                                              std::string("Tool handler threw: ") + e.what()}));
+                } catch (...) {
+                    ZOO_LOG("error", "tool handler threw unknown exception");
+                    promise->set_value(std::unexpected(Error{
+                        ErrorCode::ToolExecutionFailed, "Tool handler threw unknown exception"}));
+                }
+            }).detach();
+        } catch (const std::exception& e) {
+            promise->set_value(std::unexpected(
+                Error{ErrorCode::ToolExecutionFailed,
+                      std::string("Failed to start tool handler thread: ") + e.what()}));
+        }
         return future;
     }
 
   private:
-    struct Job {
-        tools::ToolHandler handler;
-        nlohmann::json args;
-        std::shared_ptr<std::promise<Expected<nlohmann::json>>> promise;
-    };
-
-    void run() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        while (true) {
-            cv_.wait(lock, [this] { return shutdown_ || !queue_.empty(); });
-
-            while (!queue_.empty()) {
-                auto job = std::move(queue_.front());
-                queue_.pop();
-                lock.unlock();
-
-                Expected<nlohmann::json> result;
-                try {
-                    result = job.handler(job.args);
-                } catch (const std::exception& e) {
-                    ZOO_LOG("error", "tool handler threw: %s", e.what());
-                    result = std::unexpected(Error{ErrorCode::ToolExecutionFailed,
-                                                   std::string("Tool handler threw: ") + e.what()});
-                } catch (...) {
-                    ZOO_LOG("error", "tool handler threw unknown exception");
-                    result = std::unexpected(Error{ErrorCode::ToolExecutionFailed,
-                                                   "Tool handler threw unknown exception"});
-                }
-                job.promise->set_value(std::move(result));
-
-                lock.lock();
-            }
-
-            if (shutdown_) {
-                return;
-            }
-        }
-    }
-
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::queue<Job> queue_;
-    bool shutdown_ = false;
-    std::thread thread_;
+    std::atomic<bool> shutdown_{false};
 };
 
 } // namespace zoo::internal::agent

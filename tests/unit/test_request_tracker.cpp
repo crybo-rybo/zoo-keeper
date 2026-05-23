@@ -82,6 +82,24 @@ TEST(RequestSlotsTest, CancelMarksActiveRequestFlag) {
     EXPECT_TRUE(after_cancel->cancelled->load(std::memory_order_acquire));
 }
 
+TEST(RequestSlotsTest, CancelAllMarksOutstandingRequestFlags) {
+    RequestSlots slots(2);
+
+    auto first = slots.emplace(make_text_request("one"));
+    auto second = slots.emplace(make_text_request("two"));
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    slots.cancel_all();
+
+    auto active_first = slots.active_request(QueuedRequest{first->slot, first->generation});
+    auto active_second = slots.active_request(QueuedRequest{second->slot, second->generation});
+    ASSERT_TRUE(active_first.has_value());
+    ASSERT_TRUE(active_second.has_value());
+    EXPECT_TRUE(active_first->cancelled->load(std::memory_order_acquire));
+    EXPECT_TRUE(active_second->cancelled->load(std::memory_order_acquire));
+}
+
 TEST(RequestSlotsTest, ResolveErrorPropagatesThroughAwaitHandle) {
     RequestSlots slots(1);
 

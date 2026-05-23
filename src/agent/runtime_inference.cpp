@@ -10,6 +10,7 @@
 #include "zoo/tools/validation.hpp"
 #include <chrono>
 #include <exception>
+#include <future>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,8 @@
 namespace zoo::internal::agent {
 
 namespace {
+
+constexpr auto kToolWaitPollInterval = std::chrono::milliseconds(10);
 
 class ToolLoopController {
   public:
@@ -52,7 +55,7 @@ class ToolLoopController {
                 auto tool_result =
                     handle_tool_calls(detection.tool_calls, std::move(detection.response_text),
                                       std::move(detection.structured_tool_calls), iteration,
-                                      request.options->record_tool_trace);
+                                      request.options->record_tool_trace, request);
                 if (!tool_result) {
                     return std::unexpected(tool_result.error());
                 }
@@ -131,7 +134,7 @@ class ToolLoopController {
     Expected<void> handle_tool_calls(const std::vector<tools::ToolCall>& tool_calls,
                                      std::string response_text,
                                      std::vector<ToolCallInfo> structured_tool_calls, int iteration,
-                                     bool record_tool_trace) {
+                                     bool record_tool_trace, const ActiveRequest& request) {
         if (!structured_tool_calls.empty()) {
             backend_.add_message(
                 Message::assistant_with_tool_calls(response_text, structured_tool_calls).view());
@@ -145,7 +148,7 @@ class ToolLoopController {
                                         ? structured_tool_calls[index].arguments_json
                                         : tool_calls[index].arguments.dump();
             auto result = handle_tool_call(tool_calls[index], std::move(args_json), iteration,
-                                           record_tool_trace);
+                                           record_tool_trace, request);
             if (!result) {
                 return std::unexpected(result.error());
             }
@@ -154,7 +157,13 @@ class ToolLoopController {
     }
 
     Expected<void> handle_tool_call(const tools::ToolCall& tool_call, std::string args_json,
-                                    int iteration, bool record_tool_trace) {
+                                    int iteration, bool record_tool_trace,
+                                    const ActiveRequest& request) {
+        if (is_cancelled(request)) {
+            return std::unexpected(
+                Error{ErrorCode::RequestCancelled, "Request cancelled before tool execution"});
+        }
+
         if (auto validation_result = validator_.validate(tool_call, tool_registry_);
             !validation_result) {
             return handle_validation_failure(tool_call, std::move(args_json),
@@ -165,9 +174,13 @@ class ToolLoopController {
                 iteration, use_native_tool_calling_);
         auto handler = tool_registry_.find_handler(tool_call.name);
         Expected<nlohmann::json> invoke_result =
-            handler ? tool_executor_.submit(std::move(*handler), tool_call.arguments).get()
+            handler ? await_tool_result(
+                          tool_executor_.submit(std::move(*handler), tool_call.arguments), request)
                     : std::unexpected(
                           Error{ErrorCode::ToolNotFound, "Tool not found: " + tool_call.name});
+        if (!invoke_result && invoke_result.error().code == ErrorCode::RequestCancelled) {
+            return std::unexpected(invoke_result.error());
+        }
 
         std::string tool_result_str;
         std::optional<std::string> result_json;
@@ -191,6 +204,17 @@ class ToolLoopController {
         }
         callback_dispatcher_.drain();
         return {};
+    }
+
+    Expected<nlohmann::json> await_tool_result(std::future<Expected<nlohmann::json>> future,
+                                               const ActiveRequest& request) const {
+        while (future.wait_for(kToolWaitPollInterval) != std::future_status::ready) {
+            if (is_cancelled(request)) {
+                return std::unexpected(
+                    Error{ErrorCode::RequestCancelled, "Request cancelled during tool execution"});
+            }
+        }
+        return future.get();
     }
 
     Expected<void> handle_validation_failure(const tools::ToolCall& tool_call,

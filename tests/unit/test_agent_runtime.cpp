@@ -1305,6 +1305,63 @@ TEST(AgentRuntimeTest, CancelDuringToolHandlerReturnsRequestCancelledAfterHandle
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 }
 
+TEST(AgentRuntimeTest, CancelDuringBlockedToolHandlerDoesNotBlockLaterTools) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered_tool = std::make_shared<std::promise<void>>();
+    auto entered_tool_future = entered_tool->get_future();
+    auto release_tool = std::make_shared<std::promise<void>>();
+    auto release_tool_future = release_tool->get_future().share();
+
+    auto slow_definition = zoo::tools::detail::make_tool_definition(
+        "slow", "Blocks until released", std::vector<std::string>{"value"},
+        [entered_tool, release_tool_future](int value) {
+            entered_tool->set_value();
+            release_tool_future.wait();
+            return value;
+        });
+    ASSERT_TRUE(slow_definition.has_value()) << slow_definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*slow_definition)).has_value());
+
+    std::atomic<int> fast_calls{0};
+    auto fast_definition = zoo::tools::detail::make_tool_definition(
+        "fast", "Returns immediately", std::vector<std::string>{"value"}, [&fast_calls](int value) {
+            fast_calls.fetch_add(1, std::memory_order_relaxed);
+            return value + 1;
+        });
+    ASSERT_TRUE(fast_definition.has_value()) << fast_definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*fast_definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("slow", {{"value", 1}}));
+    });
+
+    auto slow_handle = runtime.chat("run slow tool");
+    ASSERT_EQ(entered_tool_future.wait_for(1s), std::future_status::ready);
+
+    slow_handle.cancel();
+    auto slow_result = slow_handle.await_result(1s);
+    ASSERT_FALSE(slow_result.has_value());
+    EXPECT_EQ(slow_result.error().code, ErrorCode::RequestCancelled);
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("fast", {{"value", 2}}));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    auto fast_result = runtime.chat("run fast tool").await_result(1s);
+    ASSERT_TRUE(fast_result.has_value()) << fast_result.error().to_string();
+    EXPECT_EQ(fast_result->text, "done");
+    EXPECT_EQ(fast_calls.load(std::memory_order_relaxed), 1);
+
+    release_tool->set_value();
+}
+
 TEST(AgentRuntimeTest, ToolHandlerExceptionsBecomeExecutionFailedErrors) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -1411,6 +1468,82 @@ TEST(AgentRuntimeTest, ToolExecutionCompletesCleanlyBeforeRuntimeDestruction) {
     // Destructor must not hang — inference thread and ToolExecutor worker both exit cleanly.
     auto destroy_future = std::async(std::launch::async, [&] { runtime.reset(); });
     EXPECT_EQ(destroy_future.wait_for(3s), std::future_status::ready);
+}
+
+TEST(AgentRuntimeTest, StopReturnsWhileToolHandlerIsBlocked) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered_tool = std::make_shared<std::promise<void>>();
+    auto entered_tool_future = entered_tool->get_future();
+    auto release_tool = std::make_shared<std::promise<void>>();
+    auto release_tool_future = release_tool->get_future().share();
+
+    auto definition = zoo::tools::detail::make_tool_definition(
+        "slow", "Blocks until released", std::vector<std::string>{"value"},
+        [entered_tool, release_tool_future](int value) {
+            entered_tool->set_value();
+            release_tool_future.wait();
+            return value;
+        });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("slow", {{"value", 1}}));
+    });
+
+    auto handle = runtime.chat("run slow tool");
+    ASSERT_EQ(entered_tool_future.wait_for(1s), std::future_status::ready);
+
+    auto stop_future = std::async(std::launch::async, [&runtime] { runtime.stop(); });
+    ASSERT_EQ(stop_future.wait_for(1s), std::future_status::ready);
+
+    auto result = handle.await_result(1s);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+
+    release_tool->set_value();
+}
+
+TEST(AgentRuntimeTest, DestructionReturnsWhileToolHandlerIsBlocked) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    auto runtime = std::make_unique<AgentRuntime>(make_model_config(), make_agent_config(),
+                                                  GenerationOptions{}, std::move(backend));
+
+    auto entered_tool = std::make_shared<std::promise<void>>();
+    auto entered_tool_future = entered_tool->get_future();
+    auto release_tool = std::make_shared<std::promise<void>>();
+    auto release_tool_future = release_tool->get_future().share();
+
+    auto definition = zoo::tools::detail::make_tool_definition(
+        "slow", "Blocks until released", std::vector<std::string>{"value"},
+        [entered_tool, release_tool_future](int value) {
+            entered_tool->set_value();
+            release_tool_future.wait();
+            return value;
+        });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime->register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(tool_call_generation("slow", {{"value", 1}}));
+    });
+
+    auto handle = runtime->chat("run slow tool");
+    ASSERT_EQ(entered_tool_future.wait_for(1s), std::future_status::ready);
+
+    auto destroy_future = std::async(std::launch::async, [&runtime] { runtime.reset(); });
+    ASSERT_EQ(destroy_future.wait_for(1s), std::future_status::ready);
+
+    auto result = handle.await_result(1s);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+
+    release_tool->set_value();
 }
 
 TEST(ScopeExitTest, MoveConstructionTransfersSingleExecution) {
