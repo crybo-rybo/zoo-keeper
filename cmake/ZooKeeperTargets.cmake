@@ -32,6 +32,11 @@ add_library(zoo STATIC
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/core/hf_download.cpp>"
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/huggingface.cpp>"
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/catalog_repository.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store_catalog_io.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/model_resolver.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/model_importer.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/hub_pull_service.cpp>"
     ${PROJECT_SOURCE_DIR}/src/log_callback.cpp
 )
 target_include_directories(zoo PUBLIC

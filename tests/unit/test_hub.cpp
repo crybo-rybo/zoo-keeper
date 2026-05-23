@@ -434,30 +434,6 @@ TEST(ModelStoreCatalogTest, OpenRejectsDuplicateAliasesOnSameEntry) {
     EXPECT_EQ(store.error().code, zoo::ErrorCode::StoreCorrupted);
 }
 
-TEST(ModelStoreCatalogTest, HubPullServicePersistsSourceAnnotation) {
-    TempDir temp_dir;
-    zoo::hub::ModelStoreConfig config;
-    config.store_directory = temp_dir.path().string();
-    zoo::hub::detail::CatalogRepository repository(config);
-
-    std::vector<zoo::hub::ModelEntry> entries = {
-        make_entry("model-1", "fixture-model", "/tmp/model.gguf")};
-    ASSERT_TRUE(repository.save(entries).has_value());
-
-    auto annotated = zoo::hub::detail::HubPullService::persist_source_annotation(
-        entries, repository, "model-1", "https://huggingface.co/owner/repo/resolve/main/model.gguf",
-        "owner/repo");
-    ASSERT_TRUE(annotated.has_value()) << annotated.error().to_string();
-    EXPECT_EQ(annotated->source_url, "https://huggingface.co/owner/repo/resolve/main/model.gguf");
-    EXPECT_EQ(annotated->huggingface_repo, "owner/repo");
-
-    auto loaded = repository.load();
-    ASSERT_TRUE(loaded.has_value()) << loaded.error().to_string();
-    ASSERT_EQ(loaded->size(), 1u);
-    EXPECT_EQ((*loaded)[0].source_url, "https://huggingface.co/owner/repo/resolve/main/model.gguf");
-    EXPECT_EQ((*loaded)[0].huggingface_repo, "owner/repo");
-}
-
 TEST(ModelStoreCatalogTest, OpenPreservesMetadataAndSourceFields) {
     TempDir temp_dir;
 

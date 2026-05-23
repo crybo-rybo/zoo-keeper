@@ -78,7 +78,8 @@ class ModelStore {
     /**
      * @brief Finds a model by name, alias, or path.
      *
-     * Resolution order: exact alias match, then name substring match, then path match.
+     * Resolution order: exact alias match, exact name match, name substring match,
+     * path match, then catalog ID match.
      */
     [[nodiscard]] Expected<ModelEntry> find(const std::string& query) const;
 

@@ -28,6 +28,7 @@ if(ZOO_BUILD_TESTS)
         unit/test_gguf_inspector.cpp
         unit/test_system_probe.cpp
         "$<$<BOOL:${ZOO_BUILD_HUB}>:${CMAKE_CURRENT_SOURCE_DIR}/unit/test_hub.cpp>"
+        "$<$<BOOL:${ZOO_BUILD_HUB}>:${CMAKE_CURRENT_SOURCE_DIR}/unit/test_model_store_internals.cpp>"
     )
 
     add_executable(zoo_tests ${ZOO_TEST_SOURCES})
