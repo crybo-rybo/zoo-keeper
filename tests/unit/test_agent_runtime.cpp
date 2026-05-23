@@ -10,10 +10,12 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <functional>
 #include <future>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 namespace {
@@ -50,6 +52,7 @@ struct UnsupportedRequestResult {};
 static_assert(requires { typename RequestHandle<TextResponse>; });
 static_assert(requires { typename RequestHandle<ExtractionResponse>; });
 static_assert(!zoo::internal::agent::RequestHandleResult<UnsupportedRequestResult>);
+static_assert(!std::is_move_assignable_v<ScopeExit<std::function<void()>>>);
 
 class FakeBackend final : public AgentBackend {
   public:
@@ -1267,18 +1270,6 @@ TEST(ScopeExitTest, MoveConstructionTransfersSingleExecution) {
     {
         ScopeExit original([&] { ++calls; });
         ScopeExit moved(std::move(original));
-    }
-
-    EXPECT_EQ(calls, 1);
-}
-
-TEST(ScopeExitTest, MoveAssignmentTransfersSingleExecution) {
-    int calls = 0;
-
-    {
-        ScopeExit original([&] { ++calls; });
-        ScopeExit moved([] {});
-        moved = std::move(original);
     }
 
     EXPECT_EQ(calls, 1);
