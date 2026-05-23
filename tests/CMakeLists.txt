@@ -70,6 +70,15 @@ if(ZOO_BUILD_TESTS)
     )
     set_tests_properties(InstrumentationOptionsArePrivate PROPERTIES LABELS "unit")
 
+    add_test(
+        NAME LlamaBuildIdentityValidation
+        COMMAND "${CMAKE_COMMAND}"
+            "-DZOO_PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DZOO_PROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_llama_identity.cmake"
+    )
+    set_tests_properties(LlamaBuildIdentityValidation PROPERTIES LABELS "unit")
+
     zoo_apply_strict_target_options(zoo_tests)
 endif()
 

@@ -317,6 +317,10 @@ Make sure `nlohmann_json` is also installed and discoverable via
 `CMAKE_PREFIX_PATH` or `nlohmann_json_DIR`. `ZooKeeperConfig.cmake` resolves it
 transitively with `find_dependency(nlohmann_json CONFIG)`, so consumers do not
 need a separate `target_link_libraries(... nlohmann_json::nlohmann_json)` line.
+The installed config also verifies the located `llama` package exposes the same
+`LLAMA_BUILD_COMMIT` and `LLAMA_BUILD_NUMBER` that Zoo-Keeper was built
+against; packages without that metadata, or with a different llama.cpp build,
+fail during CMake configure with a diagnostic.
 
 Example:
 
