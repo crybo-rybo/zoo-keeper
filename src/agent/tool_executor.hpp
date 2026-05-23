@@ -5,34 +5,59 @@
 
 #pragma once
 
-#include "log.hpp"
 #include "zoo/core/types.hpp"
 #include "zoo/tools/types.hpp"
 
 #include <atomic>
-#include <exception>
+#include <chrono>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
-#include <string>
-#include <thread>
-#include <utility>
 
 namespace zoo::internal::agent {
 
 /**
  * @brief Executes tool handlers off the inference thread.
  *
- * Each submitted handler owns its callable, arguments, and promise. The caller
- * can abandon the returned future during cancellation or shutdown without
- * waiting for user code that may be blocked indefinitely.
+ * Each submitted handler owns its callable, arguments, and promise. The caller can abandon the
+ * returned handle during cancellation or shutdown without waiting for user code that may be blocked
+ * indefinitely.
  */
 class ToolExecutor {
+  private:
+    struct JobControl;
+
   public:
-    ToolExecutor() = default;
-    ~ToolExecutor() {
-        shutdown_.store(true, std::memory_order_release);
-    }
+    class Handle {
+      public:
+        Handle() = default;
+        Handle(const Handle&) = delete;
+        Handle& operator=(const Handle&) = delete;
+        Handle(Handle&&) noexcept = default;
+        Handle& operator=(Handle&&) noexcept = default;
+
+        template <typename Rep, typename Period>
+        [[nodiscard]] std::future_status
+        wait_for(const std::chrono::duration<Rep, Period>& timeout) const {
+            return future_.wait_for(timeout);
+        }
+
+        [[nodiscard]] Expected<nlohmann::json> get();
+        void abandon();
+
+      private:
+        friend class ToolExecutor;
+
+        Handle(std::future<Expected<nlohmann::json>> future,
+               std::shared_ptr<JobControl> control) noexcept;
+
+        std::future<Expected<nlohmann::json>> future_;
+        std::shared_ptr<JobControl> control_;
+    };
+
+    ToolExecutor();
+    ~ToolExecutor();
 
     ToolExecutor(const ToolExecutor&) = delete;
     ToolExecutor& operator=(const ToolExecutor&) = delete;
@@ -42,43 +67,18 @@ class ToolExecutor {
     /**
      * @brief Submits a tool handler for execution.
      *
-     * Returns a future that resolves to the handler's return value. If called after shutdown or if
-     * the worker cannot be started, the future resolves immediately with an error.
+     * Returns a handle that resolves to the handler's return value. If called after shutdown, the
+     * handle resolves immediately with an error.
      */
-    [[nodiscard]] std::future<Expected<nlohmann::json>> submit(tools::ToolHandler handler,
-                                                               nlohmann::json args) {
-        auto promise = std::make_shared<std::promise<Expected<nlohmann::json>>>();
-        auto future = promise->get_future();
-        if (shutdown_.load(std::memory_order_acquire)) {
-            promise->set_value(
-                std::unexpected(Error{ErrorCode::AgentNotRunning, "Tool executor is shut down"}));
-            return future;
-        }
-
-        try {
-            std::thread([handler = std::move(handler), args = std::move(args), promise]() mutable {
-                try {
-                    promise->set_value(handler(args));
-                } catch (const std::exception& e) {
-                    ZOO_LOG("error", "tool handler threw: %s", e.what());
-                    promise->set_value(
-                        std::unexpected(Error{ErrorCode::ToolExecutionFailed,
-                                              std::string("Tool handler threw: ") + e.what()}));
-                } catch (...) {
-                    ZOO_LOG("error", "tool handler threw unknown exception");
-                    promise->set_value(std::unexpected(Error{
-                        ErrorCode::ToolExecutionFailed, "Tool handler threw unknown exception"}));
-                }
-            }).detach();
-        } catch (const std::exception& e) {
-            promise->set_value(std::unexpected(
-                Error{ErrorCode::ToolExecutionFailed,
-                      std::string("Failed to start tool handler thread: ") + e.what()}));
-        }
-        return future;
-    }
+    [[nodiscard]] Handle submit(tools::ToolHandler handler, nlohmann::json args);
+    void shutdown() noexcept;
 
   private:
+    struct JobControl {
+        std::mutex mutex;
+        bool abandoned = false;
+    };
+
     std::atomic<bool> shutdown_{false};
 };
 
