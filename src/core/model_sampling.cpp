@@ -4,6 +4,7 @@
  */
 
 #include "core/model_impl.hpp"
+#include "core/sampling_helpers.hpp"
 #include "zoo/core/model.hpp"
 
 #include <atomic>
@@ -12,7 +13,6 @@
 #include <cstdint>
 #include <llama.h>
 #include <random>
-#include <regex>
 
 namespace zoo::core {
 
@@ -34,12 +34,6 @@ uint32_t make_sampler_seed(int configured_seed) {
     seed ^= static_cast<uint64_t>(rd());
 
     return static_cast<uint32_t>(seed ^ (seed >> 32));
-}
-
-/// Escapes regex special characters for use in trigger patterns.
-std::string regex_escape(const std::string& str) {
-    static const std::regex special_chars{R"([-[\]{}()*+?.,\^$|#\s])"};
-    return std::regex_replace(str, special_chars, R"(\$&)");
 }
 
 void add_sampling_stages(llama_sampler* chain, const SamplingParams& sp) {
@@ -85,7 +79,7 @@ void append_grammar_trigger(const common_grammar_trigger& trigger,
                             std::vector<llama_token>& trigger_tokens) {
     switch (trigger.type) {
     case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-        trigger_patterns.push_back(regex_escape(trigger.value));
+        trigger_patterns.push_back(detail::regex_escape(trigger.value));
         break;
     case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
         trigger_patterns.push_back(trigger.value);
