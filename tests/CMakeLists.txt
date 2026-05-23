@@ -61,6 +61,15 @@ if(ZOO_BUILD_TESTS)
     )
     set_tests_properties(LlamaArchiveDigestValidation PROPERTIES LABELS "unit")
 
+    add_test(
+        NAME InstrumentationOptionsArePrivate
+        COMMAND "${CMAKE_COMMAND}"
+            -S "${CMAKE_CURRENT_SOURCE_DIR}/cmake/instrumentation_probe"
+            -B "${PROJECT_BINARY_DIR}/tests/instrumentation_probe"
+            "-DZOO_PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    )
+    set_tests_properties(InstrumentationOptionsArePrivate PROPERTIES LABELS "unit")
+
     zoo_apply_strict_target_options(zoo_tests)
 endif()
 
