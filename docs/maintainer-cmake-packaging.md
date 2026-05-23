@@ -54,6 +54,41 @@ consumer CMakeLists.txt
                    -> installed ZooKeeperConfig.cmake is loaded
 ```
 
+For the `find_package(...)` path specifically:
+
+```mermaid
+flowchart TB
+    subgraph Consumer["Downstream consumer project"]
+        CP["find_package(ZooKeeper CONFIG)<br/>target_link_libraries(... ZooKeeper::zoo)"]
+    end
+
+    subgraph BuildTree["Build-tree package (smoke tests, local dev)"]
+        BTC["build/ZooKeeperConfig.cmake"]
+        BTZ["Imported ZooKeeper::zoo<br/>-> producer build/libzoo.a"]
+        BTL["Imported ZooKeeper::llama<br/>-> built llama archives"]
+        BTJ["Imported ZooKeeper::nlohmann_json<br/>-> fetched headers"]
+        BTC --> BTZ
+        BTC --> BTL
+        BTC --> BTJ
+    end
+
+    subgraph InstallTree["Install-tree package (normal consumers)"]
+        ITC["prefix/lib/cmake/ZooKeeper/ZooKeeperConfig.cmake"]
+        FD["find_dependency(llama)<br/>find_dependency(nlohmann_json)"]
+        TG["ZooKeeperTargets.cmake<br/>exported ZooKeeper::zoo"]
+        ITC --> FD --> TG
+    end
+
+    CP -->|"CMAKE_PREFIX_PATH points at build/"| BTC
+    CP -->|"CMAKE_PREFIX_PATH points at install prefix/"| ITC
+
+```
+
+The build-tree path hand-authors imported targets that point back into the
+producer build directory. The install-tree path loads exported targets from the
+install prefix and resolves `llama` and `nlohmann_json` through
+`find_dependency`.
+
 ## Generation Flow Inside This Repo
 
 ```text
@@ -120,39 +155,6 @@ This file creates imported targets that point back into the producer build tree:
   - points at the built llama/llama-common/ggml archives and platform link flags
 - `ZooKeeper::zoo_core`
   - compatibility forwarding target to `ZooKeeper::zoo`
-
-```mermaid
-flowchart TB
-    subgraph Consumer["Downstream consumer project"]
-        CP["find_package(ZooKeeper CONFIG)<br/>target_link_libraries(… ZooKeeper::zoo)"]
-    end
-
-    subgraph BuildTree["Build-tree package (smoke tests, local dev)"]
-        BTC["build/ZooKeeperConfig.cmake"]
-        BTZ["Imported ZooKeeper::zoo<br/>→ producer build/libzoo.a"]
-        BTL["Imported ZooKeeper::llama<br/>→ built llama archives"]
-        BTJ["Imported ZooKeeper::nlohmann_json<br/>→ fetched headers"]
-        BTC --> BTZ
-        BTC --> BTL
-        BTC --> BTJ
-    end
-
-    subgraph InstallTree["Install-tree package (normal consumers)"]
-        ITC["prefix/lib/cmake/ZooKeeper/ZooKeeperConfig.cmake"]
-        FD["find_dependency(llama)<br/>find_dependency(nlohmann_json)"]
-        TG["ZooKeeperTargets.cmake<br/>exported ZooKeeper::zoo"]
-        ITC --> FD --> TG
-    end
-
-    CP -->|"points at build dir"| BuildTree
-    CP -->|"points at install prefix"| InstallTree
-
-```
-
-The build-tree path (left) hand-authors imported targets that point back into
-the producer build directory. The install-tree path (right) loads exported
-targets from the install prefix and resolves `llama` and `nlohmann_json`
-through `find_dependency`.
 
 Use this when:
 

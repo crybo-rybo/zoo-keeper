@@ -1,8 +1,8 @@
 # Hub Layer
 
 The hub layer (`zoo::hub`) is an optional Layer 4 that adds HuggingFace model
-downloading and a local model catalog on top of the core library. It is only
-compiled when `ZOO_BUILD_HUB=ON`.
+downloading and a local model catalog. It is only compiled when
+`ZOO_BUILD_HUB=ON`.
 
 ```bash
 scripts/build.sh -DZOO_BUILD_HUB=ON
@@ -15,7 +15,7 @@ available without enabling the hub.
 ```mermaid
 flowchart TB
     subgraph Hub["zoo::hub (optional Layer 4)"]
-        MS["ModelStore facade<br/>aliases · catalog · create_agent()"]
+        MS["ModelStore facade<br/>aliases · catalog · local imports"]
         HF["HuggingFaceClient<br/>download · cache · resume"]
         MS --> HF
     end
@@ -32,10 +32,10 @@ flowchart TB
     subgraph CoreReuse["Reused core APIs"]
         GI["GgufInspector<br/>metadata read"]
         SP["SystemProbe + auto_configure"]
-        MD["Model / Agent creation"]
+        CFG["ModelConfig<br/>auto-configure from metadata"]
         MS --> GI
         MS --> SP
-        MS --> MD
+        MS --> CFG
     end
 
     subgraph Cache["Shared cache"]
@@ -108,8 +108,8 @@ auto hf = zoo::hub::HuggingFaceClient::create({.token = "hf_..."}).value();
 JSON in the store directory (default: `~/.zoo-keeper/models/`). Catalog saves
 write a temporary file and atomically rename it over `catalog.json`.
 
-The store supports alias-based lookup, auto-configuration from cached
-inspection metadata, and one-liner Model or Agent creation.
+The store supports alias-based lookup and auto-configuration from cached
+inspection metadata.
 
 ```cpp
 auto store = zoo::hub::ModelStore::open().value();
@@ -125,12 +125,8 @@ store->add("/path/to/model.gguf", {"my-model"});
 auto entry = store->find("qwen3").value();
 std::cout << entry.info.name << " at " << entry.file_path << "\n";
 
-// One-liner: alias to running agent
-auto agent = store->create_agent("qwen3").value();
-agent->try_set_system_prompt("You are a helpful assistant.").value();
-
-// Or load a core::Model directly
-auto model = store->load_model("qwen3").value();
+// Resolve stored metadata to a normal ModelConfig.
+auto config = store->model_config("qwen3").value();
 ```
 
 Catalog operations: `add()`, `remove()`, `find()`, `list()`, `add_alias()`.

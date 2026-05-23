@@ -72,11 +72,13 @@ flowchart TB
         C["zoo::core<br/>Model · GgufInspector · SystemProbe"]
     end
 
-    subgraph Engine["Inference engine"]
-        LL["llama.cpp + llama-common"]
+    subgraph Llama["llama.cpp libraries"]
+        LL["llama.cpp core + llama-common"]
     end
 
     H --> A
+    H --> C
+    H -->|"download/cache"| LL
     A --> T
     A --> C
     C --> LL

@@ -25,7 +25,7 @@ flowchart TB
     subgraph Seam["Backend seam"]
         IF["AgentBackend (interface)"]
         AD["AgentBackendModel adapter"]
-        IF --> AD
+        AD -. implements .-> IF
     end
 
     subgraph Core["Layer 1 (src/core/)"]
@@ -119,7 +119,7 @@ Contributor rules:
 ## Hub Internals
 
 `zoo::hub::ModelStore` stays the public facade for catalog operations, local
-imports, HuggingFace pulls, and one-line Model/Agent creation. It reuses
+imports, HuggingFace pulls, and metadata-backed configuration. It reuses
 `zoo::core::GgufInspector` from `src/core/gguf_inspector.cpp` for metadata
 inspection and auto-configuration. Its private hub collaborators live under
 `src/hub/`:

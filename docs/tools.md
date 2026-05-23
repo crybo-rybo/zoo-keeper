@@ -11,14 +11,14 @@ path and no synthetic alternate protocol is introduced.
 ```mermaid
 flowchart TD
     START(["User request enters tool loop"])
-    GEN["Model generates tokens<br/>(grammar-constrained when tools active)"]
-    PARSE["parse_tool_response()<br/>native format detection"]
+    GEN["Model generates tokens<br/>(native tool grammar when available)"]
+    PARSE["Extract native tool calls<br/>(template parser format)"]
     TEXT{"Tool calls<br/>detected?"}
     DONE(["Return TextResponse<br/>+ optional tool_trace"])
     VAL["Validate arguments<br/>against registered schema"]
     OK{"Valid?"}
     EXEC["ToolExecutor runs<br/>registered handler"]
-    INJ["Inject tool result message<br/>into conversation"]
+    INJ["Inject tool result/error<br/>as tool message"]
     RETRY{"Retries<br/>remaining?"}
     FAIL(["Fail: ToolRetriesExhausted"])
     LIMIT{"Within<br/>iteration budget?"}

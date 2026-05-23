@@ -22,11 +22,13 @@ flowchart TB
         C["zoo::core<br/>Model · GgufInspector · SystemProbe"]
     end
 
-    subgraph Engine["Inference engine"]
-        LL["llama.cpp + llama-common"]
+    subgraph Llama["llama.cpp libraries"]
+        LL["llama.cpp core + llama-common"]
     end
 
     H --> A
+    H --> C
+    H -->|"download/cache"| LL
     A --> T
     A --> C
     C --> LL
@@ -68,6 +70,7 @@ sequenceDiagram
     autonumber
     participant App as Calling thread
     participant Facade as zoo::Agent
+    participant Handle as RequestHandle
     participant Slots as RequestSlots
     participant Mailbox as RuntimeMailbox
     participant Inf as Inference thread
@@ -79,9 +82,10 @@ sequenceDiagram
     Facade->>Mailbox: push_request(QueuedRequest)
     Facade-->>App: RequestHandle<TextResponse>
 
-    loop until request complete
-        Inf->>Mailbox: pop (commands first)
-        Inf->>Model: render prompt + generate
+    Inf->>Mailbox: pop next work item (commands first)
+    Inf->>Slots: load active request payload
+    Inf->>Model: generate_from_history(...)
+    loop token generation
         Model-->>Inf: token(s)
         opt streaming callback registered
             Inf->>CB: dispatch token
@@ -89,11 +93,13 @@ sequenceDiagram
             App-->>CB: Continue / Stop
         end
     end
+    Model-->>Inf: GenerationResult
 
     Inf->>Slots: complete slot with TextResponse
-    App->>Facade: await_result()
-    Facade->>Slots: wait + release
-    Facade-->>App: Expected<TextResponse>
+    App->>Handle: await_result()
+    Handle->>Slots: wait + release
+    Slots-->>Handle: Expected<TextResponse>
+    Handle-->>App: Expected<TextResponse>
 ```
 
 1. The calling thread submits via `chat()`, `complete()`, or `extract()` and
@@ -128,10 +134,12 @@ flowchart LR
     end
 
     subgraph Runtime["Agent runtime"]
+        SLOTS["RequestSlots<br/>payloads + completion state"]
         MB["RuntimeMailbox<br/>requests + commands"]
         INF["Inference thread<br/>AgentRuntime"]
         BE["AgentBackend → Model"]
         MB --> INF --> BE
+        INF -->|"load / resolve"| SLOTS
     end
 
     subgraph Workers["Dedicated workers"]
@@ -139,13 +147,14 @@ flowchart LR
         TE["ToolExecutor<br/>user tool handlers"]
     end
 
+    SUB -->|"reserve slot"| SLOTS
     SUB -->|"enqueue request"| MB
     SUB -->|"return handle"| AWAIT
     INF -->|"dispatch tokens"| CB
     CB -->|"TokenAction::Continue / Stop"| APP
     INF -->|"invoke handler"| TE
     TE -->|"result"| INF
-    AWAIT -->|"poll / block until done"| INF
+    AWAIT -->|"ready / await / cancel"| SLOTS
 
 ```
 
@@ -164,14 +173,14 @@ a `tool_trace` describing the attempts made during the tool loop.
 ```mermaid
 flowchart TD
     START(["User request enters tool loop"])
-    GEN["Model generates tokens<br/>(grammar-constrained when tools active)"]
-    PARSE["parse_tool_response()<br/>native format detection"]
+    GEN["Model generates tokens<br/>(native tool grammar when available)"]
+    PARSE["Extract native tool calls<br/>(template parser format)"]
     TEXT{"Tool calls<br/>detected?"}
     DONE(["Return TextResponse<br/>+ optional tool_trace"])
     VAL["Validate arguments<br/>against registered schema"]
     OK{"Valid?"}
     EXEC["ToolExecutor runs<br/>registered handler"]
-    INJ["Inject tool result message<br/>into conversation"]
+    INJ["Inject tool result/error<br/>as tool message"]
     RETRY{"Retries<br/>remaining?"}
     FAIL(["Fail: ToolRetriesExhausted"])
     LIMIT{"Within<br/>iteration budget?"}
