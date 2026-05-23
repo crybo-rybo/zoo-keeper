@@ -1437,9 +1437,7 @@ TEST(AgentRuntimeTest, CancelDuringToolHandlerReturnsRequestCancelledAfterHandle
 TEST(AgentRuntimeTest, CancelDuringBlockedToolHandlerDoesNotBlockLaterTools) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
-    auto agent_config = make_agent_config();
-    agent_config.tool_worker_threads = 1;
-    AgentRuntime runtime(make_model_config(), agent_config, GenerationOptions{},
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
                          std::move(backend));
 
     auto entered_tool = std::make_shared<std::promise<void>>();

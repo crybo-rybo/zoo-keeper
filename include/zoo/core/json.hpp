@@ -200,14 +200,13 @@ inline void to_json(nlohmann::json& j, const AgentConfig& config) {
     j = nlohmann::json{{"max_history_messages", config.max_history_messages},
                        {"request_queue_capacity", config.request_queue_capacity},
                        {"max_tool_iterations", config.max_tool_iterations},
-                       {"max_tool_retries", config.max_tool_retries},
-                       {"tool_worker_threads", config.tool_worker_threads}};
+                       {"max_tool_retries", config.max_tool_retries}};
 }
 
 inline void from_json(const nlohmann::json& j, AgentConfig& config) {
-    static constexpr std::array<const char*, 5> kAllowedKeys = {
-        "max_history_messages", "request_queue_capacity", "max_tool_iterations", "max_tool_retries",
-        "tool_worker_threads"};
+    static constexpr std::array<const char*, 4> kAllowedKeys = {
+        "max_history_messages", "request_queue_capacity", "max_tool_iterations",
+        "max_tool_retries"};
 
     detail::reject_unknown_keys(j, "agent config", kAllowedKeys);
 
@@ -223,9 +222,6 @@ inline void from_json(const nlohmann::json& j, AgentConfig& config) {
     }
     if (auto it = j.find("max_tool_retries"); it != j.end()) {
         it->get_to(parsed.max_tool_retries);
-    }
-    if (auto it = j.find("tool_worker_threads"); it != j.end()) {
-        it->get_to(parsed.tool_worker_threads);
     }
 
     config = std::move(parsed);

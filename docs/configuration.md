@@ -52,7 +52,6 @@ minimal auto-configured example shape.
 | `request_queue_capacity` | `size_t` | `64` | Maximum queued requests owned by the agent |
 | `max_tool_iterations` | `int` | `5` | Detect/execute/respond iterations per request |
 | `max_tool_retries` | `int` | `2` | Validation retries for malformed tool calls |
-| `tool_worker_threads` | `size_t` | `2` | Worker threads available for tool handlers |
 
 ### `zoo::GenerationOptions`
 
@@ -114,8 +113,7 @@ auto runtime = zoo::Agent::create(model, agent, generation);
     "max_history_messages": 64,
     "request_queue_capacity": 64,
     "max_tool_iterations": 5,
-    "max_tool_retries": 2,
-    "tool_worker_threads": 2
+    "max_tool_retries": 2
   },
   "generation": {
     "max_tokens": -1,
@@ -142,7 +140,7 @@ The example app wraps the three config blocks in a small top-level struct so it 
 Validation checks run automatically inside `Agent::create()`.
 
 - `ModelConfig`: `model_path` must be set and `context_size` must be positive
-- `AgentConfig`: `max_history_messages`, `request_queue_capacity`, and `tool_worker_threads` must be at least 1
+- `AgentConfig`: `max_history_messages` and `request_queue_capacity` must be at least 1
 - `GenerationOptions`: `max_tokens` must be positive or `-1`, and `sampling` must be valid
 
 If validation fails, construction returns an `Error` with the relevant `ErrorCode`.

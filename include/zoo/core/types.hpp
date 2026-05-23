@@ -630,7 +630,6 @@ struct AgentConfig {
     size_t request_queue_capacity = 64; ///< Fixed number of request slots the agent may own.
     int max_tool_iterations = 5;        ///< Maximum detect/execute/respond iterations per request.
     int max_tool_retries = 2;           ///< Maximum validation retries for malformed tool calls.
-    size_t tool_worker_threads = 2;     ///< Fixed worker threads for off-thread tool handlers.
 
     [[nodiscard]] Expected<void> validate() const {
         if (max_history_messages == 0) {
@@ -650,10 +649,6 @@ struct AgentConfig {
             return std::unexpected(
                 Error{ErrorCode::InvalidConfig, "max_tool_retries must be >= 0 (got " +
                                                     std::to_string(max_tool_retries) + ")"});
-        }
-        if (tool_worker_threads == 0) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidConfig, "tool_worker_threads must be >= 1"});
         }
         return {};
     }
