@@ -2,6 +2,9 @@
 
 This guide walks through the split public API and a minimal first agent.
 
+For visual overviews of the layer stack, threading model, and request flow,
+see [Architecture](architecture.md).
+
 ## Prerequisites
 
 - **C++23 compiler**: macOS uses Clang 16+; Linux uses GCC 13+ or Clang 18+
@@ -27,46 +30,16 @@ See [building.md](building.md) for platform-specific setup, integration tests, a
 
 ## Your First Agent
 
-```cpp
-#include <zoo/zoo.hpp>
-#include <iostream>
+The runnable version of this walkthrough is
+[`examples/minimal_agent.cpp`](../examples/minimal_agent.cpp):
 
-int main() {
-    zoo::ModelConfig model;
-    model.model_path = "models/llama-3-8b.gguf";
-    model.context_size = 8192;
-    model.n_gpu_layers = 0;
-
-    zoo::AgentConfig agent;
-    agent.max_history_messages = 32;
-
-    zoo::GenerationOptions generation;
-    generation.max_tokens = 256;
-
-    auto result = zoo::Agent::create(model, agent, generation);
-    if (!result) {
-        std::cerr << result.error().to_string() << '\n';
-        return 1;
-    }
-    auto agent_runtime = std::move(*result);
-
-    if (auto prompt = agent_runtime->try_set_system_prompt("You are a helpful AI assistant.");
-        !prompt) {
-        std::cerr << prompt.error().to_string() << '\n';
-        return 1;
-    }
-
-    auto handle = agent_runtime->chat(zoo::MessageView{zoo::Role::User, "Hello!"});
-    auto response = handle.await_result();
-    if (!response) {
-        std::cerr << response.error().to_string() << '\n';
-        return 1;
-    }
-
-    std::cout << response->text << '\n';
-    return 0;
-}
+```bash
+./build/examples/minimal_agent /path/to/model.gguf
 ```
+
+It loads split `ModelConfig`, `AgentConfig`, and `GenerationOptions`, sets a
+system prompt, issues one `chat()`, and prints the reply. Read the source for
+the full `Expected`-aware error handling.
 
 ## Core API Overview
 
@@ -131,6 +104,8 @@ The synchronous llama.cpp wrapper for direct, single-threaded inference.
 | `estimated_tokens()` | Get estimated token count of history |
 | `is_context_exceeded()` | Check if history exceeds the context window |
 
+Runnable sample: [`examples/model_generate.cpp`](../examples/model_generate.cpp).
+
 ### `zoo::MessageView`, `ConversationView`, and `HistorySnapshot`
 
 `MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type; `Message` remains a stable alias for it. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::try_get_history()` return.
@@ -167,9 +142,11 @@ if (!response) {
 }
 ```
 
+Runnable: [`examples/error_handling.cpp`](../examples/error_handling.cpp).
+
 ## Next Steps
 
 - [Tool System](tools.md) -- register native C++ functions as model-callable tools
 - [Configuration Reference](configuration.md) -- all config options
 - [Architecture](architecture.md) -- four-layer design and threading model
-- [Examples Cookbook](examples.md) -- copy-paste code snippets
+- [Examples](../examples/README.md) -- runnable programs and usage

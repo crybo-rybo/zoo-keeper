@@ -54,6 +54,37 @@ headers used by the agent and core runtime.
 
 Four layers, each depending only on the layers below it:
 
+```mermaid
+flowchart TB
+    subgraph L4["Layer 4 — Hub (optional, ZOO_BUILD_HUB=ON)"]
+        H["zoo::hub<br/>HuggingFaceClient · ModelStore"]
+    end
+
+    subgraph L3["Layer 3 — Agent"]
+        A["zoo::Agent<br/>RequestHandle · async orchestration"]
+    end
+
+    subgraph L2["Layer 2 — Tools (llama.cpp-free)"]
+        T["zoo::tools<br/>ToolRegistry · Parser · Validator"]
+    end
+
+    subgraph L1["Layer 1 — Core"]
+        C["zoo::core<br/>Model · GgufInspector · SystemProbe"]
+    end
+
+    subgraph Llama["llama.cpp libraries"]
+        LL["llama.cpp core + llama-common"]
+    end
+
+    H --> A
+    H --> C
+    H -->|"download/cache"| LL
+    A --> T
+    A --> C
+    C --> LL
+
+```
+
 | Layer | Namespace | Responsibility |
 |-------|-----------|----------------|
 | 4 | `zoo::hub` | **Optional.** HuggingFace downloading and local model store. Only compiled with `ZOO_BUILD_HUB=ON` |

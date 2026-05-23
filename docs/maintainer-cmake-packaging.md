@@ -54,6 +54,41 @@ consumer CMakeLists.txt
                    -> installed ZooKeeperConfig.cmake is loaded
 ```
 
+For the `find_package(...)` path specifically:
+
+```mermaid
+flowchart TB
+    subgraph Consumer["Downstream consumer project"]
+        CP["find_package(ZooKeeper CONFIG)<br/>target_link_libraries(... ZooKeeper::zoo)"]
+    end
+
+    subgraph BuildTree["Build-tree package (smoke tests, local dev)"]
+        BTC["build/ZooKeeperConfig.cmake"]
+        BTZ["Imported ZooKeeper::zoo<br/>-> producer build/libzoo.a"]
+        BTL["Imported ZooKeeper::llama<br/>-> built llama archives"]
+        BTJ["Imported ZooKeeper::nlohmann_json<br/>-> fetched headers"]
+        BTC --> BTZ
+        BTC --> BTL
+        BTC --> BTJ
+    end
+
+    subgraph InstallTree["Install-tree package (normal consumers)"]
+        ITC["prefix/lib/cmake/ZooKeeper/ZooKeeperConfig.cmake"]
+        FD["find_dependency(llama)<br/>find_dependency(nlohmann_json)"]
+        TG["ZooKeeperTargets.cmake<br/>exported ZooKeeper::zoo"]
+        ITC --> FD --> TG
+    end
+
+    CP -->|"CMAKE_PREFIX_PATH points at build/"| BTC
+    CP -->|"CMAKE_PREFIX_PATH points at install prefix/"| ITC
+
+```
+
+The build-tree path hand-authors imported targets that point back into the
+producer build directory. The install-tree path loads exported targets from the
+install prefix and resolves `llama` and `nlohmann_json` through
+`find_dependency`.
+
 ## Generation Flow Inside This Repo
 
 ```text
@@ -121,23 +156,6 @@ This file creates imported targets that point back into the producer build tree:
 - `ZooKeeper::zoo_core`
   - compatibility forwarding target to `ZooKeeper::zoo`
 
-Diagram:
-
-```text
-consumer project
-    |
-    +-- find_package(ZooKeeper CONFIG)
-            |
-            +-- build/ZooKeeperConfig.cmake
-                    |
-                    +-- creates imported target ZooKeeper::zoo
-                    |       IMPORTED_LOCATION = <producer build>/libzoo.a
-                    |       INCLUDE_DIRS      = <producer source>/include + generated headers
-                    |
-                    +-- creates imported target ZooKeeper::llama
-                    +-- creates imported target ZooKeeper::nlohmann_json
-```
-
 Use this when:
 
 - you want to smoke-test packaging without installing first
@@ -160,22 +178,6 @@ Its job is mostly dependency setup:
   - `ZooKeeper::nlohmann_json`
 - include the installed exported targets file:
   - `ZooKeeperTargets.cmake`
-
-Diagram:
-
-```text
-consumer project
-    |
-    +-- find_package(ZooKeeper CONFIG)
-            |
-            +-- <prefix>/lib/cmake/ZooKeeper/ZooKeeperConfig.cmake
-                    |
-                    +-- find_dependency(llama)
-                    +-- find_dependency(nlohmann_json)
-                    +-- include(ZooKeeperTargets.cmake)
-                            |
-                            +-- defines imported target ZooKeeper::zoo
-```
 
 Use this when:
 
