@@ -29,14 +29,41 @@ Expected<nlohmann::json> invoke_tool_handler(tools::ToolHandler& handler, nlohma
     }
 }
 
+void defer_thread_join(std::thread worker) {
+    if (!worker.joinable()) {
+        return;
+    }
+    std::thread([worker = std::move(worker)]() mutable {
+        worker.join();
+    }).detach();
+}
+
 } // namespace
 
 ToolExecutor::Handle::Handle(std::future<Expected<nlohmann::json>> future,
                              std::shared_ptr<JobControl> control) noexcept
     : future_(std::move(future)), control_(std::move(control)) {}
 
+ToolExecutor::Handle::~Handle() {
+    release_worker();
+}
+
 Expected<nlohmann::json> ToolExecutor::Handle::get() {
-    return future_.get();
+    auto result = future_.get();
+    release_worker();
+    return result;
+}
+
+void ToolExecutor::Handle::release_worker() {
+    if (!control_) {
+        return;
+    }
+    std::thread worker;
+    {
+        std::lock_guard lock(control_->mutex);
+        worker = std::move(control_->worker);
+    }
+    defer_thread_join(std::move(worker));
 }
 
 void ToolExecutor::Handle::abandon() {
@@ -47,6 +74,7 @@ void ToolExecutor::Handle::abandon() {
         std::lock_guard lock(control_->mutex);
         control_->abandoned = true;
     }
+    release_worker();
 }
 
 ToolExecutor::ToolExecutor() = default;
@@ -66,8 +94,8 @@ ToolExecutor::Handle ToolExecutor::submit(tools::ToolHandler handler, nlohmann::
 
     auto control = std::make_shared<JobControl>();
     try {
-        std::thread([control, promise, handler = std::move(handler),
-                     args = std::move(args)]() mutable {
+        control->worker = std::thread([control, promise, handler = std::move(handler),
+                                       args = std::move(args)]() mutable {
             auto result = invoke_tool_handler(handler, args);
             {
                 std::lock_guard lock(control->mutex);
@@ -76,7 +104,7 @@ ToolExecutor::Handle ToolExecutor::submit(tools::ToolHandler handler, nlohmann::
                 }
             }
             promise->set_value(std::move(result));
-        }).detach();
+        });
     } catch (const std::exception& e) {
         ZOO_LOG("error", "failed to start tool handler thread: %s", e.what());
         promise->set_value(std::unexpected(

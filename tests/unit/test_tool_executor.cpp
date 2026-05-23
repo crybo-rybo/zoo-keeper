@@ -8,10 +8,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 using namespace std::chrono_literals;
 
@@ -92,6 +94,37 @@ TEST(ToolExecutorTest, AbandonedBlockedJobDoesNotStarveLaterSubmissions) {
     EXPECT_EQ((*result)["sum"].get<int>(), 3);
 
     release->set_value();
+}
+
+TEST(ToolExecutorTest, AbandonedHandlerThreadIsJoined) {
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+    auto finished = std::make_shared<std::atomic<bool>>(false);
+
+    zoo::internal::agent::ToolExecutor executor;
+    auto blocked = executor.submit(
+        [entered, release_future,
+         finished](const nlohmann::json&) mutable -> zoo::Expected<nlohmann::json> {
+            entered->set_value();
+            release_future.wait();
+            finished->store(true, std::memory_order_release);
+            return nlohmann::json{{"ok", true}};
+        },
+        nlohmann::json{});
+    ASSERT_EQ(entered_future.wait_for(3s), std::future_status::ready);
+
+    blocked.abandon();
+    release->set_value();
+
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (finished->load(std::memory_order_acquire)) {
+            break;
+        }
+        std::this_thread::sleep_for(50ms);
+    }
+    EXPECT_TRUE(finished->load(std::memory_order_acquire));
 }
 
 TEST(ToolExecutorTest, HandlerExceptionMapsToToolExecutionFailed) {

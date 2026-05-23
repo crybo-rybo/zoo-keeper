@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <thread>
 
 namespace zoo::internal::agent {
 
@@ -22,7 +23,7 @@ namespace zoo::internal::agent {
  *
  * Each submitted handler owns its callable, arguments, and promise. The caller can abandon the
  * returned handle during cancellation or shutdown without waiting for user code that may be blocked
- * indefinitely.
+ * indefinitely. Handler threads are joined asynchronously after completion or abandonment.
  */
 class ToolExecutor {
   private:
@@ -36,6 +37,7 @@ class ToolExecutor {
         Handle& operator=(const Handle&) = delete;
         Handle(Handle&&) noexcept = default;
         Handle& operator=(Handle&&) noexcept = default;
+        ~Handle();
 
         template <typename Rep, typename Period>
         [[nodiscard]] std::future_status
@@ -51,6 +53,8 @@ class ToolExecutor {
 
         Handle(std::future<Expected<nlohmann::json>> future,
                std::shared_ptr<JobControl> control) noexcept;
+
+        void release_worker();
 
         std::future<Expected<nlohmann::json>> future_;
         std::shared_ptr<JobControl> control_;
@@ -77,6 +81,7 @@ class ToolExecutor {
     struct JobControl {
         std::mutex mutex;
         bool abandoned = false;
+        std::thread worker;
     };
 
     std::atomic<bool> shutdown_{false};
