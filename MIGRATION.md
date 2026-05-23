@@ -16,6 +16,48 @@ does not change Zoo-Keeper's public API on its own.
 - Custom `ZOO_LLAMA_TAG` or archive URL overrides still require an explicit
   matching `ZOO_LLAMA_SHA256`.
 
+### Agent Command APIs
+
+Version `1.1.5` still shipped void `set_system_prompt()`, `get_history()`, and
+`clear_history()` helpers that discarded command-lane failures. Those helpers
+are removed in `1.1.6`. Use `try_*` methods or the timeout overloads that
+return `Expected<T>`:
+
+```cpp
+// v1.1.5 — compiled, but failures were silent
+agent->set_system_prompt("You are a helpful assistant.");
+const auto history = agent->get_history();
+agent->clear_history();
+
+// v1.1.6 — required
+agent->try_set_system_prompt("You are a helpful assistant.");
+agent->try_get_history();
+agent->try_clear_history();
+// or: set_system_prompt(..., timeout), get_history(timeout), clear_history(timeout)
+```
+
+### GPU Offload Preflight
+
+Model load now runs a GPU memory-fit check before llama.cpp initialization when
+`n_gpu_layers != 0`. Configurations projected to exceed available device memory
+fail fast with `ErrorCode::ModelLoadFailed` instead of failing later during
+inference. Reduce `n_gpu_layers` or `context_size`, or use
+`GgufInspector::auto_configure()` to derive a safer configuration.
+
+### Tool Loop Behavior
+
+When a model emits multiple structured tool calls in one turn, the agent runtime
+now executes every parsed call before continuing the loop. Enable
+`GenerationOptions::record_tool_trace` to capture per-call diagnostics in
+`TextResponse::tool_trace`.
+
+### Installed Package Identity
+
+`find_package(ZooKeeper CONFIG)` now verifies that the located llama.cpp package
+exposes the same `LLAMA_BUILD_COMMIT` and `LLAMA_BUILD_NUMBER` Zoo-Keeper was
+compiled against. Mismatched or metadata-less llama packages fail at configure
+time with a diagnostic.
+
 ## v1.1.3 → v1.1.4
 
 ### Async Request Controls
