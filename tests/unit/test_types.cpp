@@ -73,6 +73,11 @@ TEST(ToolCallTest, OwnedToolCallProducesBorrowedView) {
     EXPECT_EQ(view.arguments_json, R"({"city":"Boston"})");
 }
 
+TEST(CoreAliasTest, StableCompatibilityAliasesNameOwningTypes) {
+    static_assert(std::same_as<zoo::Message, zoo::OwnedMessage>);
+    static_assert(std::same_as<zoo::ToolCallInfo, zoo::OwnedToolCall>);
+}
+
 TEST(ToolCallTest, ToolCallSpanSupportsBorrowedAndOwnedStorage) {
     const std::array<zoo::ToolCallView, 1> borrowed = {
         zoo::ToolCallView{"call_1", "lookup_weather", R"({"city":"Boston"})"}};

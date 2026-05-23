@@ -317,6 +317,11 @@ retained agent state stays behind `get_history()` and `clear_history()`. Use
 `chat()` for appending a new turn and `complete()` for running against a
 supplied history without mutating the retained conversation.
 
+`OwnedMessage` and `OwnedToolCall` are the ownership-explicit canonical names
+for retained messages and structured tool calls. The older `Message` and
+`ToolCallInfo` names remain stable source-compatible aliases, so existing
+consumers do not need to rename them.
+
 ```cpp
 // Before: scoped history passed owning Message values directly.
 std::vector<zoo::Message> history = {

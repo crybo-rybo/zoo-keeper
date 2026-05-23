@@ -300,9 +300,9 @@ struct OwnedMessage {
     bool operator==(const OwnedMessage& other) const = default;
 };
 
-/// Transitional alias retained for internal code and existing consumers.
+/// Stable source-compatible alias for the owning retained-history message type.
 using Message = OwnedMessage;
-/// Transitional alias retained for internal code and existing consumers.
+/// Stable source-compatible alias for the owning structured tool-call type.
 using ToolCallInfo = OwnedToolCall;
 
 /**
