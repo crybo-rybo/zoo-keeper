@@ -8,6 +8,12 @@ Zoo-Keeper only executes native tool calls emitted by the active model or
 template. If native tool calling is unavailable, the request stays on the text
 path and no synthetic alternate protocol is introduced.
 
+**Runnable references:** [`examples/demo_chat.cpp`](../examples/demo_chat.cpp)
+(typed tools in the interactive loop),
+[`examples/manual_tool_schema.cpp`](../examples/manual_tool_schema.cpp)
+(manual schema + `tool_trace`). Build and run:
+[`examples/README.md`](../examples/README.md).
+
 ```mermaid
 flowchart TD
     START(["User request enters tool loop"])
@@ -256,5 +262,5 @@ overlap.
 
 - [Getting Started](getting-started.md) -- basic Agent setup
 - [Structured Output](extract.md) -- grammar-constrained extraction using the same schema subset
-- [Examples](examples.md) -- complete usage snippets
+- [Examples](../examples/README.md) -- runnable programs
 - [Architecture](architecture.md) -- runtime structure and threading model

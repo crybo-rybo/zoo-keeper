@@ -8,6 +8,10 @@ downloading and a local model catalog. It is only compiled when
 scripts/build.sh -DZOO_BUILD_HUB=ON
 ```
 
+There is no hub-specific example binary yet; the snippets below illustrate API
+shape. Core-layer `GgufInspector` and `SystemProbe` work without enabling the
+hub.
+
 GGUF metadata inspection and hardware-aware auto-configuration live in the
 core layer (`zoo::core::GgufInspector`, `zoo::core::SystemProbe`) so they are
 available without enabling the hub.
@@ -154,4 +158,4 @@ hub-range `zoo::ErrorCode` enumerators.
 
 - [Getting Started](getting-started.md) -- basic Agent setup
 - [Architecture](architecture.md) -- layer design and threading model
-- [Examples](examples.md) -- complete usage snippets including model store
+- [Examples](../examples/README.md) -- runnable agent and core programs

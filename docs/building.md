@@ -347,20 +347,22 @@ The `zoo-keeper.pc` file declares a dependency on `nlohmann_json`. If
 and make sure its `.pc` directory is on `PKG_CONFIG_PATH` alongside
 Zoo-Keeper's.
 
-## Running the Demo
+## Running the Examples
 
 ```bash
 scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
-./build/examples/demo_chat examples/config.example.json
+./build/examples/minimal_agent /path/to/model.gguf
 ```
 
-Additional example executables are built alongside `demo_chat`:
+Full list, usage lines, and config notes:
+[`examples/README.md`](../examples/README.md).
 
-- `demo_extract` - structured extraction examples for stateful, stateless, and streaming flows
-- `model_generate` -- standalone `zoo::core::Model` usage
-- `error_handling` -- practical error reporting patterns
-- `stream_cancel` -- streaming output with cooperative cancellation
-- `manual_tool_schema` -- manual-schema registration through `Agent::register_tool(...)`
+For the interactive chat demo, edit `examples/config.example.json` so
+`model.model_path` points at a local GGUF, then:
+
+```bash
+./build/examples/demo_chat examples/config.example.json
+```
 
 ## See Also
 

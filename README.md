@@ -51,7 +51,7 @@ auto handle = agent->chat("Hello!");
 auto response = handle.await_result().value();
 ```
 
-For CMake integration, configuration, tools, streaming, and error handling, see [Getting Started](docs/getting-started.md) and [Building](docs/building.md).
+For CMake integration, configuration, tools, streaming, and error handling, see [Getting Started](docs/getting-started.md) and [Building](docs/building.md). Runnable programs live under [`examples/`](examples/README.md).
 
 ## Documentation
 
@@ -64,7 +64,7 @@ For CMake integration, configuration, tools, streaming, and error handling, see 
 | [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
 | [Hub Layer](docs/hub.md) | HuggingFace downloading, local model store, and how hub code uses core inspection |
 | [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
-| [Examples](docs/examples.md) | Streaming, cancellation, tools, error handling, model store |
+| [Examples](docs/examples.md) | Runnable programs under `examples/`; API sketches in docs |
 | [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
 | [Migration](MIGRATION.md) | Upgrade notes for major API changes |
 
