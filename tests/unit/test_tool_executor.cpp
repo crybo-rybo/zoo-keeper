@@ -81,7 +81,8 @@ TEST(ToolExecutorTest, DestructorDoesNotBlockOnSlowHandler) {
     {
         zoo::internal::agent::ToolExecutor executor(1);
         (void)executor.submit(
-            [entered, release_future](const nlohmann::json&) mutable -> zoo::Expected<nlohmann::json> {
+            [entered,
+             release_future](const nlohmann::json&) mutable -> zoo::Expected<nlohmann::json> {
                 entered->set_value();
                 release_future.wait_for(5s);
                 return nlohmann::json{{"ok", true}};

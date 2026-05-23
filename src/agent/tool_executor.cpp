@@ -83,8 +83,8 @@ std::future<Expected<nlohmann::json>> ToolExecutor::submit(tools::ToolHandler ha
             return future;
         }
         if (workers_.empty()) {
-            promise->set_value(std::unexpected(Error{
-                ErrorCode::ToolExecutionFailed, "Tool executor has no worker threads"}));
+            promise->set_value(std::unexpected(
+                Error{ErrorCode::ToolExecutionFailed, "Tool executor has no worker threads"}));
             return future;
         }
         state_->queue.push(Job{std::move(handler), std::move(args), std::move(promise)});

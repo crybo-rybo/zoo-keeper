@@ -40,14 +40,13 @@ Expected<HfRepoTagParts> split_repo_tag(const std::string& identifier) {
         auto [repo, tag] = common_download_split_repo_tag(identifier);
         return HfRepoTagParts{std::move(repo), std::move(tag)};
     } catch (const std::invalid_argument&) {
-        return std::unexpected(
-            Error{ErrorCode::InvalidModelIdentifier,
-                  "Repository ID must be in 'owner/repo' or 'owner/repo:tag' format: " +
-                      identifier});
+        return std::unexpected(Error{
+            ErrorCode::InvalidModelIdentifier,
+            "Repository ID must be in 'owner/repo' or 'owner/repo:tag' format: " + identifier});
     } catch (const std::exception& e) {
         return std::unexpected(
-            Error{ErrorCode::DownloadFailed, "Failed to parse repository identifier: " +
-                                                 std::string(e.what())});
+            Error{ErrorCode::DownloadFailed,
+                  "Failed to parse repository identifier: " + std::string(e.what())});
     }
 }
 
