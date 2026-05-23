@@ -56,6 +56,21 @@ Expected<void> validate_download_status(int status, const std::string& url) {
     return {};
 }
 
+Expected<void> validate_explicit_filename(std::string_view filename, std::string_view identifier) {
+    if (filename.empty()) {
+        return std::unexpected(Error{ErrorCode::InvalidModelIdentifier,
+                                     "Empty filename after '::' in: " + std::string(identifier)});
+    }
+    if (filename == "." || filename == ".." || filename.find('\0') != std::string_view::npos ||
+        filename.find('/') != std::string_view::npos ||
+        filename.find('\\') != std::string_view::npos) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidModelIdentifier,
+                  "Explicit filename must be a single path segment: " + std::string(identifier)});
+    }
+    return {};
+}
+
 } // namespace
 
 struct HuggingFaceClient::Impl {
@@ -103,10 +118,8 @@ HuggingFaceClient::parse_identifier(std::string_view identifier) {
     if (double_sep != std::string_view::npos) {
         auto repo_part = identifier.substr(0, double_sep);
         auto filename = identifier.substr(double_sep + 2);
-        if (filename.empty()) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidModelIdentifier,
-                      "Empty filename after '::' in: " + std::string(identifier)});
+        if (auto valid = validate_explicit_filename(filename, identifier); !valid) {
+            return std::unexpected(valid.error());
         }
         result.filename = std::string(filename);
         try {

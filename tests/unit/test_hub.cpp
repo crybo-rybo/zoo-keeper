@@ -162,6 +162,30 @@ TEST(HuggingFaceParseTest, EmptyFilenameAfterSeparator) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
 }
 
+TEST(HuggingFaceParseTest, RejectsUnsafeExplicitFilenames) {
+    std::vector<std::string> identifiers = {
+        "owner/repo::.",
+        "owner/repo::..",
+        "owner/repo::subdir/model.gguf",
+        "owner/repo::subdir\\model.gguf",
+    };
+    identifiers.push_back(std::string("owner/repo::bad") + '\0' + "name.gguf");
+
+    for (const auto& identifier : identifiers) {
+        auto result = zoo::hub::HuggingFaceClient::parse_identifier(identifier);
+        EXPECT_FALSE(result.has_value()) << identifier;
+        EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    }
+}
+
+TEST(HuggingFaceParseTest, ParseSingleSegmentExplicitFilename) {
+    auto result =
+        zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::model.name-v2.Q4_K_M.gguf");
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->filename.has_value());
+    EXPECT_EQ(*result->filename, "model.name-v2.Q4_K_M.gguf");
+}
+
 TEST(HuggingFaceParseTest, MultipleSlashes) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("a/b/c");
     ASSERT_FALSE(result.has_value());
