@@ -58,8 +58,7 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
 | `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |
-| `try_set_system_prompt(text)` | Primary system prompt update API with `Expected<void>` error reporting |
-| `set_system_prompt(text)` | Compatibility best-effort system prompt update |
+| `try_set_system_prompt(text)` | Replace the system prompt; returns command-lane failures |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
 | `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
 | `register_tools(definitions)` | Batch-register multiple tools with one inference-thread command |
@@ -71,16 +70,13 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `register_tool(..., timeout)` | Register a tool with timeout; returns `RequestTimeout` if inference thread is busy |
 | `stop()` | Gracefully shut down the agent |
 | `is_running()` | Check if the agent is accepting requests |
-| `clear_history()` | Clear conversation history |
-| `get_history()` | Get an owning `HistorySnapshot` of the current conversation |
 | `model_config()` | Access the loaded `ModelConfig` |
 | `agent_config()` | Access the loaded `AgentConfig` |
 | `default_generation_options()` | Access the default `GenerationOptions` |
 | `tool_count()` | Number of registered tools |
 
-Fallible command-lane methods are the primary API for new code. The void
-`set_system_prompt()`, `get_history()`, and `clear_history()` forms remain for
-source compatibility, but they intentionally discard command failures.
+Command-lane methods return `Expected<T>` so callers can handle `AgentNotRunning`,
+`RequestTimeout`, and other failures explicitly.
 
 Existing code that passes `GenerationOptions` remains source-compatible. For
 legacy `GenerationOptions{}` arguments, the request still inherits configured
@@ -112,7 +108,7 @@ Runnable sample: [`examples/model_generate.cpp`](../examples/model_generate.cpp)
 
 ### `zoo::MessageView`, `ConversationView`, and `HistorySnapshot`
 
-`MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type; `Message` remains a stable alias for it. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::get_history()` return.
+`MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type; `Message` remains a stable alias for it. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::try_get_history()` return.
 
 Assistant `MessageView` values may carry borrowed `ToolCallView` records via
 `ToolCallSpan`. This is intended for request-scoped adapters that already have

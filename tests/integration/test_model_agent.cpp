@@ -163,7 +163,7 @@ TEST_F(LiveModelIntegrationTest, AgentChatsAndStreams) {
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
 
     auto& agent = *agent_result;
-    agent->set_system_prompt("Reply briefly.");
+    ASSERT_TRUE(agent->try_set_system_prompt("Reply briefly.").has_value());
 
     std::string streamed;
     auto handle = agent->chat("Say hello in one short sentence.", {},
@@ -174,7 +174,9 @@ TEST_F(LiveModelIntegrationTest, AgentChatsAndStreams) {
     EXPECT_FALSE(response->text.empty());
     EXPECT_FALSE(streamed.empty());
 
-    const auto history = agent->get_history();
+    auto history_result = agent->try_get_history();
+    ASSERT_TRUE(history_result.has_value()) << history_result.error().to_string();
+    const auto history = *history_result;
     ASSERT_GE(history.size(), 3u);
     EXPECT_EQ(history[0].role, zoo::Role::System);
     EXPECT_EQ(history[1].role, zoo::Role::User);
@@ -187,13 +189,15 @@ TEST_F(LiveModelIntegrationTest, AgentCompleteDoesNotMutatePersistentHistory) {
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
 
     auto& agent = *agent_result;
-    agent->set_system_prompt("Reply briefly.");
+    ASSERT_TRUE(agent->try_set_system_prompt("Reply briefly.").has_value());
 
     auto persistent = agent->chat("Say hello in one short sentence.");
     auto persistent_response = persistent.await_result();
     ASSERT_TRUE(persistent_response.has_value()) << persistent_response.error().to_string();
 
-    const auto before = agent->get_history();
+    auto before_result = agent->try_get_history();
+    ASSERT_TRUE(before_result.has_value()) << before_result.error().to_string();
+    const auto before = *before_result;
     ASSERT_GE(before.size(), 3u);
 
     std::string streamed;
@@ -210,7 +214,9 @@ TEST_F(LiveModelIntegrationTest, AgentCompleteDoesNotMutatePersistentHistory) {
     EXPECT_FALSE(scoped_response->text.empty());
     EXPECT_FALSE(streamed.empty());
 
-    const auto after = agent->get_history();
+    auto after_result = agent->try_get_history();
+    ASSERT_TRUE(after_result.has_value()) << after_result.error().to_string();
+    const auto after = *after_result;
     EXPECT_EQ(after, before);
 }
 
@@ -227,7 +233,8 @@ TEST_F(LiveModelIntegrationTest, AgentWithToolsHandlesFencedCodePrompt) {
                                     []() { return std::string("2026-03-20 12:00:00"); })
                     .has_value());
 
-    agent->set_system_prompt("You are a helpful assistant with access to tools.");
+    ASSERT_TRUE(agent->try_set_system_prompt("You are a helpful assistant with access to tools.")
+                    .has_value());
 
     auto handle =
         agent->chat("Write a short fenced Python hello-world example and keep the answer brief.");
@@ -251,9 +258,11 @@ TEST_F(LiveModelIntegrationTest, AgentWithToolsInvokesToolForTimeQuery) {
                                     []() { return std::string("2026-03-20 12:00:00"); })
                     .has_value());
 
-    agent->set_system_prompt(
-        "You are a helpful assistant. When the user asks for the current time, you MUST call the "
-        "get_time tool. Do not guess.");
+    ASSERT_TRUE(agent
+                    ->try_set_system_prompt(
+                        "You are a helpful assistant. When the user asks for the current time, you "
+                        "MUST call the get_time tool. Do not guess.")
+                    .has_value());
 
     auto handle = agent->chat("What is the current date and time right now?");
     auto response = handle.await_result();

@@ -253,8 +253,11 @@ int main(int argc, char** argv) {
         if (line == "/quit" || line == "/exit")
             break;
         if (line == "/clear") {
-            agent->clear_history();
-            std::cout << "History cleared.\n\n";
+            if (auto result = agent->try_clear_history(); !result) {
+                std::cerr << "Failed to clear history: " << result.error().to_string() << "\n";
+            } else {
+                std::cout << "History cleared.\n\n";
+            }
             continue;
         }
         if (line == "/help") {

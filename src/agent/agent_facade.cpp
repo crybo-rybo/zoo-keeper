@@ -88,10 +88,6 @@ void Agent::cancel(RequestId id) {
     impl_->runtime.cancel(id);
 }
 
-void Agent::set_system_prompt(std::string_view prompt) {
-    impl_->runtime.set_system_prompt(prompt);
-}
-
 Expected<void> Agent::try_set_system_prompt(std::string_view prompt) {
     return impl_->runtime.try_set_system_prompt(prompt);
 }
@@ -117,20 +113,12 @@ bool Agent::is_running() const noexcept {
     return impl_->runtime.is_running();
 }
 
-HistorySnapshot Agent::get_history() const {
-    return impl_->runtime.get_history();
-}
-
 Expected<HistorySnapshot> Agent::try_get_history() const {
     return impl_->runtime.try_get_history();
 }
 
 Expected<HistorySnapshot> Agent::get_history(std::chrono::nanoseconds timeout) const {
     return impl_->runtime.get_history(timeout);
-}
-
-void Agent::clear_history() {
-    impl_->runtime.clear_history();
 }
 
 Expected<void> Agent::try_clear_history() {

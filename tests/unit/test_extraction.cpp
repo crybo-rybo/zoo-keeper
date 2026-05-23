@@ -195,7 +195,9 @@ TEST(ExtractionRuntimeTest, StatelessExtractDoesNotMutateHistory) {
     });
 
     ASSERT_TRUE(runtime.chat("hello").await_result().has_value());
-    const auto before = runtime.get_history();
+    auto before_result = runtime.try_get_history();
+    ASSERT_TRUE(before_result.has_value()) << before_result.error().to_string();
+    const auto before = *before_result;
 
     const std::array<Message, 2> scoped_messages = {Message::system("Extract entities."),
                                                     Message::user("Bob is 42")};
@@ -205,7 +207,9 @@ TEST(ExtractionRuntimeTest, StatelessExtractDoesNotMutateHistory) {
 
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     EXPECT_EQ(result->data["name"], "Bob");
-    EXPECT_EQ(runtime.get_history(), before);
+    auto after_result = runtime.try_get_history();
+    ASSERT_TRUE(after_result.has_value()) << after_result.error().to_string();
+    EXPECT_EQ(*after_result, before);
 }
 
 TEST(ExtractionRuntimeTest, ExtractStreamsTokens) {

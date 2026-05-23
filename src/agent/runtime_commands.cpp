@@ -34,7 +34,7 @@ template <typename CmdT> auto make_string_cmd(std::string s) {
 template <typename Result, typename Maker>
 Expected<Result> AgentRuntime::send_sync_command(Maker&& make_cmd,
                                                  std::optional<std::chrono::nanoseconds> timeout,
-                                                 std::string_view name) {
+                                                 std::string_view name) const {
     if (!running_.load(std::memory_order_acquire)) {
         return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
     }
@@ -55,10 +55,6 @@ AgentRuntime::set_system_prompt_impl(std::string prompt,
                                      std::optional<std::chrono::nanoseconds> timeout) {
     return send_sync_command<void>(make_string_cmd<SetSystemPromptCmd>(std::move(prompt)), timeout,
                                    "set_system_prompt");
-}
-
-void AgentRuntime::set_system_prompt(std::string_view prompt) {
-    (void)set_system_prompt_impl(std::string(prompt), std::nullopt);
 }
 
 Expected<void> AgentRuntime::try_set_system_prompt(std::string_view prompt) {
@@ -88,13 +84,9 @@ Expected<void> AgentRuntime::add_system_message(std::string_view message,
 
 Expected<HistorySnapshot>
 AgentRuntime::get_history_impl(std::optional<std::chrono::nanoseconds> timeout) const {
-    return const_cast<AgentRuntime*>(this)->send_sync_command<HistorySnapshot>(
+    return send_sync_command<HistorySnapshot>(
         [](auto done) -> Command { return GetHistoryCmd{std::move(done)}; }, timeout,
         "get_history");
-}
-
-HistorySnapshot AgentRuntime::get_history() const {
-    return get_history_impl(std::nullopt).value_or(HistorySnapshot{});
 }
 
 Expected<HistorySnapshot> AgentRuntime::try_get_history() const {
@@ -109,10 +101,6 @@ Expected<void> AgentRuntime::clear_history_impl(std::optional<std::chrono::nanos
     return send_sync_command<void>(
         [](auto done) -> Command { return ClearHistoryCmd{std::move(done)}; }, timeout,
         "clear_history");
-}
-
-void AgentRuntime::clear_history() {
-    (void)clear_history_impl(std::nullopt);
 }
 
 Expected<void> AgentRuntime::try_clear_history() {
