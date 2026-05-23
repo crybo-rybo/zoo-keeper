@@ -29,7 +29,7 @@ endfunction()
 
 function(zoo_apply_llama_common_workarounds)
     if(TARGET llama-common AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        # b8992 common/ngram-mod.cpp uses std::fill without including <algorithm>.
+        # b9296 common/ngram-mod.cpp uses std::fill without including <algorithm>.
         # libstdc++ pulls <algorithm> transitively via other STL headers used by the
         # file, so GCC builds compile cleanly; libc++ is stricter and fails. If a
         # future GCC build also fails here, drop the gate and apply unconditionally.

@@ -2,6 +2,20 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## v1.1.5 → v1.1.6
+
+### llama.cpp b9296
+
+Zoo-Keeper now pins llama.cpp release `b9296` (was `b8992`). The llama.cpp bump
+does not change Zoo-Keeper's public API on its own.
+
+- Parent projects that provide llama.cpp must expose both `llama` and
+  `llama-common` targets at a compatible build.
+- Installed-package consumers must match the `LLAMA_BUILD_COMMIT` and
+  `LLAMA_BUILD_NUMBER` that Zoo-Keeper was built against.
+- Custom `ZOO_LLAMA_TAG` or archive URL overrides still require an explicit
+  matching `ZOO_LLAMA_SHA256`.
+
 ## v1.1.3 → v1.1.4
 
 ### Async Request Controls

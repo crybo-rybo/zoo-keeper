@@ -18,6 +18,7 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+- Updated the pinned llama.cpp release tag to `b9296`.
 - Documentation now consistently describes GGUF inspection, system probing, and
   hardware-aware auto-configuration as `zoo::core` APIs, while the optional
   `zoo::hub` layer owns HuggingFace downloads and the local model store.

@@ -67,7 +67,7 @@ can affect Core, Hub, and packaging code.
 - **Do not local-patch fetched llama.cpp sources.** FetchContent re-fetches
   the pinned tag on every clean build, so any in-place edits would be silently
   discarded. Carry compatibility workarounds in `cmake/ZooKeeperLlama.cmake`
-  instead — see `zoo_apply_llama_common_workarounds()` for the b8992
+  instead — see `zoo_apply_llama_common_workarounds()` for the b9296
   `-include algorithm` pattern.
 - **Test fixtures are vendored under `tests/fixtures/`.** Do not depend on
   files inside the FetchContent cache (`build/_deps/llama_cpp-src/`); those
