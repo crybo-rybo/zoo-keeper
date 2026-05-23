@@ -85,6 +85,24 @@ TEST(SchemaGrammarTest, NumberType) {
     EXPECT_NE(grammar.find("number ::="), std::string::npos);
 }
 
+TEST(SchemaGrammarTest, NumericPrimitivesUseJsonNumberForms) {
+    auto grammar = GrammarBuilder::build_schema({});
+
+    EXPECT_NE(grammar.find(R"(integer ::= "-"? ("0" | [1-9] [0-9]*))"), std::string::npos);
+    EXPECT_NE(grammar.find(R"(number ::= "-"? ("0" | [1-9] [0-9]*))"), std::string::npos);
+    EXPECT_EQ(grammar.find(R"(integer ::= "-"? [0-9]+)"), std::string::npos);
+    EXPECT_EQ(grammar.find(R"(number ::= "-"? [0-9]+)"), std::string::npos);
+}
+
+TEST(SchemaGrammarTest, StringPrimitiveModelsJsonEscapesAndControlCharacters) {
+    auto grammar = GrammarBuilder::build_schema({});
+
+    EXPECT_NE(grammar.find(R"(string ::= "\"" ([^"\\\x00-\x1F])"), std::string::npos);
+    EXPECT_NE(grammar.find(R"(["\\/bfnrt])"), std::string::npos);
+    EXPECT_NE(grammar.find(R"("u" hex hex hex hex)"), std::string::npos);
+    EXPECT_NE(grammar.find("hex ::= [0-9a-fA-F]"), std::string::npos);
+}
+
 TEST(SchemaGrammarTest, BooleanType) {
     std::vector<ToolParameter> params = {
         {"active", ToolValueType::Boolean, true, "", {}},
