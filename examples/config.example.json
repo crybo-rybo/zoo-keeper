@@ -10,7 +10,8 @@
         "max_history_messages": 64,
         "request_queue_capacity": 64,
         "max_tool_iterations": 5,
-        "max_tool_retries": 2
+        "max_tool_retries": 2,
+        "tool_worker_threads": 2
     },
     "generation": {
         "max_tokens": -1,

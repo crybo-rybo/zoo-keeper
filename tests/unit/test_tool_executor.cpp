@@ -30,7 +30,7 @@ zoo::tools::ToolHandler make_add_handler() {
 TEST(ToolExecutorTest, ConcurrentJobsCompleteWithFixedWorkerPool) {
     zoo::internal::agent::ToolExecutor executor(2);
 
-    std::vector<std::future<zoo::Expected<nlohmann::json>>> futures;
+    std::vector<zoo::internal::agent::ToolExecutor::Handle> futures;
     futures.reserve(6);
     for (int i = 0; i < 6; ++i) {
         futures.push_back(executor.submit(make_add_handler(), nlohmann::json{{"a", i}, {"b", 1}}));
@@ -90,6 +90,32 @@ TEST(ToolExecutorTest, DestructorDoesNotBlockOnSlowHandler) {
             nlohmann::json{});
         ASSERT_EQ(entered_future.wait_for(3s), std::future_status::ready);
     }
+
+    release->set_value();
+}
+
+TEST(ToolExecutorTest, AbandonedBlockedJobDoesNotStarveLaterSubmissions) {
+    auto entered = std::make_shared<std::promise<void>>();
+    auto entered_future = entered->get_future();
+    auto release = std::make_shared<std::promise<void>>();
+    auto release_future = release->get_future().share();
+
+    zoo::internal::agent::ToolExecutor executor(1);
+    auto blocked = executor.submit(
+        [entered, release_future](const nlohmann::json&) mutable -> zoo::Expected<nlohmann::json> {
+            entered->set_value();
+            release_future.wait_for(5s);
+            return nlohmann::json{{"ok", true}};
+        },
+        nlohmann::json{});
+    ASSERT_EQ(entered_future.wait_for(3s), std::future_status::ready);
+
+    blocked.abandon();
+    auto fast = executor.submit(make_add_handler(), nlohmann::json{{"a", 1}, {"b", 2}});
+    ASSERT_EQ(fast.wait_for(3s), std::future_status::ready);
+    const auto result = fast.get();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ((*result)["sum"].get<int>(), 3);
 
     release->set_value();
 }
