@@ -367,6 +367,7 @@ TEST(AgentConfigJsonTest, RoundTripsSerializableFields) {
     config.max_tool_retries = 1;
 
     const nlohmann::json json = config;
+    EXPECT_FALSE(json.contains("tool_worker_threads"));
     const auto round_trip = json.get<zoo::AgentConfig>();
     EXPECT_EQ(round_trip, config);
 }
