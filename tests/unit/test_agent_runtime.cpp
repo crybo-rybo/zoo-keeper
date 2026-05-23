@@ -38,6 +38,7 @@ using zoo::Role;
 using zoo::TextResponse;
 using zoo::TokenAction;
 using zoo::TokenCallback;
+using zoo::ToolCallInfo;
 using zoo::ToolInvocationStatus;
 using zoo::internal::agent::AgentBackend;
 using zoo::internal::agent::AgentRuntime;
@@ -211,6 +212,20 @@ GenerationResult tool_call_generation(const std::string& tool_name, const nlohma
                                       std::string id = "call-1") {
     nlohmann::json payload = {{"id", std::move(id)}, {"name", tool_name}, {"arguments", arguments}};
     return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true, "", {}};
+}
+
+ToolCallInfo tool_call_info(std::string id, std::string name, const nlohmann::json& arguments) {
+    return ToolCallInfo{std::move(id), std::move(name), arguments.dump()};
+}
+
+GenerationResult structured_tool_call_generation(std::vector<ToolCallInfo> calls,
+                                                 std::string content = "") {
+    GenerationResult result;
+    result.text = content;
+    result.tool_call_detected = true;
+    result.parsed_content = std::move(content);
+    result.tool_calls = std::move(calls);
+    return result;
 }
 
 nlohmann::json simple_extraction_schema() {
@@ -640,6 +655,100 @@ TEST(AgentRuntimeTest, ToolLoopReturnsTraceOnlyWhenRequested) {
     ASSERT_TRUE(result->tool_trace.has_value());
     ASSERT_EQ(result->tool_trace->invocations.size(), 1u);
     EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
+}
+
+TEST(AgentRuntimeTest, StructuredTurnExecutesAllToolCallsInOrder) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto double_def = zoo::tools::detail::make_tool_definition("double", "Double a number",
+                                                               std::vector<std::string>{"value"},
+                                                               [](int value) { return value * 2; });
+    auto square_def = zoo::tools::detail::make_tool_definition(
+        "square", "Square a number", std::vector<std::string>{"value"},
+        [](int value) { return value * value; });
+    ASSERT_TRUE(double_def.has_value()) << double_def.error().to_string();
+    ASSERT_TRUE(square_def.has_value()) << square_def.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*double_def)).has_value());
+    ASSERT_TRUE(runtime.register_tool(std::move(*square_def)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(structured_tool_call_generation({
+            tool_call_info("call-1", "double", {{"value", 5}}),
+            tool_call_info("call-2", "square", {{"value", 4}}),
+        }));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto result = runtime.chat("run both tools", options).await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "done");
+    ASSERT_TRUE(result->tool_trace.has_value());
+    ASSERT_EQ(result->tool_trace->invocations.size(), 2u);
+    EXPECT_EQ(result->tool_trace->invocations[0].id, "call-1");
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::Succeeded);
+    EXPECT_EQ(result->tool_trace->invocations[1].id, "call-2");
+    EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 5u);
+    EXPECT_EQ(history[1].role, Role::Assistant);
+    ASSERT_EQ(history[1].tool_calls.size(), 2u);
+    EXPECT_EQ(history[1].tool_calls[0].id, "call-1");
+    EXPECT_EQ(history[1].tool_calls[1].id, "call-2");
+    EXPECT_EQ(history[2].role, Role::Tool);
+    EXPECT_EQ(history[2].tool_call_id, "call-1");
+    EXPECT_EQ(history[3].role, Role::Tool);
+    EXPECT_EQ(history[3].tool_call_id, "call-2");
+    EXPECT_EQ(history[4].content, "done");
+}
+
+TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterValidationFailure) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto definition = zoo::tools::detail::make_tool_definition("double", "Double a number",
+                                                               std::vector<std::string>{"value"},
+                                                               [](int value) { return value * 2; });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(structured_tool_call_generation({
+            tool_call_info("call-bad", "double", {{"wrong", 5}}),
+            tool_call_info("call-good", "double", {{"value", 7}}),
+        }));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto result = runtime.chat("run both tools", options).await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    ASSERT_TRUE(result->tool_trace.has_value());
+    ASSERT_EQ(result->tool_trace->invocations.size(), 2u);
+    EXPECT_EQ(result->tool_trace->invocations[0].id, "call-bad");
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::ValidationFailed);
+    EXPECT_EQ(result->tool_trace->invocations[1].id, "call-good");
+    EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 5u);
+    EXPECT_EQ(history[2].role, Role::Tool);
+    EXPECT_EQ(history[2].tool_call_id, "call-bad");
+    EXPECT_NE(history[2].content.find("Please correct the arguments."), std::string::npos);
+    EXPECT_EQ(history[3].role, Role::Tool);
+    EXPECT_EQ(history[3].tool_call_id, "call-good");
 }
 
 TEST(AgentRuntimeTest, ToolCallingWorksAfterSchemaExtractionRestoresToolGrammar) {
