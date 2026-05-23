@@ -12,6 +12,7 @@ if(ZOO_BUILD_TESTS)
         unit/test_schema_grammar.cpp
         unit/test_error_recovery.cpp
         unit/test_batch.cpp
+        unit/test_gpu_fit.cpp
         unit/test_prompt_bookkeeping.cpp
         unit/test_agent_mailbox.cpp
         unit/test_agent_runtime.cpp
@@ -31,7 +32,6 @@ if(ZOO_BUILD_TESTS)
     target_link_libraries(zoo_tests
         PRIVATE
             zoo
-            $<BUILD_INTERFACE:llama-common>
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
@@ -52,6 +52,12 @@ if(ZOO_BUILD_TESTS)
         PROPERTIES
             LABELS "unit"
     )
+    add_test(NAME ZooKeeperLlamaIdentityRejectsMismatch
+        COMMAND ${CMAKE_COMMAND} -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_llama_identity_mismatch.cmake")
+    set_tests_properties(ZooKeeperLlamaIdentityRejectsMismatch PROPERTIES
+        LABELS "unit;packaging"
+        WILL_FAIL TRUE)
 
     zoo_apply_strict_target_options(zoo_tests)
 endif()

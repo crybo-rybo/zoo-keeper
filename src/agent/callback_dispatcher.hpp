@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <exception>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -54,16 +55,22 @@ class CallbackDispatcher {
     /**
      * @brief Enqueues a callback invocation for execution on the dispatcher thread.
      *
-     * The token string is copied into the queue. The callback reference must
-     * remain valid until `dispatch()` returns (action callbacks) or until the
-     * next `drain()` returns (void callbacks).
+     * The token string and callback are copied into the queue so async entries
+     * do not depend on request-slot-owned callback storage.
      */
-    TokenAction dispatch(AsyncTokenCallback& callback, std::string_view token) {
-        if (callback.returns_action()) {
-            return dispatch_sync(callback, token);
+    TokenAction dispatch(std::shared_ptr<AsyncTokenCallback> callback, std::string_view token) {
+        if (!callback || !*callback) {
+            return TokenAction::Continue;
         }
-        dispatch_async(callback, token);
+        if (callback->returns_action()) {
+            return dispatch_sync(std::move(callback), token);
+        }
+        dispatch_async(std::move(callback), token);
         return TokenAction::Continue;
+    }
+
+    TokenAction dispatch(AsyncTokenCallback& callback, std::string_view token) {
+        return dispatch(std::make_shared<AsyncTokenCallback>(callback), token);
     }
 
     /**
@@ -86,7 +93,7 @@ class CallbackDispatcher {
 
   private:
     struct Entry {
-        AsyncTokenCallback* callback;
+        std::shared_ptr<AsyncTokenCallback> callback;
         std::string token;
         // Set for action-returning callbacks; the inference thread waits on it.
         // Null for void-returning callbacks; exceptions are captured into
@@ -94,7 +101,8 @@ class CallbackDispatcher {
         std::shared_ptr<std::promise<TokenAction>> done;
     };
 
-    TokenAction dispatch_sync(AsyncTokenCallback& callback, std::string_view token) {
+    TokenAction dispatch_sync(std::shared_ptr<AsyncTokenCallback> callback,
+                              std::string_view token) {
         auto done = std::make_shared<std::promise<TokenAction>>();
         auto future = done->get_future();
         {
@@ -102,19 +110,19 @@ class CallbackDispatcher {
             if (shutdown_) {
                 return TokenAction::Continue;
             }
-            queue_.push(Entry{&callback, std::string(token), std::move(done)});
+            queue_.push(Entry{std::move(callback), std::string(token), std::move(done)});
         }
         cv_.notify_one();
         return future.get();
     }
 
-    void dispatch_async(AsyncTokenCallback& callback, std::string_view token) {
+    void dispatch_async(std::shared_ptr<AsyncTokenCallback> callback, std::string_view token) {
         std::exception_ptr captured;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             captured = std::exchange(failure_, nullptr);
             if (!shutdown_) {
-                queue_.push(Entry{&callback, std::string(token), nullptr});
+                queue_.push(Entry{std::move(callback), std::string(token), nullptr});
             }
         }
         cv_.notify_one();

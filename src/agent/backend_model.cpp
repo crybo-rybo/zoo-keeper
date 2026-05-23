@@ -22,14 +22,7 @@ class ModelBackend final : public AgentBackend {
     Expected<GenerationResult> generate_from_history(const GenerationOptions& options,
                                                      TokenCallback on_token,
                                                      CancellationCallback should_cancel) override {
-        auto result = model_->generate_from_history(options, on_token, should_cancel);
-        if (!result) {
-            return std::unexpected(result.error());
-        }
-
-        return GenerationResult{std::move(result->text), result->prompt_tokens,
-                                result->tool_call_detected, std::move(result->parsed_content),
-                                std::move(result->tool_calls)};
+        return model_->generate_from_history(options, on_token, should_cancel);
     }
 
     void finalize_response() override {
@@ -43,9 +36,6 @@ class ModelBackend final : public AgentBackend {
     }
     void clear_history() override {
         model_->clear_history();
-    }
-    void replace_history(HistorySnapshot snapshot) override {
-        model_->replace_history(std::move(snapshot));
     }
     HistorySnapshot swap_history(HistorySnapshot snapshot) override {
         return model_->swap_history(std::move(snapshot));
@@ -68,8 +58,7 @@ class ModelBackend final : public AgentBackend {
     }
 
     ParsedToolResponse parse_tool_response(std::string_view text) const override {
-        auto parsed = model_->parse_tool_response(text);
-        return ParsedToolResponse{std::move(parsed.content), std::move(parsed.tool_calls)};
+        return model_->parse_tool_response(text);
     }
 
     const char* tool_calling_format_name() const noexcept override {

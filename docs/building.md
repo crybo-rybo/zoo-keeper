@@ -125,12 +125,21 @@ C++23 support is required (`std::expected`, defaulted comparison operators).
 | [Graphviz](https://graphviz.org/) | host tool | System package | Optional for call graphs and include diagrams |
 
 `nlohmann/json` and `llama.cpp` are both downloaded automatically during CMake
-configuration. To pin a different llama.cpp release tag, set `ZOO_LLAMA_TAG` in
-`cmake/ZooKeeperOptions.cmake` (or override via `-DZOO_LLAMA_TAG=...`). If your
+configuration. To pin a different llama.cpp release tag, set `ZOO_LLAMA_TAG`
+and the matching `ZOO_LLAMA_SHA256` in `cmake/ZooKeeperOptions.cmake` (or
+override both via `-D...`). CMake rejects custom llama.cpp tags or archive URLs
+that do not provide a non-default digest. If your
 parent project already defines `llama` and `llama-common` CMake targets,
 Zoo-Keeper reuses them and skips its own fetch. Installed-package consumers
 still need a discoverable `nlohmann_json` package because the public headers
 include `<nlohmann/json.hpp>`.
+
+When GPU offload is enabled, `Model::load()` preflights the requested
+llama.cpp model/context parameters against available device memory. If llama.cpp
+would need to reduce GPU layers, adjust context, split tensors differently, or
+move tensors to another buffer type to fit, Zoo-Keeper rejects the load with a
+structured `ModelLoadFailed` error instead of letting a risky Metal/CUDA
+configuration reach inference.
 
 ## Running Tests
 
@@ -146,7 +155,9 @@ scripts/test.sh --verbose
 ```
 
 Hub-layer unit tests (`tests/unit/test_hub.cpp`) are only compiled when the hub
-layer is enabled. To include them, configure with `-DZOO_BUILD_HUB=ON`:
+layer is enabled. Core auto-configuration and GGUF inspection tests are useful
+to run beside them because the hub store reuses those core APIs. To include the
+hub tests, configure with `-DZOO_BUILD_HUB=ON`:
 
 ```bash
 scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON
@@ -313,6 +324,10 @@ Make sure `nlohmann_json` is also installed and discoverable via
 `CMAKE_PREFIX_PATH` or `nlohmann_json_DIR`. `ZooKeeperConfig.cmake` resolves it
 transitively with `find_dependency(nlohmann_json CONFIG)`, so consumers do not
 need a separate `target_link_libraries(... nlohmann_json::nlohmann_json)` line.
+The installed config also verifies the located `llama` package exposes the same
+`LLAMA_BUILD_COMMIT` and `LLAMA_BUILD_NUMBER` that Zoo-Keeper was built
+against; packages without that metadata, or with a different llama.cpp build,
+fail during CMake configure with a diagnostic.
 
 Example:
 

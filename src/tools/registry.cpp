@@ -5,10 +5,36 @@
 
 #include "zoo/tools/registry.hpp"
 
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <unordered_set>
 
 namespace zoo::tools {
 namespace detail {
+namespace {
+
+bool is_safe_int(const nlohmann::json& value) {
+    constexpr auto kMin = std::numeric_limits<int>::min();
+    constexpr auto kMax = std::numeric_limits<int>::max();
+
+    if (value.is_number_unsigned()) {
+        return value.get<std::uint64_t>() <= static_cast<std::uint64_t>(kMax);
+    }
+    if (value.is_number_integer()) {
+        const auto number = value.get<std::int64_t>();
+        return number >= static_cast<std::int64_t>(kMin) &&
+               number <= static_cast<std::int64_t>(kMax);
+    }
+    if (value.is_number_float()) {
+        const auto number = value.get<double>();
+        return std::isfinite(number) && std::trunc(number) == number &&
+               number >= static_cast<double>(kMin) && number <= static_cast<double>(kMax);
+    }
+    return false;
+}
+
+} // namespace
 
 nlohmann::json build_parameters_schema(const std::vector<ToolParameter>& parameters) {
     nlohmann::json properties = nlohmann::json::object();
@@ -56,7 +82,7 @@ Expected<ToolValueType> parse_tool_value_type(std::string_view value) {
 bool json_matches_type(const nlohmann::json& value, ToolValueType type) {
     switch (type) {
     case ToolValueType::Integer:
-        return value.is_number_integer();
+        return is_safe_int(value);
     case ToolValueType::Number:
         return value.is_number();
     case ToolValueType::String:

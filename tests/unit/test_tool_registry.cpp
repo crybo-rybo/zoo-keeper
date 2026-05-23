@@ -5,9 +5,12 @@
 
 #include "fixtures/tool_definitions.hpp"
 #include "zoo/tools/registry.hpp"
+#include "zoo/tools/validation.hpp"
 #include <chrono>
+#include <cstdint>
 #include <future>
 #include <gtest/gtest.h>
+#include <limits>
 #include <thread>
 
 using json = nlohmann::json;
@@ -224,6 +227,21 @@ TEST(ToolDefinitionFactoryTest, TypedCallableBuildsMetadataAndHandler) {
     EXPECT_EQ((*result)["result"], 7);
 }
 
+TEST(ToolDefinitionFactoryTest, TypedIntegerHandlerAcceptsValidatedIntegralFloat) {
+    auto definition = zoo::tools::make_tool_definition("double_it", "Double an integer", {"x"},
+                                                       [](int x) { return x * 2; });
+    ASSERT_TRUE(definition.has_value()) << definition.error().to_string();
+
+    zoo::tools::ToolCall tool_call{"call-1", "double_it", {{"x", 3.0}}};
+    auto validation =
+        zoo::tools::ToolArgumentsValidator{}.validate(tool_call, definition->metadata);
+    ASSERT_TRUE(validation.has_value()) << validation.error().to_string();
+
+    auto result = definition->handler(tool_call.arguments);
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ((*result)["result"], 6);
+}
+
 TEST(ToolDefinitionFactoryTest, JsonSchemaBuildsMetadataAndHandler) {
     json schema = {{"type", "object"},
                    {"properties",
@@ -357,9 +375,37 @@ TEST(JsonMatchesTypeTest, IntegerMatchesInteger) {
     EXPECT_TRUE(detail::json_matches_type(json(42), zoo::tools::ToolValueType::Integer));
 }
 
-TEST(JsonMatchesTypeTest, FloatDoesNotMatchInteger) {
-    // JSON floats are not integers
+TEST(JsonMatchesTypeTest, IntegralFloatsMatchInteger) {
+    EXPECT_TRUE(detail::json_matches_type(json(3.0), zoo::tools::ToolValueType::Integer));
+    EXPECT_TRUE(detail::json_matches_type(json(-42.0), zoo::tools::ToolValueType::Integer));
+    EXPECT_TRUE(detail::json_matches_type(json(0.0), zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, FractionalFloatsDoNotMatchInteger) {
     EXPECT_FALSE(detail::json_matches_type(json(3.14), zoo::tools::ToolValueType::Integer));
+    EXPECT_FALSE(detail::json_matches_type(json(-1.5), zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, NonFiniteFloatsDoNotMatchInteger) {
+    EXPECT_FALSE(detail::json_matches_type(json(std::numeric_limits<double>::infinity()),
+                                           zoo::tools::ToolValueType::Integer));
+    EXPECT_FALSE(detail::json_matches_type(json(std::numeric_limits<double>::quiet_NaN()),
+                                           zoo::tools::ToolValueType::Integer));
+}
+
+TEST(JsonMatchesTypeTest, OutOfRangeNumbersDoNotMatchInteger) {
+    const auto above_int_max = static_cast<std::int64_t>(std::numeric_limits<int>::max()) + 1;
+    const auto below_int_min = static_cast<std::int64_t>(std::numeric_limits<int>::min()) - 1;
+
+    EXPECT_FALSE(
+        detail::json_matches_type(json(above_int_max), zoo::tools::ToolValueType::Integer));
+    EXPECT_FALSE(
+        detail::json_matches_type(json(below_int_min), zoo::tools::ToolValueType::Integer));
+    EXPECT_FALSE(detail::json_matches_type(json(std::numeric_limits<std::uint64_t>::max()),
+                                           zoo::tools::ToolValueType::Integer));
+    EXPECT_FALSE(
+        detail::json_matches_type(json(static_cast<double>(std::numeric_limits<int>::max()) + 1.0),
+                                  zoo::tools::ToolValueType::Integer));
 }
 
 TEST(JsonMatchesTypeTest, IntegerMatchesNumber) {

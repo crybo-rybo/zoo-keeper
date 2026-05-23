@@ -26,8 +26,8 @@ Think of it this way: **llama.cpp is the engine. Zoo-Keeper is the SDK.**
 ```cpp
 // Five lines from zero to a running agent with tools
 auto agent = zoo::Agent::create(config).value();
-agent->set_system_prompt("You are a helpful assistant.");
-agent->register_tool("search", "Search the web", {"query"}, my_search_fn);
+agent->try_set_system_prompt("You are a helpful assistant.").value();
+agent->register_tool("search", "Search the web", {"query"}, my_search_fn).value();
 auto handle = agent->chat("Find flights to Tokyo", {}, on_token);
 auto result = handle.await_result().value();
 ```
@@ -101,10 +101,10 @@ Each layer depends only on the layers below it. Consumers can stop at whichever 
 
 | Layer | Namespace | What it does | Key types |
 |-------|-----------|-------------|-----------|
-| **Hub** *(optional)* | `zoo::hub` | GGUF inspection, HuggingFace downloads, local model store, auto-configuration | `GgufInspector`, `ModelStore`, `HuggingFaceClient` |
+| **Hub** *(optional)* | `zoo::hub` | HuggingFace downloads, local model store, aliases, pulls | `ModelStore`, `HuggingFaceClient` |
 | **Agent** | `zoo::Agent` | Async inference runtime with request queue, per-token streaming, cancellation, agentic tool loop, and structured extraction | `Agent`, `RequestHandle<T>`, `TextResponse`, `ExtractionResponse` |
 | **Tools** | `zoo::tools` | Tool registration, JSON Schema generation from C++ signatures, argument validation. Zero llama.cpp dependency | `ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator` |
-| **Core** | `zoo::core` | Direct synchronous llama.cpp wrapper — model loading, prompt rendering, generation, chat history, KV cache management | `Model`, `ModelConfig`, `GenerationOptions` |
+| **Core** | `zoo::core` | Direct synchronous llama.cpp wrapper, GGUF inspection, hardware probing, auto-configuration | `Model`, `GgufInspector`, `SystemProbe`, `ModelConfig` |
 
 **Threading model:** The Agent owns a single inference thread. Callers submit requests via `chat()`, `complete()`, or `extract()` and receive a `RequestHandle<T>`. Model access is confined to that thread, streaming callbacks run on a callback dispatcher, and tool handlers run on a tool executor worker.
 
@@ -169,8 +169,11 @@ int main() {
     }
 
     // Register a native C++ function as a tool
-    agent->register_tool("add", "Add two integers", {"a", "b"},
-        [](int a, int b) { return a + b; });
+    if (auto tool = agent->register_tool("add", "Add two integers", {"a", "b"},
+            [](int a, int b) { return a + b; }); !tool) {
+        std::cerr << tool.error().to_string() << '\n';
+        return 1;
+    }
 
     // Stream tokens as they arrive
     auto on_token = [](std::string_view token) {
@@ -199,10 +202,11 @@ int main() {
 Register any C++ callable and Zoo-Keeper generates the JSON Schema, detects tool calls from llama.cpp PEG parser output, validates arguments, executes the handler, and feeds results back into the conversation:
 
 ```cpp
-agent->register_tool("get_weather", "Get current weather", {"city"},
-    [](std::string city) -> std::string {
-        return fetch_weather(city);  // Your code
-    });
+auto weather_tool = agent->register_tool("get_weather", "Get current weather", {"city"},
+    [](std::string city) -> std::string { return fetch_weather(city); });
+if (!weather_tool) {
+    std::cerr << weather_tool.error().to_string() << '\n';
+}
 
 // The agent automatically:
 // 1. Detects the model wants to call get_weather
@@ -227,7 +231,7 @@ auto result = handle.await_result().value();
 
 ### Model hub (optional)
 
-Build with `ZOO_BUILD_HUB=ON` for GGUF inspection, HuggingFace downloading, and a local model store. Downloads share the llama.cpp cache — models fetched by any llama.cpp tool are automatically available:
+Build with `ZOO_BUILD_HUB=ON` for HuggingFace downloading and a local model store. Downloads share the llama.cpp cache — models fetched by any llama.cpp tool are automatically available. GGUF inspection and hardware-aware auto-configuration live in `zoo::core` and are available without enabling the hub:
 
 ```cpp
 auto store = zoo::hub::ModelStore::open().value();
@@ -258,14 +262,14 @@ if (!result) {
 | Type | Purpose |
 |------|---------|
 | `zoo::core::Model` | Direct synchronous llama.cpp wrapper — model loading, generation, history, KV cache |
+| `zoo::core::GgufInspector` / `zoo::core::SystemProbe` | GGUF metadata reading and hardware-aware auto-configuration |
 | `zoo::Agent` | Async runtime — request queue, streaming, tool loop, structured extraction |
 | `zoo::tools::ToolRegistry` | Deterministic tool registration with typed callables or JSON Schema handlers; externally synchronize direct multi-threaded use |
 | `zoo::RequestHandle<T>` | Async result handle with `id()`, `ready()`, `await_result()`, cancellation |
 | `zoo::TextResponse` | Generated text + token usage + latency metrics + optional tool trace |
 | `zoo::ExtractionResponse` | Parsed JSON output + raw text + usage + metrics |
 | `zoo::ModelConfig` / `zoo::AgentConfig` / `zoo::GenerationOptions` | Validated configuration with JSON serialization |
-| `zoo::hub::GgufInspector` | GGUF metadata reading without loading weights |
-| `zoo::hub::ModelStore` | Local model catalog with aliases and auto-configuration |
+| `zoo::hub::ModelStore` | Local model catalog with aliases and ModelConfig creation from stored metadata |
 | `zoo::hub::HuggingFaceClient` | HuggingFace downloading with shared llama.cpp cache |
 
 ## Testing
@@ -273,7 +277,7 @@ if (!result) {
 ```bash
 scripts/test.sh                     # Unit tests (pure logic, no model needed)
 
-# Hub-layer unit tests are only built when the hub is enabled
+# Hub and core auto-configuration tests are built when the hub is enabled
 scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON
 scripts/test.sh -R "HuggingFace|ModelStore|AutoConfig|GgufInspector|HubPath"
 
@@ -291,7 +295,7 @@ ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 | [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, history budgets |
 | [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
 | [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
-| [Hub Layer](docs/hub.md) | GGUF inspection, HuggingFace downloading, local model store, auto-configuration |
+| [Hub Layer](docs/hub.md) | HuggingFace downloading, local model store, and how hub code uses core inspection |
 | [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
 | [Examples](docs/examples.md) | Streaming, cancellation, tools, error handling, model store |
 | [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |

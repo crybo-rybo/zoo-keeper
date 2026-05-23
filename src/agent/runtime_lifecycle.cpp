@@ -30,6 +30,7 @@ void AgentRuntime::stop() {
     }
 
     running_.store(false, std::memory_order_release);
+    request_slots_->cancel_all();
     request_mailbox_.shutdown();
     if (inference_thread_.joinable()) {
         inference_thread_.join();

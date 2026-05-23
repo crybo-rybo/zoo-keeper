@@ -18,9 +18,8 @@ history_mutation_requires_kv_reset(PromptHistoryMutation mutation) noexcept {
     return mutation != PromptHistoryMutation::Append;
 }
 
-inline void note_history_mutation(PromptHistoryMutation mutation, bool& cached_messages_dirty,
+inline void note_history_mutation(PromptHistoryMutation mutation,
                                   int& committed_prompt_len) noexcept {
-    cached_messages_dirty = true;
     if (history_mutation_requires_kv_reset(mutation)) {
         committed_prompt_len = 0;
     }

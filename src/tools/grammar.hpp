@@ -159,9 +159,12 @@ class GrammarBuilder {
     }
 
     static std::string primitive_rules() {
-        return "integer ::= \"-\"? [0-9]+\n"
-               "number ::= \"-\"? [0-9]+ (\".\" [0-9]+)? ([eE] [+-]? [0-9]+)?\n"
-               "string ::= \"\\\"\" [^\"\\\\]* (\"\\\\\" [^\\x00] [^\"\\\\]*)* \"\\\"\"\n"
+        return "integer ::= \"-\"? (\"0\" | [1-9] [0-9]*)\n"
+               "number ::= \"-\"? (\"0\" | [1-9] [0-9]*) (\".\" [0-9]+)? "
+               "([eE] [+-]? [0-9]+)?\n"
+               "string ::= \"\\\"\" ([^\"\\\\\\x00-\\x1F] | \"\\\\\" ([\"\\\\/bfnrt] | "
+               "\"u\" hex hex hex hex))* \"\\\"\"\n"
+               "hex ::= [0-9a-fA-F]\n"
                "boolean ::= \"true\" | \"false\"\n"
                "ws ::= [ \\t\\n]*\n";
     }

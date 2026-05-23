@@ -99,7 +99,12 @@ template <typename Result, typename... Args> class FunctionRef<Result(Args...)> 
 };
 
 /**
- * @brief Structured tool call view attached to assistant messages.
+ * @brief Borrowed structured tool call metadata attached to assistant messages.
+ *
+ * Intended for request-scoped adapters that already hold structured tool-call
+ * records, such as OpenAI-compatible chat messages. The referenced strings must
+ * outlive the enclosing `MessageView`/`ConversationView` call; use
+ * `OwnedToolCall` for retained history or asynchronous storage.
  */
 struct ToolCallView {
     std::string_view id;
@@ -134,6 +139,10 @@ struct OwnedToolCall {
 
 /**
  * @brief Lightweight span over either borrowed or owned tool call metadata.
+ *
+ * `ToolCallSpan` never owns the underlying records. Runtime entry points copy
+ * request-scoped `MessageView` values into `OwnedMessage` storage before
+ * enqueueing asynchronous work.
  */
 class ToolCallSpan {
   public:
@@ -300,9 +309,9 @@ struct OwnedMessage {
     bool operator==(const OwnedMessage& other) const = default;
 };
 
-/// Transitional alias retained for internal code and existing consumers.
+/// Stable source-compatible alias for the owning retained-history message type.
 using Message = OwnedMessage;
-/// Transitional alias retained for internal code and existing consumers.
+/// Stable source-compatible alias for the owning structured tool-call type.
 using ToolCallInfo = OwnedToolCall;
 
 /**
@@ -570,6 +579,7 @@ class AsyncTokenCallback {
     bool returns_action_ = false;
 };
 
+/// Stable source-compatible alias for the pre-`TokenAction` async callback name.
 using AsyncTextCallback = AsyncTokenCallback;
 
 /**

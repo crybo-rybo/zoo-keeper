@@ -13,13 +13,18 @@ can affect Core, Hub, and packaging code.
    git checkout -b chore/update-llama-cpp
    ```
 
-2. **Bump `ZOO_LLAMA_TAG`** in `cmake/ZooKeeperOptions.cmake`:
+2. **Bump `ZOO_LLAMA_TAG` and `ZOO_LLAMA_SHA256`** in
+   `cmake/ZooKeeperOptions.cmake`. Keep the values together so the archive
+   digest changes in the same review as the tag:
    ```cmake
    set(ZOO_LLAMA_TAG "<new-release-tag>" CACHE STRING
        "llama.cpp release tag used by FetchContent")
+   set(ZOO_LLAMA_SHA256 "<sha256>" CACHE STRING
+       "Expected SHA-256 digest for the llama.cpp release archive")
    ```
 
-3. **Force a fresh fetch and build.** FetchContent caches sources under
+3. **Force a fresh fetch and build.** FetchContent verifies the downloaded
+   archive against `ZOO_LLAMA_SHA256` and caches sources under
    `build/_deps/`; clear them before reconfiguring so the new SHA is
    actually picked up:
    ```bash

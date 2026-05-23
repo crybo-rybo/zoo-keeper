@@ -10,67 +10,38 @@
 #include "request.hpp"
 #include "zoo/core/types.hpp"
 #include <chrono>
-#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace zoo::internal::agent {
 
 /// RAII guard that invokes a callback on scope exit.
-class ScopeExit {
+template <typename Callback> class ScopeExit {
   public:
-    explicit ScopeExit(std::function<void()> callback) : callback_(std::move(callback)) {}
+    explicit ScopeExit(Callback callback) : callback_(std::move(callback)) {}
 
     ScopeExit(const ScopeExit&) = delete;
     ScopeExit& operator=(const ScopeExit&) = delete;
-    ScopeExit(ScopeExit&& other) noexcept : callback_(std::exchange(other.callback_, {})) {}
-    ScopeExit& operator=(ScopeExit&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
-        if (callback_) {
-            callback_();
-        }
-        callback_ = std::exchange(other.callback_, {});
-        return *this;
-    }
+    ScopeExit(ScopeExit&& other) noexcept(std::is_nothrow_move_constructible_v<Callback>)
+        : callback_(std::move(other.callback_)), active_(std::exchange(other.active_, false)) {}
+    ScopeExit& operator=(ScopeExit&& other) = delete;
 
     ~ScopeExit() {
-        if (callback_) {
+        if (active_) {
             callback_();
         }
     }
 
   private:
-    std::function<void()> callback_;
+    [[no_unique_address]] Callback callback_;
+    bool active_ = true;
 };
 
-/// Scope-owned schema grammar activation for extraction requests.
-class ScopedGrammarOverride {
-  public:
-    static Expected<ScopedGrammarOverride> activate(AgentBackend& backend,
-                                                    const std::string& grammar,
-                                                    std::function<void()> restore_callback) {
-        if (!backend.set_schema_grammar(grammar)) {
-            return std::unexpected(
-                Error{ErrorCode::ExtractionFailed, "Failed to initialize schema grammar"});
-        }
-        return ScopedGrammarOverride(ScopeExit(std::move(restore_callback)));
-    }
-
-    ScopedGrammarOverride(const ScopedGrammarOverride&) = delete;
-    ScopedGrammarOverride& operator=(const ScopedGrammarOverride&) = delete;
-    ScopedGrammarOverride(ScopedGrammarOverride&&) noexcept = default;
-    ScopedGrammarOverride& operator=(ScopedGrammarOverride&&) noexcept = default;
-
-  private:
-    explicit ScopedGrammarOverride(ScopeExit guard) : guard_(std::move(guard)) {}
-
-    ScopeExit guard_;
-};
+template <typename Callback> ScopeExit(Callback) -> ScopeExit<Callback>;
 
 /// Replace backend history with the given messages. Returns error on failure.
 inline HistorySnapshot snapshot_from_messages(const std::vector<Message>& messages) {
@@ -232,7 +203,7 @@ class GenerationRunner {
         : backend_(backend), callback_dispatcher_(callback_dispatcher) {}
 
     Expected<GenerationPassResult> run(const GenerationOptions& options,
-                                       AsyncTokenCallback* streaming_callback,
+                                       std::shared_ptr<AsyncTokenCallback> streaming_callback,
                                        CancellationCallback should_cancel, GenerationStats& stats) {
         int completion_tokens = 0;
         const auto generation_start_time = std::chrono::steady_clock::now();
@@ -241,8 +212,8 @@ class GenerationRunner {
 
         auto callback = [&](std::string_view token) -> TokenAction {
             TokenAction action = TokenAction::Continue;
-            if (streaming_callback != nullptr && *streaming_callback) {
-                action = callback_dispatcher_.dispatch(*streaming_callback, token);
+            if (streaming_callback && *streaming_callback) {
+                action = callback_dispatcher_.dispatch(streaming_callback, token);
             }
             if (!first_token_received_this_pass) {
                 first_token_time_this_pass = std::chrono::steady_clock::now();

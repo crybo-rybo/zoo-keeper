@@ -61,14 +61,6 @@ RequestHandle<TextResponse> AgentRuntime::complete(ConversationView messages,
 }
 
 RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
-                                                        std::string_view user_message,
-                                                        GenerationOverride generation,
-                                                        AsyncTokenCallback callback) {
-    return extract(output_schema, MessageView{Role::User, user_message}, generation,
-                   std::move(callback));
-}
-
-RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& output_schema,
                                                         MessageView message,
                                                         GenerationOverride generation,
                                                         AsyncTokenCallback callback) {

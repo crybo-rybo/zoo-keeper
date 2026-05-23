@@ -85,6 +85,43 @@ TEST(SchemaGrammarTest, NumberType) {
     EXPECT_NE(grammar.find("number ::="), std::string::npos);
 }
 
+TEST(SchemaGrammarTest, NumericPrimitivesUseJsonNumberForms) {
+    auto grammar = GrammarBuilder::build_schema({});
+
+    EXPECT_NE(grammar.find(R"(integer ::= "-"? ("0" | [1-9] [0-9]*))"), std::string::npos);
+    EXPECT_NE(grammar.find(R"(number ::= "-"? ("0" | [1-9] [0-9]*))"), std::string::npos);
+    EXPECT_EQ(grammar.find(R"(integer ::= "-"? [0-9]+)"), std::string::npos);
+    EXPECT_EQ(grammar.find(R"(number ::= "-"? [0-9]+)"), std::string::npos);
+}
+
+TEST(SchemaGrammarTest, StringPrimitiveModelsJsonEscapesAndControlCharacters) {
+    auto grammar = GrammarBuilder::build_schema({});
+
+    EXPECT_NE(grammar.find(R"(string ::= "\"" ([^"\\\x00-\x1F])"), std::string::npos);
+    EXPECT_NE(grammar.find(R"(["\\/bfnrt])"), std::string::npos);
+    EXPECT_NE(grammar.find(R"("u" hex hex hex hex)"), std::string::npos);
+    EXPECT_NE(grammar.find("hex ::= [0-9a-fA-F]"), std::string::npos);
+}
+
+TEST(SchemaGrammarTest, JsonPrimitiveExamplesRoundTripThroughParser) {
+    const std::vector<std::string> valid_examples = {
+        R"({"value":0})",    R"({"value":-12})",           R"({"value":3.5})",
+        R"({"value":1e-9})", R"({"value":"line\nbreak"})", R"({"value":"unicode \u0041"})",
+    };
+    for (const auto& example : valid_examples) {
+        EXPECT_NO_THROW((void)nlohmann::json::parse(example));
+    }
+
+    const std::vector<std::string> invalid_examples = {
+        R"({"value":01})",
+        R"({"value":+1})",
+        "{\"value\":\"bad\ncontrol\"}",
+    };
+    for (const auto& example : invalid_examples) {
+        EXPECT_THROW((void)nlohmann::json::parse(example), nlohmann::json::parse_error);
+    }
+}
+
 TEST(SchemaGrammarTest, BooleanType) {
     std::vector<ToolParameter> params = {
         {"active", ToolValueType::Boolean, true, "", {}},

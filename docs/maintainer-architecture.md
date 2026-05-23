@@ -133,3 +133,16 @@ registry, `ToolExecutor`, and callback dispatcher.
 - `maintainer-cmake-packaging.md` explains build-tree vs install-tree package config generation and usage
 
 If a document starts teaching private command types, mailbox structure, or backend adapter details to normal consumers, that content belongs here instead.
+
+## Docs Drift Checklist
+
+Before release prep or API-facing documentation changes, verify:
+
+- `README.md`, `docs/architecture.md`, and `docs/spec.md` agree on layer
+  ownership and namespaces.
+- `docs/hub.md`, `MIGRATION.md`, and `CHANGELOG.md` describe `ZOO_BUILD_HUB`
+  as enabling HuggingFace downloads and the local model store, not core
+  inspection APIs.
+- `GgufInspector`, `SystemProbe`, and hardware-aware auto-configuration are
+  documented as `zoo::core` APIs.
+- Public examples use names that exist under `include/zoo/` at HEAD.

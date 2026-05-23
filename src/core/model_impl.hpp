@@ -51,7 +51,6 @@ struct Model::Impl {
 
     struct PromptState {
         int committed_prompt_len = 0;
-        bool dirty = true;
     };
 
     struct SamplerPolicy {
@@ -170,7 +169,6 @@ bool rebuild_sampler_with_schema_grammar(Model::Impl& impl);
                                                             std::vector<std::string> base);
 [[nodiscard]] int estimate_tokens(const Model::Impl& impl, std::string_view text);
 [[nodiscard]] int estimate_message_tokens(const Model::Impl& impl, const Message& message);
-void trim_history_to_fit(Model::Impl& impl);
 void rollback_last_message(Model::Impl& impl) noexcept;
 [[nodiscard]] GenerationOptions resolve_generation_options(const Model::Impl& impl,
                                                            GenerationOverride generation);

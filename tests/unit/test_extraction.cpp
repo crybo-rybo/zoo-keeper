@@ -86,11 +86,6 @@ class FakeBackend final : public AgentBackend {
         history_.clear();
     }
 
-    void replace_history(HistorySnapshot snapshot) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        history_ = std::move(snapshot.messages);
-    }
-
     HistorySnapshot swap_history(HistorySnapshot snapshot) override {
         std::lock_guard<std::mutex> lock(mutex_);
         HistorySnapshot previous{std::move(history_)};
@@ -164,7 +159,7 @@ TEST(ExtractionRuntimeTest, ExtractReturnsParsedJson) {
             GenerationResult{R"({"name":"Alice","age":30})", 0, false, "", {}});
     });
 
-    auto handle = runtime.extract(simple_schema(), "Alice is 30");
+    auto handle = runtime.extract(simple_schema(), MessageView{Role::User, "Alice is 30"});
     auto result = handle.await_result();
 
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
@@ -178,7 +173,7 @@ TEST(ExtractionRuntimeTest, InvalidSchemaFailsImmediately) {
                          std::move(backend));
 
     nlohmann::json bad_schema = {{"type", "array"}};
-    auto handle = runtime.extract(bad_schema, "extract");
+    auto handle = runtime.extract(bad_schema, MessageView{Role::User, "extract"});
     auto result = handle.await_result();
 
     ASSERT_FALSE(result.has_value());
@@ -229,7 +224,8 @@ TEST(ExtractionRuntimeTest, ExtractStreamsTokens) {
     });
 
     std::string streamed;
-    auto handle = runtime.extract(simple_schema(), "Alice is 30", GenerationOptions{},
+    auto handle = runtime.extract(simple_schema(), MessageView{Role::User, "Alice is 30"},
+                                  GenerationOptions{},
                                   [&](std::string_view token) { streamed.append(token); });
     auto result = handle.await_result();
 

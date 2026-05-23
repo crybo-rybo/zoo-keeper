@@ -6,15 +6,75 @@
 #include "core/model_impl.hpp"
 #include "zoo/core/model.hpp"
 
+#include "core/gpu_fit.hpp"
+
 #include <array>
 #include <chat.h>
 #include <climits>
 #include <cstdint>
 #include <cstdio>
+#include <fit.h>
 #include <llama.h>
 #include <log.h>
+#include <mutex>
+#include <vector>
 
 namespace zoo::core {
+
+namespace {
+
+constexpr size_t kGpuFitMarginBytes = 1024ULL * 1024ULL * 1024ULL;
+constexpr uint32_t kGpuFitMinimumContext = 4096;
+
+std::mutex& gpu_fit_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+Expected<void> verify_gpu_memory_fit(const Model::Impl& impl,
+                                     const llama_model_params& requested_model_params,
+                                     const llama_context_params& requested_context_params) {
+    if (impl.loaded_.model_config.n_gpu_layers == 0 || !llama_supports_gpu_offload()) {
+        return {};
+    }
+
+    llama_model_params fitted_model_params = requested_model_params;
+    llama_context_params fitted_context_params = requested_context_params;
+
+    const auto max_devices = std::max<size_t>(llama_max_devices(), 1);
+    std::vector<float> tensor_split(max_devices, 0.0f);
+    std::vector<size_t> margins(max_devices, kGpuFitMarginBytes);
+    std::vector<llama_model_tensor_buft_override> tensor_overrides(
+        std::max<size_t>(llama_max_tensor_buft_overrides(), 1), {nullptr, nullptr});
+
+    common_params_fit_status status = COMMON_PARAMS_FIT_STATUS_ERROR;
+    {
+        std::lock_guard<std::mutex> lock(gpu_fit_mutex());
+        status =
+            common_fit_params(impl.loaded_.model_config.model_path.c_str(), &fitted_model_params,
+                              &fitted_context_params, tensor_split.data(), tensor_overrides.data(),
+                              margins.data(), kGpuFitMinimumContext, GGML_LOG_LEVEL_ERROR);
+    }
+
+    if (status == COMMON_PARAMS_FIT_STATUS_ERROR) {
+        return std::unexpected(
+            Error{ErrorCode::ModelLoadFailed, "Failed to estimate GPU memory fit for model: " +
+                                                  impl.loaded_.model_config.model_path});
+    }
+    if (status == COMMON_PARAMS_FIT_STATUS_FAILURE ||
+        !gpu_fit_preserves_requested_config(requested_model_params, fitted_model_params,
+                                            requested_context_params, fitted_context_params,
+                                            tensor_split, tensor_overrides)) {
+        return std::unexpected(Error{
+            ErrorCode::ModelLoadFailed,
+            "Requested GPU offload configuration is projected to exceed available device memory",
+            "Reduce n_gpu_layers or context_size, or use GgufInspector::auto_configure()."});
+    }
+
+    return {};
+}
+
+} // namespace
 
 Expected<void> initialize_model(Model::Impl& impl) {
     initialize_model_backend();
@@ -40,14 +100,6 @@ Expected<void> initialize_model(Model::Impl& impl) {
         model_params.devices = cpu_only_devices.data();
     }
 
-    auto llama_model = LlamaModelHandle(
-        llama_model_load_from_file(impl.loaded_.model_config.model_path.c_str(), model_params));
-    if (!llama_model) {
-        return std::unexpected(
-            Error{ErrorCode::ModelLoadFailed,
-                  "Failed to load model from path: " + impl.loaded_.model_config.model_path});
-    }
-
     auto ctx_params = llama_context_default_params();
     ctx_params.n_ctx = static_cast<uint32_t>(impl.loaded_.model_config.context_size);
     ctx_params.n_batch = static_cast<uint32_t>(impl.loaded_.model_config.n_batch);
@@ -62,6 +114,18 @@ Expected<void> initialize_model(Model::Impl& impl) {
     // F16 uses more memory than Q8, but avoids KV dequant overhead in decode.
     ctx_params.type_k = GGML_TYPE_F16;
     ctx_params.type_v = GGML_TYPE_F16;
+
+    if (auto fit = verify_gpu_memory_fit(impl, model_params, ctx_params); !fit) {
+        return std::unexpected(fit.error());
+    }
+
+    auto llama_model = LlamaModelHandle(
+        llama_model_load_from_file(impl.loaded_.model_config.model_path.c_str(), model_params));
+    if (!llama_model) {
+        return std::unexpected(
+            Error{ErrorCode::ModelLoadFailed,
+                  "Failed to load model from path: " + impl.loaded_.model_config.model_path});
+    }
 
     auto ctx = LlamaContextHandle(llama_init_from_model(llama_model.get(), ctx_params));
     if (!ctx) {
