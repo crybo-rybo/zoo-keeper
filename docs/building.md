@@ -134,6 +134,10 @@ Zoo-Keeper reuses them and skips its own fetch. Installed-package consumers
 still need a discoverable `nlohmann_json` package because the public headers
 include `<nlohmann/json.hpp>`.
 
+When upgrading an existing build directory after Zoo-Keeper changes its default
+llama.cpp pin, clear `build/CMakeCache.txt` or pass the new `ZOO_LLAMA_TAG` and
+`ZOO_LLAMA_SHA256` with `-D...`; otherwise CMake may keep the old cached pin.
+
 When GPU offload is enabled, `Model::load()` preflights the requested
 llama.cpp model/context parameters against available device memory. If llama.cpp
 would need to reduce GPU layers, adjust context, split tensors differently, or
