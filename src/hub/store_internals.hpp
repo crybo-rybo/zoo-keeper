@@ -47,11 +47,6 @@ class HubPullService {
     [[nodiscard]] static Expected<ModelEntry>
     pull(HuggingFaceClient& client, const std::string& identifier, std::vector<std::string> aliases,
          std::vector<ModelEntry>& entries, const CatalogRepository& repository);
-
-    [[nodiscard]] static Expected<ModelEntry>
-    persist_source_annotation(std::vector<ModelEntry>& entries, const CatalogRepository& repository,
-                              const std::string& entry_id, std::string source_url,
-                              std::string repo_id);
 };
 
 } // namespace zoo::hub::detail

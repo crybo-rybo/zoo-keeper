@@ -9,7 +9,6 @@
 #include "hub/hf_cache_paths.hpp"
 #include "hub/store_catalog_io.hpp"
 
-#include <algorithm>
 #include <string>
 
 namespace zoo::hub::detail {
@@ -71,28 +70,6 @@ download_pull_source(HuggingFaceClient& client, const std::string& identifier,
 }
 
 } // namespace
-
-Expected<ModelEntry> HubPullService::persist_source_annotation(std::vector<ModelEntry>& entries,
-                                                               const CatalogRepository& repository,
-                                                               const std::string& entry_id,
-                                                               std::string source_url,
-                                                               std::string repo_id) {
-    return mutate_catalog(
-        repository, entries,
-        [&entry_id, source_url = std::move(source_url),
-         repo_id = std::move(repo_id)](std::vector<ModelEntry>& current) mutable {
-            auto it = std::find_if(current.begin(), current.end(),
-                                   [&](const ModelEntry& entry) { return entry.id == entry_id; });
-            if (it == current.end()) {
-                return Expected<ModelEntry>(std::unexpected(
-                    Error{ErrorCode::ModelNotFound, "No model found matching: " + entry_id}));
-            }
-
-            it->source_url = std::move(source_url);
-            it->huggingface_repo = std::move(repo_id);
-            return Expected<ModelEntry>(*it);
-        });
-}
 
 Expected<ModelEntry> HubPullService::pull(HuggingFaceClient& client, const std::string& identifier,
                                           std::vector<std::string> aliases,
