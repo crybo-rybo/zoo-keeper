@@ -34,7 +34,7 @@ template <typename CmdT> auto make_string_cmd(std::string s) {
 template <typename Result, typename Maker>
 Expected<Result> AgentRuntime::send_sync_command(Maker&& make_cmd,
                                                  std::optional<std::chrono::nanoseconds> timeout,
-                                                 std::string_view name) {
+                                                 std::string_view name) const {
     if (!running_.load(std::memory_order_acquire)) {
         return std::unexpected(Error{ErrorCode::AgentNotRunning, "Agent is not running"});
     }
@@ -88,7 +88,7 @@ Expected<void> AgentRuntime::add_system_message(std::string_view message,
 
 Expected<HistorySnapshot>
 AgentRuntime::get_history_impl(std::optional<std::chrono::nanoseconds> timeout) const {
-    return const_cast<AgentRuntime*>(this)->send_sync_command<HistorySnapshot>(
+    return send_sync_command<HistorySnapshot>(
         [](auto done) -> Command { return GetHistoryCmd{std::move(done)}; }, timeout,
         "get_history");
 }
