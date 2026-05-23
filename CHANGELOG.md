@@ -7,11 +7,31 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Load-time GPU-fit preflight rejects risky GPU offload configurations before
+  llama.cpp reaches inference.
+- Agent tool loops now execute every structured tool call in a generated turn
+  and retain optional per-call trace diagnostics.
+- Installed package configs verify the located llama.cpp build identity matches
+  the build Zoo-Keeper was compiled against.
+
 ### Changed
 
 - Documentation now consistently describes GGUF inspection, system probing, and
   hardware-aware auto-configuration as `zoo::core` APIs, while the optional
   `zoo::hub` layer owns HuggingFace downloads and the local model store.
+- Async streaming callbacks and tool handlers run outside the inference thread,
+  with shutdown-aware request cancellation.
+
+### Fixed
+
+- llama.cpp FetchContent archives are verified by SHA-256, and custom llama.cpp
+  tags or archive URLs now require an explicit matching digest.
+- Tool-call grammar and typed argument validation now reject invalid JSON
+  numeric/string forms while accepting safe integral JSON numbers.
+- ModelStore catalog mutations use advisory locking, version checks, and
+  reload-before-write behavior to avoid lost updates.
 
 ## [1.1.5] - 2026-05-21
 

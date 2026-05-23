@@ -56,8 +56,7 @@ class ToolExecutor {
         }
 
         try {
-            std::thread([handler = std::move(handler), args = std::move(args),
-                         promise = std::move(promise)]() mutable {
+            std::thread([handler = std::move(handler), args = std::move(args), promise]() mutable {
                 try {
                     promise->set_value(handler(args));
                 } catch (const std::exception& e) {

@@ -103,6 +103,25 @@ TEST(SchemaGrammarTest, StringPrimitiveModelsJsonEscapesAndControlCharacters) {
     EXPECT_NE(grammar.find("hex ::= [0-9a-fA-F]"), std::string::npos);
 }
 
+TEST(SchemaGrammarTest, JsonPrimitiveExamplesRoundTripThroughParser) {
+    const std::vector<std::string> valid_examples = {
+        R"({"value":0})",    R"({"value":-12})",           R"({"value":3.5})",
+        R"({"value":1e-9})", R"({"value":"line\nbreak"})", R"({"value":"unicode \u0041"})",
+    };
+    for (const auto& example : valid_examples) {
+        EXPECT_NO_THROW((void)nlohmann::json::parse(example));
+    }
+
+    const std::vector<std::string> invalid_examples = {
+        R"({"value":01})",
+        R"({"value":+1})",
+        "{\"value\":\"bad\ncontrol\"}",
+    };
+    for (const auto& example : invalid_examples) {
+        EXPECT_THROW((void)nlohmann::json::parse(example), nlohmann::json::parse_error);
+    }
+}
+
 TEST(SchemaGrammarTest, BooleanType) {
     std::vector<ToolParameter> params = {
         {"active", ToolValueType::Boolean, true, "", {}},

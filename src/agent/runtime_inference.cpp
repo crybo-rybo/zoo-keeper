@@ -150,10 +150,22 @@ class ToolLoopController {
             auto result = handle_tool_call(tool_calls[index], std::move(args_json), iteration,
                                            record_tool_trace, request);
             if (!result) {
+                if (result.error().code == ErrorCode::RequestCancelled) {
+                    add_cancelled_tool_results(tool_calls, index, result.error());
+                }
                 return std::unexpected(result.error());
             }
         }
         return {};
+    }
+
+    void add_cancelled_tool_results(const std::vector<tools::ToolCall>& tool_calls,
+                                    size_t start_index, const Error& error) {
+        const std::string content = "Error: " + error.message;
+        for (size_t index = start_index; index < tool_calls.size(); ++index) {
+            backend_.add_message(Message::tool(content, tool_calls[index].id).view());
+        }
+        callback_dispatcher_.drain();
     }
 
     Expected<void> handle_tool_call(const tools::ToolCall& tool_call, std::string args_json,
@@ -316,19 +328,20 @@ void AgentRuntime::inference_loop() {
 }
 
 void AgentRuntime::handle_request(QueuedRequest request) {
-    const auto active_request = request_slots_->active_request(request);
-    if (!active_request.has_value()) {
-        return;
-    }
-
-    if (active_request->cancelled && active_request->cancelled->load(std::memory_order_acquire)) {
-        request_slots_->resolve_error(
-            request.slot, request.generation,
-            Error{ErrorCode::RequestCancelled, "Request cancelled before processing"});
-        return;
-    }
-
     try {
+        const auto active_request = request_slots_->active_request(request);
+        if (!active_request.has_value()) {
+            return;
+        }
+
+        if (active_request->cancelled &&
+            active_request->cancelled->load(std::memory_order_acquire)) {
+            request_slots_->resolve_error(
+                request.slot, request.generation,
+                Error{ErrorCode::RequestCancelled, "Request cancelled before processing"});
+            return;
+        }
+
         if (active_request->result_kind == ResultKind::Extraction) {
             request_slots_->resolve_extraction(request.slot, request.generation,
                                                process_extraction_request(*active_request));

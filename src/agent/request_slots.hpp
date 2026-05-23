@@ -96,8 +96,7 @@ class RequestSlots {
         };
     }
 
-    [[nodiscard]] std::optional<ActiveRequest>
-    active_request(const QueuedRequest& request) noexcept {
+    [[nodiscard]] std::optional<ActiveRequest> active_request(const QueuedRequest& request) {
         if (request.slot >= slots_.size()) {
             return std::nullopt;
         }

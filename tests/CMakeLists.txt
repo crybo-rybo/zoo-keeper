@@ -52,6 +52,12 @@ if(ZOO_BUILD_TESTS)
         PROPERTIES
             LABELS "unit"
     )
+    add_test(NAME ZooKeeperLlamaIdentityRejectsMismatch
+        COMMAND ${CMAKE_COMMAND} -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_llama_identity_mismatch.cmake")
+    set_tests_properties(ZooKeeperLlamaIdentityRejectsMismatch PROPERTIES
+        LABELS "unit;packaging"
+        WILL_FAIL TRUE)
 
     zoo_apply_strict_target_options(zoo_tests)
 endif()

@@ -40,6 +40,14 @@ if(TARGET llama OR TARGET llama-common)
             "project provides llama.cpp. Provide both targets or neither.")
     endif()
 else()
+    if((NOT "${ZOO_LLAMA_TAG}" STREQUAL "${ZOO_LLAMA_DEFAULT_TAG}" OR
+            NOT "${ZOO_LLAMA_ARCHIVE_BASE_URL}" STREQUAL
+                "${ZOO_LLAMA_DEFAULT_ARCHIVE_BASE_URL}") AND
+            "${ZOO_LLAMA_SHA256}" STREQUAL "${ZOO_LLAMA_DEFAULT_SHA256}")
+        message(FATAL_ERROR
+            "Custom ZOO_LLAMA_TAG or ZOO_LLAMA_ARCHIVE_BASE_URL requires setting "
+            "ZOO_LLAMA_SHA256 to the matching archive digest.")
+    endif()
     zoo_configure_llama_build_options()
     set(ZOO_LLAMA_ARCHIVE_URL "${ZOO_LLAMA_ARCHIVE_BASE_URL}/${ZOO_LLAMA_TAG}.tar.gz")
     FetchContent_Declare(

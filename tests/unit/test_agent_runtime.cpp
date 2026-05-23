@@ -12,6 +12,7 @@
 #include <deque>
 #include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -23,6 +24,7 @@ namespace {
 using namespace std::chrono_literals;
 
 using zoo::AgentConfig;
+using zoo::AsyncTokenCallback;
 using zoo::CancellationCallback;
 using zoo::Error;
 using zoo::ErrorCode;
@@ -231,6 +233,27 @@ nlohmann::json simple_extraction_schema() {
             {"required", nlohmann::json::array({"name", "age"})},
             {"additionalProperties", false}};
 }
+
+class CopyFailingCallback {
+  public:
+    explicit CopyFailingCallback(std::shared_ptr<std::atomic<bool>> fail_on_copy)
+        : fail_on_copy_(std::move(fail_on_copy)) {}
+
+    CopyFailingCallback(const CopyFailingCallback& other) : fail_on_copy_(other.fail_on_copy_) {
+        if (fail_on_copy_->load(std::memory_order_acquire)) {
+            throw std::runtime_error("callback copy failed");
+        }
+    }
+
+    CopyFailingCallback(CopyFailingCallback&&) noexcept = default;
+    CopyFailingCallback& operator=(const CopyFailingCallback&) = delete;
+    CopyFailingCallback& operator=(CopyFailingCallback&&) noexcept = default;
+
+    void operator()(std::string_view) const {}
+
+  private:
+    std::shared_ptr<std::atomic<bool>> fail_on_copy_;
+};
 
 TEST(AgentRuntimeTest, QueueFullFailsAdditionalRequestWhileSlotIsOccupied) {
     auto backend = std::make_unique<FakeBackend>();
@@ -598,6 +621,23 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackFailureFailsRequest) {
     EXPECT_NE(result.error().message.find("callback boom"), std::string::npos);
 }
 
+TEST(AgentRuntimeTest, StreamingCallbackCopyFailureFailsRequest) {
+    auto backend = std::make_unique<FakeBackend>();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto fail_on_copy = std::make_shared<std::atomic<bool>>(false);
+    AsyncTokenCallback callback{CopyFailingCallback{fail_on_copy}};
+    fail_on_copy->store(true, std::memory_order_release);
+
+    auto handle = runtime.chat("trigger callback copy", GenerationOptions{}, std::move(callback));
+    auto result = handle.await_result(1s);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InferenceFailed);
+    EXPECT_NE(result.error().message.find("callback copy failed"), std::string::npos);
+}
+
 TEST(AgentRuntimeTest, QueuedStreamingCallbackOutlivesRequestSlotAfterGenerationThrows) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();
@@ -636,6 +676,42 @@ TEST(AgentRuntimeTest, QueuedStreamingCallbackOutlivesRequestSlotAfterGeneration
     release.set_value();
     ASSERT_EQ(done_future.wait_for(2s), std::future_status::ready);
     EXPECT_TRUE(observed.load(std::memory_order_acquire));
+}
+
+TEST(AgentRuntimeTest, StopWaitsForQueuedStreamingCallback) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("late"), TokenAction::Continue);
+        }
+        return Expected<GenerationResult>(GenerationResult{"late", 1, false, "", {}});
+    });
+
+    std::promise<void> entered;
+    auto entered_future = entered.get_future();
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+
+    auto handle = runtime.chat("trigger callback", GenerationOptions{},
+                               [&, release_future](std::string_view token) mutable {
+                                   EXPECT_EQ(token, "late");
+                                   entered.set_value();
+                                   release_future.wait();
+                               });
+    ASSERT_EQ(entered_future.wait_for(2s), std::future_status::ready);
+
+    auto stop_future = std::async(std::launch::async, [&runtime] { runtime.stop(); });
+    EXPECT_EQ(stop_future.wait_for(100ms), std::future_status::timeout);
+    release.set_value();
+    ASSERT_EQ(stop_future.wait_for(2s), std::future_status::ready);
+
+    auto result = handle.await_result(1s);
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->text, "late");
 }
 
 TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
@@ -784,6 +860,60 @@ TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterValidationFailure) {
     EXPECT_EQ(history[2].role, Role::Tool);
     EXPECT_EQ(history[2].tool_call_id, "call-bad");
     EXPECT_NE(history[2].content.find("Please correct the arguments."), std::string::npos);
+    EXPECT_EQ(history[3].role, Role::Tool);
+    EXPECT_EQ(history[3].tool_call_id, "call-good");
+}
+
+TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterHandlerFailure) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    nlohmann::json schema = {{"type", "object"},
+                             {"properties", nlohmann::json{{"value", {{"type", "integer"}}}}},
+                             {"required", nlohmann::json::array({"value"})},
+                             {"additionalProperties", false}};
+    zoo::tools::ToolHandler failing_handler =
+        [](const nlohmann::json&) -> Expected<nlohmann::json> {
+        return std::unexpected(Error{ErrorCode::ToolExecutionFailed, "first handler failed"});
+    };
+    auto failing_def = zoo::tools::detail::make_tool_definition("fail_first", "Always fails",
+                                                                schema, std::move(failing_handler));
+    auto double_def = zoo::tools::detail::make_tool_definition("double", "Double a number",
+                                                               std::vector<std::string>{"value"},
+                                                               [](int value) { return value * 2; });
+    ASSERT_TRUE(failing_def.has_value()) << failing_def.error().to_string();
+    ASSERT_TRUE(double_def.has_value()) << double_def.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*failing_def)).has_value());
+    ASSERT_TRUE(runtime.register_tool(std::move(*double_def)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(structured_tool_call_generation({
+            tool_call_info("call-fail", "fail_first", {{"value", 5}}),
+            tool_call_info("call-good", "double", {{"value", 7}}),
+        }));
+    });
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(GenerationResult{"done", 0, false, "", {}});
+    });
+
+    GenerationOptions options;
+    options.record_tool_trace = true;
+    auto result = runtime.chat("run both tools", options).await_result();
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    ASSERT_TRUE(result->tool_trace.has_value());
+    ASSERT_EQ(result->tool_trace->invocations.size(), 2u);
+    EXPECT_EQ(result->tool_trace->invocations[0].id, "call-fail");
+    EXPECT_EQ(result->tool_trace->invocations[0].status, ToolInvocationStatus::ExecutionFailed);
+    EXPECT_EQ(result->tool_trace->invocations[1].id, "call-good");
+    EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 5u);
+    EXPECT_EQ(history[2].role, Role::Tool);
+    EXPECT_EQ(history[2].tool_call_id, "call-fail");
+    EXPECT_NE(history[2].content.find("first handler failed"), std::string::npos);
     EXPECT_EQ(history[3].role, Role::Tool);
     EXPECT_EQ(history[3].tool_call_id, "call-good");
 }
@@ -1359,6 +1489,60 @@ TEST(AgentRuntimeTest, CancelDuringBlockedToolHandlerDoesNotBlockLaterTools) {
     EXPECT_EQ(fast_calls.load(std::memory_order_relaxed), 1);
 
     release_tool->set_value();
+}
+
+TEST(AgentRuntimeTest, CancelDuringMultiToolTurnAddsToolResultsForEveryCall) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    auto entered_tool = std::make_shared<std::promise<void>>();
+    auto entered_tool_future = entered_tool->get_future();
+    auto release_tool = std::make_shared<std::promise<void>>();
+    auto release_tool_future = release_tool->get_future().share();
+
+    auto slow_definition = zoo::tools::detail::make_tool_definition(
+        "slow", "Blocks until released", std::vector<std::string>{"value"},
+        [entered_tool, release_tool_future](int value) {
+            entered_tool->set_value();
+            release_tool_future.wait();
+            return value;
+        });
+    auto fast_definition = zoo::tools::detail::make_tool_definition(
+        "fast", "Returns immediately", std::vector<std::string>{"value"},
+        [](int value) { return value + 1; });
+    ASSERT_TRUE(slow_definition.has_value()) << slow_definition.error().to_string();
+    ASSERT_TRUE(fast_definition.has_value()) << fast_definition.error().to_string();
+    ASSERT_TRUE(runtime.register_tool(std::move(*slow_definition)).has_value());
+    ASSERT_TRUE(runtime.register_tool(std::move(*fast_definition)).has_value());
+
+    backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
+        return Expected<GenerationResult>(structured_tool_call_generation({
+            tool_call_info("call-slow", "slow", {{"value", 1}}),
+            tool_call_info("call-fast", "fast", {{"value", 2}}),
+        }));
+    });
+
+    auto handle = runtime.chat("run both tools");
+    ASSERT_EQ(entered_tool_future.wait_for(1s), std::future_status::ready);
+
+    handle.cancel();
+    auto result = handle.await_result(1s);
+    release_tool->set_value();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
+
+    const auto history = runtime.get_history();
+    ASSERT_EQ(history.size(), 4u);
+    EXPECT_EQ(history[1].role, Role::Assistant);
+    ASSERT_EQ(history[1].tool_calls.size(), 2u);
+    EXPECT_EQ(history[2].role, Role::Tool);
+    EXPECT_EQ(history[2].tool_call_id, "call-slow");
+    EXPECT_NE(history[2].content.find("Request cancelled"), std::string::npos);
+    EXPECT_EQ(history[3].role, Role::Tool);
+    EXPECT_EQ(history[3].tool_call_id, "call-fast");
+    EXPECT_NE(history[3].content.find("Request cancelled"), std::string::npos);
 }
 
 TEST(AgentRuntimeTest, ToolHandlerExceptionsBecomeExecutionFailedErrors) {
