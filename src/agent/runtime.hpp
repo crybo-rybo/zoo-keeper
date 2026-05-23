@@ -95,7 +95,7 @@ class AgentRuntime {
     template <typename Result, typename Maker>
     Expected<Result> send_sync_command(Maker&& make_cmd,
                                        std::optional<std::chrono::nanoseconds> timeout,
-                                       std::string_view name);
+                                       std::string_view name) const;
 
     Expected<void> set_system_prompt_impl(std::string prompt,
                                           std::optional<std::chrono::nanoseconds> timeout);

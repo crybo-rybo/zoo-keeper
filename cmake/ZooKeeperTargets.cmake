@@ -17,6 +17,7 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_inference.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_lifecycle.cpp
     ${PROJECT_SOURCE_DIR}/src/agent/runtime_extraction.cpp
+    ${PROJECT_SOURCE_DIR}/src/agent/tool_executor.cpp
     ${PROJECT_SOURCE_DIR}/src/tools/registry.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_init.cpp
@@ -28,8 +29,14 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/core/stream_filter.cpp
     ${PROJECT_SOURCE_DIR}/src/core/gguf_inspector.cpp
     ${PROJECT_SOURCE_DIR}/src/core/system_probe.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/hf_download.cpp
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/huggingface.cpp>"
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/catalog_repository.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store_catalog_io.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/model_resolver.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/model_importer.cpp>"
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/hub_pull_service.cpp>"
     ${PROJECT_SOURCE_DIR}/src/log_callback.cpp
 )
 target_include_directories(zoo PUBLIC

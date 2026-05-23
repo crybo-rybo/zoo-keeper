@@ -5,23 +5,24 @@
 
 #pragma once
 
-#include "log.hpp"
 #include "zoo/core/types.hpp"
 #include "zoo/tools/types.hpp"
 
 #include <atomic>
-#include <exception>
+#include <condition_variable>
+#include <cstddef>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
-#include <string>
+#include <queue>
 #include <thread>
-#include <utility>
+#include <vector>
 
 namespace zoo::internal::agent {
 
 /**
- * @brief Executes tool handlers off the inference thread.
+ * @brief Executes tool handlers off the inference thread using a bounded worker pool.
  *
  * Each submitted handler owns its callable, arguments, and promise. The caller
  * can abandon the returned future during cancellation or shutdown without
@@ -29,10 +30,8 @@ namespace zoo::internal::agent {
  */
 class ToolExecutor {
   public:
-    ToolExecutor() = default;
-    ~ToolExecutor() {
-        shutdown_.store(true, std::memory_order_release);
-    }
+    explicit ToolExecutor(size_t worker_count = 2);
+    ~ToolExecutor();
 
     ToolExecutor(const ToolExecutor&) = delete;
     ToolExecutor& operator=(const ToolExecutor&) = delete;
@@ -43,43 +42,31 @@ class ToolExecutor {
      * @brief Submits a tool handler for execution.
      *
      * Returns a future that resolves to the handler's return value. If called after shutdown or if
-     * the worker cannot be started, the future resolves immediately with an error.
+     * no workers are available, the future resolves immediately with an error.
      */
     [[nodiscard]] std::future<Expected<nlohmann::json>> submit(tools::ToolHandler handler,
-                                                               nlohmann::json args) {
-        auto promise = std::make_shared<std::promise<Expected<nlohmann::json>>>();
-        auto future = promise->get_future();
-        if (shutdown_.load(std::memory_order_acquire)) {
-            promise->set_value(
-                std::unexpected(Error{ErrorCode::AgentNotRunning, "Tool executor is shut down"}));
-            return future;
-        }
-
-        try {
-            std::thread([handler = std::move(handler), args = std::move(args), promise]() mutable {
-                try {
-                    promise->set_value(handler(args));
-                } catch (const std::exception& e) {
-                    ZOO_LOG("error", "tool handler threw: %s", e.what());
-                    promise->set_value(
-                        std::unexpected(Error{ErrorCode::ToolExecutionFailed,
-                                              std::string("Tool handler threw: ") + e.what()}));
-                } catch (...) {
-                    ZOO_LOG("error", "tool handler threw unknown exception");
-                    promise->set_value(std::unexpected(Error{
-                        ErrorCode::ToolExecutionFailed, "Tool handler threw unknown exception"}));
-                }
-            }).detach();
-        } catch (const std::exception& e) {
-            promise->set_value(std::unexpected(
-                Error{ErrorCode::ToolExecutionFailed,
-                      std::string("Failed to start tool handler thread: ") + e.what()}));
-        }
-        return future;
-    }
+                                                               nlohmann::json args);
 
   private:
-    std::atomic<bool> shutdown_{false};
+    struct Job {
+        tools::ToolHandler handler;
+        nlohmann::json args;
+        std::shared_ptr<std::promise<Expected<nlohmann::json>>> promise;
+    };
+
+    struct State {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::queue<Job> queue;
+        std::atomic<bool> shutdown{false};
+    };
+    // Shared by worker threads so detached workers can finish safely after ~ToolExecutor().
+
+    static void worker_loop(const std::shared_ptr<State>& state);
+    static void fail_pending_jobs_locked(State& state, Error error);
+
+    std::shared_ptr<State> state_;
+    std::vector<std::thread> workers_;
 };
 
 } // namespace zoo::internal::agent

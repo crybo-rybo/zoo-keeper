@@ -309,6 +309,7 @@ TEST(AgentConfigTest, DefaultsAndValidation) {
     EXPECT_EQ(config.request_queue_capacity, 64u);
     EXPECT_EQ(config.max_tool_iterations, 5);
     EXPECT_EQ(config.max_tool_retries, 2);
+    EXPECT_EQ(config.tool_worker_threads, 2u);
     EXPECT_TRUE(config.validate().has_value());
 }
 
@@ -323,6 +324,10 @@ TEST(AgentConfigTest, ValidationRejectsInvalidFields) {
 
     config = {};
     config.max_tool_iterations = 0;
+    EXPECT_FALSE(config.validate().has_value());
+
+    config = {};
+    config.tool_worker_threads = 0;
     EXPECT_FALSE(config.validate().has_value());
 }
 
@@ -365,6 +370,7 @@ TEST(AgentConfigJsonTest, RoundTripsSerializableFields) {
     config.request_queue_capacity = 4;
     config.max_tool_iterations = 3;
     config.max_tool_retries = 1;
+    config.tool_worker_threads = 4;
 
     const nlohmann::json json = config;
     const auto round_trip = json.get<zoo::AgentConfig>();

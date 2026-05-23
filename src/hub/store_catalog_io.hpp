@@ -1,0 +1,37 @@
+/**
+ * @file store_catalog_io.hpp
+ * @brief Shared catalog locking, persistence, and mutation helpers for ModelStore.
+ */
+
+#pragma once
+
+#include "hub/store_internals.hpp"
+#include "zoo/hub/types.hpp"
+
+#include <optional>
+#include <span>
+#include <string>
+#include <type_traits>
+#include <vector>
+
+namespace zoo::hub {
+
+/// Validates alias uniqueness across the catalog and within a single request.
+Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries,
+                                          std::span<const std::string> aliases,
+                                          std::optional<size_t> skip_index = std::nullopt);
+
+namespace detail {
+
+std::string generate_id();
+std::string now_iso8601();
+
+/// Atomically reloads, mutates, and persists the catalog under an exclusive lock.
+template <typename Mutator>
+auto mutate_catalog(const CatalogRepository& repository, std::vector<ModelEntry>& cached_entries,
+                    Mutator&& mutator);
+
+} // namespace detail
+} // namespace zoo::hub
+
+#include "hub/store_catalog_io_impl.hpp"

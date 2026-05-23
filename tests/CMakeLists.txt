@@ -14,8 +14,11 @@ if(ZOO_BUILD_TESTS)
         unit/test_batch.cpp
         unit/test_gpu_fit.cpp
         unit/test_prompt_bookkeeping.cpp
+        unit/test_sampling_helpers.cpp
         unit/test_agent_mailbox.cpp
         unit/test_agent_runtime.cpp
+        unit/test_backend_contract.cpp
+        unit/test_tool_executor.cpp
         unit/test_extraction.cpp
         unit/test_request_tracker.cpp
         unit/test_model_tool_calling.cpp

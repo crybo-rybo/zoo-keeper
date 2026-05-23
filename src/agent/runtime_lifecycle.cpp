@@ -16,7 +16,7 @@ AgentRuntime::AgentRuntime(ModelConfig model_config, AgentConfig agent_config,
     : model_config_(std::move(model_config)), agent_config_(agent_config),
       default_generation_options_(std::move(default_generation)), backend_(std::move(backend)),
       request_slots_(std::make_shared<RequestSlots>(agent_config_.request_queue_capacity)),
-      request_mailbox_() {
+      request_mailbox_(), tool_executor_(agent_config_.tool_worker_threads) {
     inference_thread_ = std::thread([this]() { inference_loop(); });
 }
 

@@ -72,7 +72,10 @@ TEST_F(LiveExtractIntegrationTest, ExtractReturnsValidJsonMatchingSchema) {
     auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
-    agent->set_system_prompt("You are a helpful assistant. Extract information as instructed.");
+    ASSERT_TRUE(agent
+                    ->try_set_system_prompt(
+                        "You are a helpful assistant. Extract information as instructed.")
+                    .has_value());
 
     nlohmann::json schema = {
         {"type", "object"},
@@ -97,7 +100,7 @@ TEST_F(LiveExtractIntegrationTest, ChatReturnsPlainTextResponse) {
     auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
-    agent->set_system_prompt("Reply briefly.");
+    ASSERT_TRUE(agent->try_set_system_prompt("Reply briefly.").has_value());
 
     auto handle = agent->chat("Say hello in one short sentence.");
     auto response = handle.await_result();
@@ -113,12 +116,14 @@ TEST_F(LiveExtractIntegrationTest, StatelessExtractDoesNotMutateHistory) {
     auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
-    agent->set_system_prompt("Reply briefly.");
+    ASSERT_TRUE(agent->try_set_system_prompt("Reply briefly.").has_value());
 
     auto chat_handle = agent->chat("Say hello in one short sentence.");
     ASSERT_TRUE(chat_handle.await_result().has_value());
 
-    const auto before = agent->get_history();
+    auto before_result = agent->try_get_history();
+    ASSERT_TRUE(before_result.has_value()) << before_result.error().to_string();
+    const auto before = *before_result;
 
     nlohmann::json schema = {{"type", "object"},
                              {"properties", {{"sentiment", {{"type", "string"}}}}},
@@ -133,7 +138,9 @@ TEST_F(LiveExtractIntegrationTest, StatelessExtractDoesNotMutateHistory) {
         agent->extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)});
     ASSERT_TRUE(extract_handle.await_result().has_value());
 
-    EXPECT_EQ(agent->get_history(), before);
+    auto after_result = agent->try_get_history();
+    ASSERT_TRUE(after_result.has_value()) << after_result.error().to_string();
+    EXPECT_EQ(*after_result, before);
 }
 
 // Streaming callback must fire during extraction and extracted_data must still resolve.
@@ -142,7 +149,10 @@ TEST_F(LiveExtractIntegrationTest, ExtractStreamsTokensAndReturnsExtractedData) 
     auto agent_result = zoo::Agent::create(cfg.model, cfg.agent, cfg.generation);
     ASSERT_TRUE(agent_result.has_value()) << agent_result.error().to_string();
     auto& agent = *agent_result;
-    agent->set_system_prompt("You are a helpful assistant. Extract information as instructed.");
+    ASSERT_TRUE(agent
+                    ->try_set_system_prompt(
+                        "You are a helpful assistant. Extract information as instructed.")
+                    .has_value());
 
     nlohmann::json schema = {{"type", "object"},
                              {"properties", {{"count", {{"type", "integer"}}}}},
