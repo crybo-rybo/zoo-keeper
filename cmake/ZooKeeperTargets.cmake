@@ -29,7 +29,7 @@ add_library(zoo STATIC
     ${PROJECT_SOURCE_DIR}/src/core/stream_filter.cpp
     ${PROJECT_SOURCE_DIR}/src/core/gguf_inspector.cpp
     ${PROJECT_SOURCE_DIR}/src/core/system_probe.cpp
-    ${PROJECT_SOURCE_DIR}/src/core/hf_download.cpp
+    "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/core/hf_download.cpp>"
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/huggingface.cpp>"
     "$<$<BOOL:${ZOO_BUILD_HUB}>:${PROJECT_SOURCE_DIR}/src/hub/store.cpp>"
     ${PROJECT_SOURCE_DIR}/src/log_callback.cpp
