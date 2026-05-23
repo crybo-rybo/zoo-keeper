@@ -22,7 +22,9 @@ requests externally.
 The primary async callback type is now `AsyncTokenCallback`, which can return
 `TokenAction::Stop` to end generation from inside the callback. Existing
 `void(std::string_view)` callback code remains source-compatible and is treated
-as `TokenAction::Continue`.
+as `TokenAction::Continue`. `AsyncTextCallback` remains a stable
+source-compatible alias for `AsyncTokenCallback` for consumers that adopted the
+older name.
 
 ```cpp
 auto handle = agent->chat(
