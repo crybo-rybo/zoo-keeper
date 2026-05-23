@@ -53,6 +53,14 @@ if(ZOO_BUILD_TESTS)
             LABELS "unit"
     )
 
+    add_test(
+        NAME LlamaArchiveDigestValidation
+        COMMAND "${CMAKE_COMMAND}"
+            "-DZOO_PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_llama_archive_digest.cmake"
+    )
+    set_tests_properties(LlamaArchiveDigestValidation PROPERTIES LABELS "unit")
+
     zoo_apply_strict_target_options(zoo_tests)
 endif()
 
