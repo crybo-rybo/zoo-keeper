@@ -218,15 +218,16 @@ class ToolLoopController {
         return {};
     }
 
-    Expected<nlohmann::json> await_tool_result(std::future<Expected<nlohmann::json>> future,
+    Expected<nlohmann::json> await_tool_result(ToolExecutor::Handle handle,
                                                const ActiveRequest& request) const {
-        while (future.wait_for(kToolWaitPollInterval) != std::future_status::ready) {
+        while (handle.wait_for(kToolWaitPollInterval) != std::future_status::ready) {
             if (is_cancelled(request)) {
+                handle.abandon();
                 return std::unexpected(
                     Error{ErrorCode::RequestCancelled, "Request cancelled during tool execution"});
             }
         }
-        return future.get();
+        return handle.get();
     }
 
     Expected<void> handle_validation_failure(const tools::ToolCall& tool_call,

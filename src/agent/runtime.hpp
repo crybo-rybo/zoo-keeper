@@ -125,7 +125,7 @@ class AgentRuntime {
     CallbackDispatcher callback_dispatcher_;
     // Declared after callback_dispatcher_: ~AgentRuntime() calls stop() which joins
     // the inference thread before any member destructor runs, so ordering here is for
-    // grouping only — both worker threads are already stopped at that point.
+    // grouping only.
     ToolExecutor tool_executor_;
 };
 
