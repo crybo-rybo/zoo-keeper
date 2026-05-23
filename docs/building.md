@@ -146,7 +146,9 @@ scripts/test.sh --verbose
 ```
 
 Hub-layer unit tests (`tests/unit/test_hub.cpp`) are only compiled when the hub
-layer is enabled. To include them, configure with `-DZOO_BUILD_HUB=ON`:
+layer is enabled. Core auto-configuration and GGUF inspection tests are useful
+to run beside them because the hub store reuses those core APIs. To include the
+hub tests, configure with `-DZOO_BUILD_HUB=ON`:
 
 ```bash
 scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON

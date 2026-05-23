@@ -7,6 +7,12 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation now consistently describes GGUF inspection, system probing, and
+  hardware-aware auto-configuration as `zoo::core` APIs, while the optional
+  `zoo::hub` layer owns HuggingFace downloads and the local model store.
+
 ## [1.1.5] - 2026-05-21
 
 ### Added
@@ -147,12 +153,12 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **`zoo::hub` layer (Layer 4)** — optional GGUF inspection, HuggingFace downloading,
-  and local model store with alias support. `GgufInspector` performs two-phase metadata
-  reading and generates sensible `ModelConfig` defaults via `auto_configure()`.
-  `HuggingFaceClient` wraps llama.cpp's download infrastructure using the shared cache.
-  `ModelStore` provides a JSON-persisted catalog with one-liner Model/Agent creation.
-  Build with `ZOO_BUILD_HUB=ON`.
+- **`zoo::hub` layer (Layer 4)** — optional HuggingFace downloading and local
+  model store with alias support. Core `GgufInspector` performs two-phase
+  metadata reading and generates sensible `ModelConfig` defaults via
+  `auto_configure()`. `HuggingFaceClient` wraps llama.cpp's download
+  infrastructure using the shared cache. `ModelStore` provides a JSON-persisted
+  catalog with one-liner Model/Agent creation. Build with `ZOO_BUILD_HUB=ON`.
 - **`CallbackDispatcher`** — dedicated thread for streaming callback execution, so the
   inference thread is no longer blocked by user callback logic. Drain points ensure
   ordering at synchronization boundaries.

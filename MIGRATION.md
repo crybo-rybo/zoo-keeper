@@ -190,9 +190,13 @@ present for backwards compatibility.
 
 ### Hub Layer (Additive)
 
-New optional Layer 4 (`zoo::hub`) adds GGUF inspection, HuggingFace downloading,
-and a local model store. Public headers live under `include/zoo/hub/`. The key
-types are `GgufInspector`, `HuggingFaceClient`, and `ModelStore`.
+New optional Layer 4 (`zoo::hub`) adds HuggingFace downloading and a local model
+store. Public hub headers live under `include/zoo/hub/`. The key hub types are
+`HuggingFaceClient` and `ModelStore`.
+
+GGUF inspection, host probing, and hardware-aware auto-configuration are core
+APIs under `zoo::core` (`GgufInspector` and `SystemProbe`). `ModelStore` reuses
+those core APIs when the hub layer is enabled.
 
 This is a purely additive change — non-hub consumers are unaffected. Enable with
 `-DZOO_BUILD_HUB=ON` at configure time.

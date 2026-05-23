@@ -46,16 +46,18 @@ Four layers, each depending only on the layers below it:
 
 | Layer | Namespace | Responsibility |
 |-------|-----------|----------------|
-| 4 | `zoo::hub` | **Optional.** GGUF inspection, HuggingFace downloading, local model store, auto-configuration. Only compiled with `ZOO_BUILD_HUB=ON` |
+| 4 | `zoo::hub` | **Optional.** HuggingFace downloading and local model store. Only compiled with `ZOO_BUILD_HUB=ON` |
 | 3 | `zoo::Agent` | Async orchestration, request handles, history management, tool execution |
 | 2 | `zoo::tools` | Tool registry, call parsing, and argument validation. Public headers are llama.cpp-free; private schema grammar helpers stay under `src/` |
-| 1 | `zoo::core` | Direct llama.cpp wrapper, prompt rendering, native tool calling, structured extraction |
+| 1 | `zoo::core` | Direct llama.cpp wrapper, prompt rendering, native tool calling, structured extraction, GGUF inspection, system probing, auto-configuration |
 
 The current core layer owns the model, context, sampler, chat templates, and the
-template-driven tool/extraction grammar state. The agent layer chooses request shape
-and preserves or restores history as needed. The hub layer is optional and provides
-GGUF metadata inspection, HuggingFace model downloading, a local model store, and
-auto-configuration. Hub error codes occupy the 700-799 range.
+template-driven tool/extraction grammar state, GGUF metadata inspection, host
+system probing, and hardware-aware auto-configuration. The agent layer chooses
+request shape and preserves or restores history as needed. The hub layer is
+optional and provides HuggingFace model downloading and a local model store that
+reuses core inspection/configuration APIs. Hub error codes occupy the 700-799
+range.
 
 ## Error Handling
 
