@@ -23,6 +23,10 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `zoo::hub` layer owns HuggingFace downloads and the local model store.
 - Async streaming callbacks and tool handlers run outside the inference thread,
   with shutdown-aware request cancellation.
+- Agent command-lane APIs now require explicit error handling: void
+  `set_system_prompt()`, `get_history()`, and `clear_history()` helpers were
+  removed in favor of `try_*` methods and timeout overloads that return
+  `Expected<T>`.
 
 ### Fixed
 

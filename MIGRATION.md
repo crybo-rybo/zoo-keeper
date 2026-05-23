@@ -53,9 +53,11 @@ agent->chat("Use these options exactly.",
 
 ### Expected-Based Agent Commands
 
-`try_set_system_prompt()`, `try_get_history()`, and `try_clear_history()` expose
-command-lane failures through `Expected<T>`. The existing convenience methods
-remain best-effort helpers for source compatibility.
+Agent command-lane operations now return `Expected<T>` exclusively. Use
+`try_set_system_prompt()`, `try_get_history()`, and `try_clear_history()` when
+no timeout is needed, or the timeout overloads when bounded waits are required.
+The void `set_system_prompt()`, `get_history()`, and `clear_history()` helpers
+were removed because they discarded command-lane failures.
 
 ### Tool Definition Construction
 
@@ -331,12 +333,37 @@ async storage.
 
 ### Agent Command APIs
 
-Fallible command-lane forms are the primary Agent API for 2.0-era code. Prefer
-`try_set_system_prompt()`, `try_get_history()`, `try_clear_history()`, and the
-timeout overloads so command failures remain observable. The void
-`set_system_prompt()`, `get_history()`, and `clear_history()` methods remain
-available for source compatibility, but they are best-effort conveniences that
-discard command-lane errors.
+Fallible command-lane forms are the only Agent API for command operations.
+Replace void helpers with `try_*` methods or timeout overloads so failures stay
+observable.
+
+```cpp
+// Before: void helpers silently discarded command-lane failures.
+agent->set_system_prompt("You are a helpful assistant.");
+const auto history = agent->get_history();
+agent->clear_history();
+```
+
+```cpp
+// After: check Expected results explicitly.
+if (auto prompt = agent->try_set_system_prompt("You are a helpful assistant.");
+    !prompt) {
+    // handle prompt.error()
+}
+
+if (auto history = agent->try_get_history(); history) {
+    // use *history
+}
+
+if (auto cleared = agent->try_clear_history(); !cleared) {
+    // handle cleared.error()
+}
+
+// Or use timeout overloads when bounded waits are required:
+if (auto history = agent->get_history(std::chrono::seconds{5}); !history) {
+    // handle history.error()
+}
+```
 
 ```cpp
 // Before: scoped history passed owning Message values directly.
