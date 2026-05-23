@@ -601,6 +601,46 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackFailureFailsRequest) {
     EXPECT_NE(result.error().message.find("callback boom"), std::string::npos);
 }
 
+TEST(AgentRuntimeTest, QueuedStreamingCallbackOutlivesRequestSlotAfterGenerationThrows) {
+    auto backend = std::make_unique<FakeBackend>();
+    auto* backend_ptr = backend.get();
+    AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
+                         std::move(backend));
+
+    backend_ptr->push_generation([](TokenCallback on_token, const CancellationCallback&) {
+        if (on_token) {
+            EXPECT_EQ(on_token("late"), TokenAction::Continue);
+        }
+        throw std::runtime_error("backend boom");
+        return Expected<GenerationResult>(GenerationResult{});
+    });
+
+    std::promise<void> entered;
+    auto entered_future = entered.get_future();
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+    std::promise<void> done;
+    auto done_future = done.get_future();
+    std::atomic<bool> observed{false};
+
+    auto handle = runtime.chat("trigger callback", GenerationOptions{},
+                               [&, release_future](std::string_view token) mutable {
+                                   EXPECT_EQ(token, "late");
+                                   entered.set_value();
+                                   release_future.wait();
+                                   observed.store(true, std::memory_order_release);
+                                   done.set_value();
+                               });
+    auto result = handle.await_result();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::InferenceFailed);
+
+    ASSERT_EQ(entered_future.wait_for(2s), std::future_status::ready);
+    release.set_value();
+    ASSERT_EQ(done_future.wait_for(2s), std::future_status::ready);
+    EXPECT_TRUE(observed.load(std::memory_order_acquire));
+}
+
 TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
     auto backend = std::make_unique<FakeBackend>();
     auto* backend_ptr = backend.get();

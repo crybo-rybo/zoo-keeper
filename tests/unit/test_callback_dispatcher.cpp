@@ -179,6 +179,28 @@ TEST(CallbackDispatcherTest, VoidCallbackDispatchReturnsWithoutWaiting) {
     EXPECT_EQ(count.load(std::memory_order_relaxed), 1);
 }
 
+TEST(CallbackDispatcherTest, AsyncEntryOwnsCallbackUntilDrain) {
+    CallbackDispatcher dispatcher;
+
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+    std::promise<void> done;
+    auto done_future = done.get_future();
+
+    {
+        AsyncTokenCallback callback = [&, release_future](std::string_view token) mutable {
+            EXPECT_EQ(token, "x");
+            release_future.wait();
+            done.set_value();
+        };
+        EXPECT_EQ(dispatcher.dispatch(callback, "x"), TokenAction::Continue);
+    }
+
+    release.set_value();
+    ASSERT_EQ(done_future.wait_for(2s), std::future_status::ready);
+    dispatcher.drain();
+}
+
 TEST(CallbackDispatcherTest, ActionCallbackDispatchWaitsForCallback) {
     CallbackDispatcher dispatcher;
 

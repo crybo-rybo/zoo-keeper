@@ -10,6 +10,7 @@
 #include "request.hpp"
 #include "zoo/core/types.hpp"
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -202,7 +203,7 @@ class GenerationRunner {
         : backend_(backend), callback_dispatcher_(callback_dispatcher) {}
 
     Expected<GenerationPassResult> run(const GenerationOptions& options,
-                                       AsyncTokenCallback* streaming_callback,
+                                       std::shared_ptr<AsyncTokenCallback> streaming_callback,
                                        CancellationCallback should_cancel, GenerationStats& stats) {
         int completion_tokens = 0;
         const auto generation_start_time = std::chrono::steady_clock::now();
@@ -211,8 +212,8 @@ class GenerationRunner {
 
         auto callback = [&](std::string_view token) -> TokenAction {
             TokenAction action = TokenAction::Continue;
-            if (streaming_callback != nullptr && *streaming_callback) {
-                action = callback_dispatcher_.dispatch(*streaming_callback, token);
+            if (streaming_callback && *streaming_callback) {
+                action = callback_dispatcher_.dispatch(streaming_callback, token);
             }
             if (!first_token_received_this_pass) {
                 first_token_time_this_pass = std::chrono::steady_clock::now();
