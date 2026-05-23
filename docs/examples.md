@@ -66,8 +66,8 @@ std::string get_time() {
 }
 
 // Register
-agent->register_tool("add", "Add two integers", {"a", "b"}, add);
-agent->register_tool("get_time", "Get current date and time", {}, get_time);
+agent->register_tool("add", "Add two integers", {"a", "b"}, add).value();
+agent->register_tool("get_time", "Get current date and time", {}, get_time).value();
 
 // The model can now call these tools. Enable record_tool_trace when you want
 // the runtime to retain the tool-attempt diagnostics.

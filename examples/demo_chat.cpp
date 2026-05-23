@@ -212,7 +212,10 @@ int main(int argc, char** argv) {
     }
     auto agent = std::move(*agent_result);
     if (dc.system_prompt) {
-        agent->set_system_prompt(*dc.system_prompt);
+        if (auto prompt = agent->try_set_system_prompt(*dc.system_prompt); !prompt) {
+            std::cerr << "Error: " << prompt.error().to_string() << "\n";
+            return 1;
+        }
     }
 
     // Register example tools

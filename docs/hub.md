@@ -94,7 +94,7 @@ std::cout << entry.info.name << " at " << entry.file_path << "\n";
 
 // One-liner: alias to running agent
 auto agent = store->create_agent("qwen3").value();
-agent->set_system_prompt("You are a helpful assistant.");
+agent->try_set_system_prompt("You are a helpful assistant.").value();
 
 // Or load a core::Model directly
 auto model = store->load_model("qwen3").value();

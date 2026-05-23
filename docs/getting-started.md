@@ -50,7 +50,11 @@ int main() {
     }
     auto agent_runtime = std::move(*result);
 
-    agent_runtime->set_system_prompt("You are a helpful AI assistant.");
+    if (auto prompt = agent_runtime->try_set_system_prompt("You are a helpful AI assistant.");
+        !prompt) {
+        std::cerr << prompt.error().to_string() << '\n';
+        return 1;
+    }
 
     auto handle = agent_runtime->chat(zoo::MessageView{zoo::Role::User, "Hello!"});
     auto response = handle.await_result();
@@ -81,8 +85,8 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
 | `extract(schema, messages)` | Stateless extraction with explicit message history |
 | `cancel(id)` | Cancel a pending request by ID |
-| `try_set_system_prompt(text)` | Set or update the system prompt with `Expected<void>` error reporting |
-| `set_system_prompt(text)` | Best-effort system prompt update |
+| `try_set_system_prompt(text)` | Primary system prompt update API with `Expected<void>` error reporting |
+| `set_system_prompt(text)` | Compatibility best-effort system prompt update |
 | `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
 | `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
 | `register_tools(definitions)` | Batch-register multiple tools with one inference-thread command |
@@ -100,6 +104,10 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 | `agent_config()` | Access the loaded `AgentConfig` |
 | `default_generation_options()` | Access the default `GenerationOptions` |
 | `tool_count()` | Number of registered tools |
+
+Fallible command-lane methods are the primary API for new code. The void
+`set_system_prompt()`, `get_history()`, and `clear_history()` forms remain for
+source compatibility, but they intentionally discard command failures.
 
 Existing code that passes `GenerationOptions` remains source-compatible. For
 legacy `GenerationOptions{}` arguments, the request still inherits configured

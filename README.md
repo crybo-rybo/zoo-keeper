@@ -26,8 +26,8 @@ Think of it this way: **llama.cpp is the engine. Zoo-Keeper is the SDK.**
 ```cpp
 // Five lines from zero to a running agent with tools
 auto agent = zoo::Agent::create(config).value();
-agent->set_system_prompt("You are a helpful assistant.");
-agent->register_tool("search", "Search the web", {"query"}, my_search_fn);
+agent->try_set_system_prompt("You are a helpful assistant.").value();
+agent->register_tool("search", "Search the web", {"query"}, my_search_fn).value();
 auto handle = agent->chat("Find flights to Tokyo", {}, on_token);
 auto result = handle.await_result().value();
 ```
@@ -169,8 +169,11 @@ int main() {
     }
 
     // Register a native C++ function as a tool
-    agent->register_tool("add", "Add two integers", {"a", "b"},
-        [](int a, int b) { return a + b; });
+    if (auto tool = agent->register_tool("add", "Add two integers", {"a", "b"},
+            [](int a, int b) { return a + b; }); !tool) {
+        std::cerr << tool.error().to_string() << '\n';
+        return 1;
+    }
 
     // Stream tokens as they arrive
     auto on_token = [](std::string_view token) {
@@ -199,10 +202,11 @@ int main() {
 Register any C++ callable and Zoo-Keeper generates the JSON Schema, detects tool calls from llama.cpp PEG parser output, validates arguments, executes the handler, and feeds results back into the conversation:
 
 ```cpp
-agent->register_tool("get_weather", "Get current weather", {"city"},
-    [](std::string city) -> std::string {
-        return fetch_weather(city);  // Your code
-    });
+auto weather_tool = agent->register_tool("get_weather", "Get current weather", {"city"},
+    [](std::string city) -> std::string { return fetch_weather(city); });
+if (!weather_tool) {
+    std::cerr << weather_tool.error().to_string() << '\n';
+}
 
 // The agent automatically:
 // 1. Detects the model wants to call get_weather

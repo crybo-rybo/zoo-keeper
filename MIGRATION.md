@@ -327,6 +327,15 @@ tool-call metadata, such as adapters from another chat message representation.
 Those views must not outlive the API call; use `OwnedToolCall` for retained or
 async storage.
 
+### Agent Command APIs
+
+Fallible command-lane forms are the primary Agent API for 2.0-era code. Prefer
+`try_set_system_prompt()`, `try_get_history()`, `try_clear_history()`, and the
+timeout overloads so command failures remain observable. The void
+`set_system_prompt()`, `get_history()`, and `clear_history()` methods remain
+available for source compatibility, but they are best-effort conveniences that
+discard command-lane errors.
+
 ```cpp
 // Before: scoped history passed owning Message values directly.
 std::vector<zoo::Message> history = {
