@@ -34,6 +34,8 @@ auto handle = agent->chat("Find flights to Tokyo");
 auto result = handle.await_result().value();
 ```
 
+Runnable programs: [`examples/README.md`](examples/README.md).
+
 ## Why Zoo-Keeper over raw llama.cpp?
 
 llama.cpp is an exceptional inference engine, but it exposes a flat C API with ~200+ functions, manual resource management, and no application-level abstractions. Building a real application on it means writing hundreds of lines of threading, state management, and error handling before you get to your first inference call.
@@ -155,45 +157,13 @@ targets, Zoo-Keeper reuses them automatically and skips its own fetch.
 
 ### Run your first agent
 
-```cpp
-#include <iostream>
-#include <zoo/zoo.hpp>
-
-int main() {
-    zoo::ModelConfig model;
-    model.model_path = "models/llama-3-8b.gguf";
-    model.context_size = 8192;
-    model.n_gpu_layers = -1; // Offload all layers to GPU
-
-    auto agent = zoo::Agent::create(model).value();
-    if (auto set_prompt = agent->try_set_system_prompt("You are a concise assistant."); !set_prompt) {
-        std::cerr << set_prompt.error().to_string() << '\n';
-        return 1;
-    }
-
-    // Register a native C++ function as a tool
-    agent->register_tool("add", "Add two integers", {"a", "b"},
-        [](int a, int b) { return a + b; });
-
-    // Stream tokens as they arrive
-    auto on_token = [](std::string_view token) {
-        std::cout << token << std::flush;
-        return zoo::TokenAction::Continue;
-    };
-
-    auto handle =
-        agent->chat("What is 42 + 58?", zoo::GenerationOverride::inherit_defaults(), on_token);
-    auto response = handle.await_result();
-
-    if (!response) {
-        std::cerr << response.error().to_string() << '\n';
-        return 1;
-    }
-
-    std::cout << "\n\nTokens: " << response->usage.total_tokens
-              << " | " << response->metrics.tokens_per_second << " tok/s\n";
-}
+```bash
+scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
+./build/examples/minimal_agent /path/to/model.gguf
 ```
+
+Source and more programs: [`examples/README.md`](examples/README.md) (includes
+`demo_chat` with tools, streaming, and metrics).
 
 ## Feature Highlights
 
@@ -215,6 +185,8 @@ agent->register_tool("get_weather", "Get current weather", {"city"},
 // 5. Generates the final response
 ```
 
+Runnable tool loop: [`examples/demo_chat.cpp`](examples/demo_chat.cpp).
+
 ### Structured output extraction
 
 Constrain model output to a JSON Schema using grammar-guided generation:
@@ -227,6 +199,8 @@ auto result = handle.await_result().value();
 
 // result.data == {"name": "John", "age": 30}
 ```
+
+Runnable: [`examples/demo_extract.cpp`](examples/demo_extract.cpp).
 
 ### Model hub (optional)
 
@@ -296,7 +270,7 @@ ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 | [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
 | [Hub Layer](docs/hub.md) | GGUF inspection, HuggingFace downloading, local model store, auto-configuration |
 | [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
-| [Examples](docs/examples.md) | Streaming, cancellation, tools, error handling, model store |
+| [Examples](docs/examples.md) | Runnable programs under `examples/`; API sketches in docs |
 | [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
 | [Migration](MIGRATION.md) | Upgrade notes for major API changes |
 

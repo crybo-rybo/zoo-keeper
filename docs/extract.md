@@ -7,13 +7,15 @@ The current API is response-first: start the request, call
 `RequestHandle<ExtractionResponse>::await_result()`, and read the structured
 payload from `response->data` if the request succeeds.
 
+**Runnable reference:** [`examples/demo_extract.cpp`](../examples/demo_extract.cpp)
+— stateful, stateless, and streaming scenarios. See
+[`examples/README.md`](../examples/README.md) for the run command.
+
 ## Quick Start
 
-```cpp
-#include <zoo/zoo.hpp>
-#include <array>
-#include <iostream>
+Schema shape for `extract()` (illustrative fragment):
 
+```cpp
 nlohmann::json schema = {
     {"type", "object"},
     {"properties", {
@@ -171,5 +173,5 @@ if (!response) {
 
 - [Tool System](tools.md) -- register callable tools the model can invoke
 - [Getting Started](getting-started.md) -- Agent setup and core API
-- [Examples](examples.md) -- copy-paste code snippets
+- [Examples](../examples/README.md) -- runnable programs
 - [Architecture](architecture.md) -- runtime structure and threading model
