@@ -134,6 +134,13 @@ Zoo-Keeper reuses them and skips its own fetch. Installed-package consumers
 still need a discoverable `nlohmann_json` package because the public headers
 include `<nlohmann/json.hpp>`.
 
+When GPU offload is enabled, `Model::load()` preflights the requested
+llama.cpp model/context parameters against available device memory. If llama.cpp
+would need to reduce GPU layers, adjust context, split tensors differently, or
+move tensors to another buffer type to fit, Zoo-Keeper rejects the load with a
+structured `ModelLoadFailed` error instead of letting a risky Metal/CUDA
+configuration reach inference.
+
 ## Running Tests
 
 ```bash

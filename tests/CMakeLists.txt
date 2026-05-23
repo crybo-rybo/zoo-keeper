@@ -12,6 +12,7 @@ if(ZOO_BUILD_TESTS)
         unit/test_schema_grammar.cpp
         unit/test_error_recovery.cpp
         unit/test_batch.cpp
+        unit/test_gpu_fit.cpp
         unit/test_prompt_bookkeeping.cpp
         unit/test_agent_mailbox.cpp
         unit/test_agent_runtime.cpp
