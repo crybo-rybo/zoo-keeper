@@ -8,6 +8,38 @@ Zoo-Keeper only executes native tool calls emitted by the active model or
 template. If native tool calling is unavailable, the request stays on the text
 path and no synthetic alternate protocol is introduced.
 
+```mermaid
+flowchart TD
+    START(["User request enters tool loop"])
+    GEN["Model generates tokens<br/>(grammar-constrained when tools active)"]
+    PARSE["parse_tool_response()<br/>native format detection"]
+    TEXT{"Tool calls<br/>detected?"}
+    DONE(["Return TextResponse<br/>+ optional tool_trace"])
+    VAL["Validate arguments<br/>against registered schema"]
+    OK{"Valid?"}
+    EXEC["ToolExecutor runs<br/>registered handler"]
+    INJ["Inject tool result message<br/>into conversation"]
+    RETRY{"Retries<br/>remaining?"}
+    FAIL(["Fail: ToolRetriesExhausted"])
+    LIMIT{"Within<br/>iteration budget?"}
+    LIMITFAIL(["Fail: ToolLoopLimitReached"])
+
+    START --> GEN --> PARSE --> TEXT
+    TEXT -->|no| DONE
+    TEXT -->|yes| LIMIT
+    LIMIT -->|no| LIMITFAIL
+    LIMIT -->|yes| VAL --> OK
+    OK -->|yes| EXEC --> INJ --> GEN
+    OK -->|no| RETRY
+    RETRY -->|yes| INJ
+    RETRY -->|no| FAIL
+
+    style START fill:#eef4ff,stroke:#4a6fa5
+    style DONE fill:#eef8f0,stroke:#3d8b5a
+    style FAIL fill:#ffecec,stroke:#c44
+    style LIMITFAIL fill:#ffecec,stroke:#c44
+```
+
 ## Typed Registration
 
 Register any supported callable and Zoo-Keeper will derive the argument schema

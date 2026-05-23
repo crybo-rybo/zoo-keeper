@@ -2,6 +2,46 @@
 
 This note documents the private module boundaries behind the public Zoo-Keeper API. It is for contributors working on runtime internals, build surface cleanup, and structural refactors. Public-facing guidance stays in [architecture.md](architecture.md).
 
+```mermaid
+flowchart TB
+    subgraph Public["Public API (include/zoo/)"]
+        AG["zoo::Agent facade<br/>agent_facade.cpp"]
+    end
+
+    subgraph Private["Private runtime (src/agent/)"]
+        RT["AgentRuntime<br/>inference thread + orchestration"]
+        MB["RuntimeMailbox"]
+        RS["RequestSlots"]
+        CD["CallbackDispatcher"]
+        TE["ToolExecutor"]
+        HL["runtime_helpers<br/>GenerationRunner · RequestHistoryScope"]
+        RT --> MB
+        RT --> RS
+        RT --> CD
+        RT --> TE
+        RT --> HL
+    end
+
+    subgraph Seam["Backend seam"]
+        IF["AgentBackend (interface)"]
+        AD["AgentBackendModel adapter"]
+        IF --> AD
+    end
+
+    subgraph Core["Layer 1 (src/core/)"]
+        MD["zoo::core::Model<br/>llama.cpp wrapper"]
+    end
+
+    AG --> RT
+    RT --> IF
+    AD --> MD
+
+    style Public fill:#eef4ff,stroke:#4a6fa5
+    style Private fill:#eef8f0,stroke:#3d8b5a
+    style Seam fill:#fff8ee,stroke:#c49a3c
+    style Core fill:#f5f0ff,stroke:#7b5ea7
+```
+
 ## Boundary Rules
 
 - Only headers under `include/zoo/` are part of the supported installed API.
@@ -27,6 +67,10 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
   - the tool executor worker used for handler invocation
   - the backend seam used to talk to the model layer
 - Calling-thread operations that need model state are routed into the runtime instead of touching the model directly.
+
+The dual-lane `RuntimeMailbox` prioritizes control commands over queued
+requests so model-affecting operations never run mid-generation. Request
+backpressure is enforced externally by `RequestSlots`.
 
 ### Backend seam
 

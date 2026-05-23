@@ -97,6 +97,40 @@ Zoo-Keeper compiles llama.cpp with `LLAMA_BUILD_TOOLS=OFF` and `LLAMA_BUILD_EXAM
 
 Four layers with strict downward-only dependencies. Use only what you need:
 
+```mermaid
+flowchart TB
+    subgraph L4["Layer 4 — Hub (optional, ZOO_BUILD_HUB=ON)"]
+        H["zoo::hub<br/>HuggingFaceClient · ModelStore"]
+    end
+
+    subgraph L3["Layer 3 — Agent"]
+        A["zoo::Agent<br/>RequestHandle · async orchestration"]
+    end
+
+    subgraph L2["Layer 2 — Tools (llama.cpp-free)"]
+        T["zoo::tools<br/>ToolRegistry · Parser · Validator"]
+    end
+
+    subgraph L1["Layer 1 — Core"]
+        C["zoo::core<br/>Model · GgufInspector · SystemProbe"]
+    end
+
+    subgraph Engine["Inference engine"]
+        LL["llama.cpp + llama-common"]
+    end
+
+    H --> A
+    A --> T
+    A --> C
+    C --> LL
+
+    style L4 fill:#f0f4ff,stroke:#4a6fa5
+    style L3 fill:#eef8f0,stroke:#3d8b5a
+    style L2 fill:#fff8ee,stroke:#c49a3c
+    style L1 fill:#f5f0ff,stroke:#7b5ea7
+    style Engine fill:#f4f4f4,stroke:#666
+```
+
 Each layer depends only on the layers below it. Consumers can stop at whichever level fits their needs.
 
 | Layer | Namespace | What it does | Key types |
@@ -106,7 +140,43 @@ Each layer depends only on the layers below it. Consumers can stop at whichever 
 | **Tools** | `zoo::tools` | Tool registration, JSON Schema generation from C++ signatures, argument validation. Zero llama.cpp dependency | `ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator` |
 | **Core** | `zoo::core` | Direct synchronous llama.cpp wrapper, GGUF inspection, hardware probing, auto-configuration | `Model`, `GgufInspector`, `SystemProbe`, `ModelConfig` |
 
+```mermaid
+flowchart LR
+    subgraph Caller["Calling thread(s)"]
+        APP["Application code"]
+        SUB["chat() · complete() · extract()"]
+        AWAIT["RequestHandle::await_result()"]
+        APP --> SUB --> AWAIT
+    end
+
+    subgraph Runtime["Agent runtime"]
+        MB["RuntimeMailbox<br/>requests + commands"]
+        INF["Inference thread<br/>AgentRuntime"]
+        BE["AgentBackend → Model"]
+        MB --> INF --> BE
+    end
+
+    subgraph Workers["Dedicated workers"]
+        CB["CallbackDispatcher<br/>streaming token callbacks"]
+        TE["ToolExecutor<br/>user tool handlers"]
+    end
+
+    SUB -->|"enqueue request"| MB
+    SUB -->|"return handle"| AWAIT
+    INF -->|"dispatch tokens"| CB
+    CB -->|"TokenAction::Continue / Stop"| APP
+    INF -->|"invoke handler"| TE
+    TE -->|"result"| INF
+    AWAIT -->|"poll / block until done"| INF
+
+    style Caller fill:#eef4ff,stroke:#4a6fa5
+    style Runtime fill:#eef8f0,stroke:#3d8b5a
+    style Workers fill:#fff8ee,stroke:#c49a3c
+```
+
 **Threading model:** The Agent owns a single inference thread. Callers submit requests via `chat()`, `complete()`, or `extract()` and receive a `RequestHandle<T>`. Model access is confined to that thread, streaming callbacks run on a callback dispatcher, and tool handlers run on a tool executor worker.
+
+See [Architecture](docs/architecture.md) for request lifecycle and tool-loop diagrams.
 
 ## Use Cases
 

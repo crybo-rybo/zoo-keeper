@@ -2,6 +2,9 @@
 
 This guide walks through the split public API and a minimal first agent.
 
+For visual overviews of the layer stack, threading model, and request flow,
+see [Architecture](architecture.md).
+
 ## Prerequisites
 
 - **C++23 compiler**: macOS uses Clang 16+; Linux uses GCC 13+ or Clang 18+

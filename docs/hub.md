@@ -12,6 +12,43 @@ GGUF metadata inspection and hardware-aware auto-configuration live in the
 core layer (`zoo::core::GgufInspector`, `zoo::core::SystemProbe`) so they are
 available without enabling the hub.
 
+```mermaid
+flowchart TB
+    subgraph Hub["zoo::hub (optional Layer 4)"]
+        MS["ModelStore facade<br/>aliases · catalog · create_agent()"]
+        HF["HuggingFaceClient<br/>download · cache · resume"]
+        MS --> HF
+    end
+
+    subgraph StoreInternals["src/hub/ collaborators"]
+        CAT["Catalog repository<br/>catalog.json (atomic rename)"]
+        RES["Resolver / importer"]
+        PULL["Pull service"]
+        MS --> CAT
+        MS --> RES
+        MS --> PULL
+    end
+
+    subgraph CoreReuse["Reused core APIs"]
+        GI["GgufInspector<br/>metadata read"]
+        SP["SystemProbe + auto_configure"]
+        MD["Model / Agent creation"]
+        MS --> GI
+        MS --> SP
+        MS --> MD
+    end
+
+    subgraph Cache["Shared cache"]
+        LC["llama.cpp HuggingFace cache<br/>LLAMA_CACHE · HF_HUB_CACHE · …"]
+        HF --> LC
+    end
+
+    style Hub fill:#f0f4ff,stroke:#4a6fa5
+    style StoreInternals fill:#eef8f0,stroke:#3d8b5a
+    style CoreReuse fill:#f5f0ff,stroke:#7b5ea7
+    style Cache fill:#f4f4f4,stroke:#666
+```
+
 ## HuggingFace Client
 
 `HuggingFaceClient` wraps llama.cpp's `llama-common` download infrastructure.
