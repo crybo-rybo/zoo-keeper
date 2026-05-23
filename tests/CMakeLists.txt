@@ -31,11 +31,16 @@ if(ZOO_BUILD_TESTS)
     target_link_libraries(zoo_tests
         PRIVATE
             zoo
-            $<BUILD_INTERFACE:llama-common>
             GTest::gtest
             GTest::gtest_main
             GTest::gmock
     )
+    get_target_property(zoo_tests_link_libraries zoo_tests LINK_LIBRARIES)
+    if(zoo_tests_link_libraries MATCHES "llama-common")
+        message(FATAL_ERROR
+            "zoo_tests must not link llama-common directly; create an isolated "
+            "test target for any test that genuinely needs that dependency.")
+    endif()
 
     target_include_directories(zoo_tests
         PRIVATE
