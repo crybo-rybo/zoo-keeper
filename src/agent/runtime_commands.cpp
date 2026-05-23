@@ -57,10 +57,6 @@ AgentRuntime::set_system_prompt_impl(std::string prompt,
                                    "set_system_prompt");
 }
 
-void AgentRuntime::set_system_prompt(std::string_view prompt) {
-    (void)set_system_prompt_impl(std::string(prompt), std::nullopt);
-}
-
 Expected<void> AgentRuntime::try_set_system_prompt(std::string_view prompt) {
     return set_system_prompt_impl(std::string(prompt), std::nullopt);
 }
@@ -93,10 +89,6 @@ AgentRuntime::get_history_impl(std::optional<std::chrono::nanoseconds> timeout) 
         "get_history");
 }
 
-HistorySnapshot AgentRuntime::get_history() const {
-    return get_history_impl(std::nullopt).value_or(HistorySnapshot{});
-}
-
 Expected<HistorySnapshot> AgentRuntime::try_get_history() const {
     return get_history_impl(std::nullopt);
 }
@@ -109,10 +101,6 @@ Expected<void> AgentRuntime::clear_history_impl(std::optional<std::chrono::nanos
     return send_sync_command<void>(
         [](auto done) -> Command { return ClearHistoryCmd{std::move(done)}; }, timeout,
         "clear_history");
-}
-
-void AgentRuntime::clear_history() {
-    (void)clear_history_impl(std::nullopt);
 }
 
 Expected<void> AgentRuntime::try_clear_history() {

@@ -164,11 +164,6 @@ class Agent {
      */
     void cancel(RequestId id);
 
-    /// Compatibility best-effort system-prompt replacement. Prefer
-    /// `try_set_system_prompt()` or the timeout overload in new code.
-    [[deprecated("Use try_set_system_prompt() or set_system_prompt(prompt, timeout) instead")]]
-    void set_system_prompt(std::string_view prompt);
-
     /// Replaces the current system prompt, returning command-lane failures.
     [[nodiscard]] Expected<void> try_set_system_prompt(std::string_view prompt);
 
@@ -213,23 +208,12 @@ class Agent {
         return default_generation_options_;
     }
 
-    /// Compatibility best-effort history snapshot. Prefer `try_get_history()`
-    /// or the timeout overload in new code.
-    [[deprecated(
-        "Use try_get_history() or get_history(timeout) instead")]] [[nodiscard]] HistorySnapshot
-    get_history() const;
-
     /// Returns a history snapshot, or an error if the command cannot run.
     [[nodiscard]] Expected<HistorySnapshot> try_get_history() const;
 
     /// Returns a history snapshot, or `RequestTimeout` if the command waits too long.
     /// @param timeout Maximum time to wait; returns `RequestTimeout` on expiry.
     [[nodiscard]] Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
-
-    /// Compatibility best-effort history clear. Prefer `try_clear_history()` or
-    /// the timeout overload in new code.
-    [[deprecated("Use try_clear_history() or clear_history(timeout) instead")]]
-    void clear_history();
 
     /// Clears history, or returns an error if the command cannot run.
     [[nodiscard]] Expected<void> try_clear_history();

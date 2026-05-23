@@ -7,7 +7,6 @@
 
 #include "agent/backend_model.hpp"
 #include "agent/runtime.hpp"
-#include "log.hpp"
 #include "zoo/core/model.hpp"
 
 namespace zoo {
@@ -89,12 +88,6 @@ void Agent::cancel(RequestId id) {
     impl_->runtime.cancel(id);
 }
 
-void Agent::set_system_prompt(std::string_view prompt) {
-    if (auto result = impl_->runtime.try_set_system_prompt(prompt); !result) {
-        ZOO_LOG("warn", "set_system_prompt failed: %s", result.error().to_string().c_str());
-    }
-}
-
 Expected<void> Agent::try_set_system_prompt(std::string_view prompt) {
     return impl_->runtime.try_set_system_prompt(prompt);
 }
@@ -120,27 +113,12 @@ bool Agent::is_running() const noexcept {
     return impl_->runtime.is_running();
 }
 
-HistorySnapshot Agent::get_history() const {
-    auto result = impl_->runtime.try_get_history();
-    if (result) {
-        return std::move(*result);
-    }
-    ZOO_LOG("warn", "get_history failed: %s", result.error().to_string().c_str());
-    return {};
-}
-
 Expected<HistorySnapshot> Agent::try_get_history() const {
     return impl_->runtime.try_get_history();
 }
 
 Expected<HistorySnapshot> Agent::get_history(std::chrono::nanoseconds timeout) const {
     return impl_->runtime.get_history(timeout);
-}
-
-void Agent::clear_history() {
-    if (auto result = impl_->runtime.try_clear_history(); !result) {
-        ZOO_LOG("warn", "clear_history failed: %s", result.error().to_string().c_str());
-    }
 }
 
 Expected<void> Agent::try_clear_history() {

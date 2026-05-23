@@ -48,6 +48,17 @@ using zoo::internal::agent::GenerationResult;
 using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::ParsedToolResponse;
 using zoo::internal::agent::RequestHistoryScope;
+
+HistorySnapshot require_history(const AgentRuntime& runtime) {
+    auto result = runtime.try_get_history();
+    EXPECT_TRUE(result.has_value()) << result.error().to_string();
+    return result.value_or(HistorySnapshot{});
+}
+
+void require_set_system_prompt(AgentRuntime& runtime, std::string_view prompt) {
+    auto result = runtime.try_set_system_prompt(prompt);
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+}
 using zoo::internal::agent::ScopeExit;
 
 struct UnsupportedRequestResult {};
@@ -475,7 +486,7 @@ TEST(AgentRuntimeTest, CompleteDoesNotMutatePersistentHistory) {
     auto persistent = runtime.chat("persistent user");
     ASSERT_TRUE(persistent.await_result().has_value());
 
-    const auto before = runtime.get_history();
+    const auto before = require_history(runtime);
     ASSERT_FALSE(before.empty());
 
     const std::array<Message, 2> scoped_messages = {Message::system("request prompt"),
@@ -486,7 +497,7 @@ TEST(AgentRuntimeTest, CompleteDoesNotMutatePersistentHistory) {
     ASSERT_TRUE(scoped_result.has_value());
     EXPECT_EQ(scoped_result->text, "scoped reply");
 
-    EXPECT_EQ(runtime.get_history(), before);
+    EXPECT_EQ(require_history(runtime), before);
 }
 
 TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
@@ -720,7 +731,7 @@ TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
     AgentRuntime runtime(make_model_config(), make_agent_config(4, 2), GenerationOptions{},
                          std::move(backend));
 
-    runtime.set_system_prompt("Keep only the latest turn.");
+    require_set_system_prompt(runtime, "Keep only the latest turn.");
 
     backend_ptr->push_generation([](TokenCallback, const CancellationCallback&) {
         return Expected<GenerationResult>(GenerationResult{"first reply", 0, false, "", {}});
@@ -732,7 +743,7 @@ TEST(AgentRuntimeTest, StatefulRequestsTrimRetainedHistoryToConfiguredLimit) {
     ASSERT_TRUE(runtime.chat("first user").await_result().has_value());
     ASSERT_TRUE(runtime.chat("second user").await_result().has_value());
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 3u);
     EXPECT_EQ(history[0].role, Role::System);
     EXPECT_EQ(history[1].content, "second user");
@@ -809,7 +820,7 @@ TEST(AgentRuntimeTest, StructuredTurnExecutesAllToolCallsInOrder) {
     EXPECT_EQ(result->tool_trace->invocations[1].id, "call-2");
     EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 5u);
     EXPECT_EQ(history[1].role, Role::Assistant);
     ASSERT_EQ(history[1].tool_calls.size(), 2u);
@@ -855,7 +866,7 @@ TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterValidationFailure) {
     EXPECT_EQ(result->tool_trace->invocations[1].id, "call-good");
     EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 5u);
     EXPECT_EQ(history[2].role, Role::Tool);
     EXPECT_EQ(history[2].tool_call_id, "call-bad");
@@ -909,7 +920,7 @@ TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterHandlerFailure) {
     EXPECT_EQ(result->tool_trace->invocations[1].id, "call-good");
     EXPECT_EQ(result->tool_trace->invocations[1].status, ToolInvocationStatus::Succeeded);
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 5u);
     EXPECT_EQ(history[2].role, Role::Tool);
     EXPECT_EQ(history[2].tool_call_id, "call-fail");
@@ -962,9 +973,9 @@ TEST(AgentRuntimeTest, SetSystemPromptUpdatesHistoryThroughCommandLane) {
     AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
                          std::move(backend));
 
-    runtime.set_system_prompt("Be concise.");
+    require_set_system_prompt(runtime, "Be concise.");
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 1u);
     EXPECT_EQ(history[0].role, Role::System);
     EXPECT_EQ(history[0].content, "Be concise.");
@@ -1074,12 +1085,12 @@ TEST(AgentRuntimeTest, AddSystemMessageAppendsWithoutReplacingExistingSystemProm
     AgentRuntime runtime(make_model_config(), make_agent_config(), GenerationOptions{},
                          std::move(backend));
 
-    runtime.set_system_prompt("You are a helpful NPC.");
+    require_set_system_prompt(runtime, "You are a helpful NPC.");
 
     auto result = runtime.add_system_message("Mood: suspicious. Trust: low.");
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 2u);
     EXPECT_EQ(history[0].role, Role::System);
     EXPECT_EQ(history[0].content, "You are a helpful NPC.");
@@ -1533,7 +1544,7 @@ TEST(AgentRuntimeTest, CancelDuringMultiToolTurnAddsToolResultsForEveryCall) {
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::RequestCancelled);
 
-    const auto history = runtime.get_history();
+    const auto history = require_history(runtime);
     ASSERT_EQ(history.size(), 4u);
     EXPECT_EQ(history[1].role, Role::Assistant);
     ASSERT_EQ(history[1].tool_calls.size(), 2u);

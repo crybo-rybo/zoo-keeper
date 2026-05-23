@@ -56,7 +56,6 @@ class AgentRuntime {
                                               AsyncTokenCallback callback = {});
 
     void cancel(RequestId id);
-    void set_system_prompt(std::string_view prompt);
     Expected<void> try_set_system_prompt(std::string_view prompt);
     Expected<void> set_system_prompt(std::string_view prompt, std::chrono::nanoseconds timeout);
     Expected<void> add_system_message(std::string_view message);
@@ -64,10 +63,8 @@ class AgentRuntime {
     void stop();
     bool is_running() const noexcept;
 
-    HistorySnapshot get_history() const;
     Expected<HistorySnapshot> try_get_history() const;
     Expected<HistorySnapshot> get_history(std::chrono::nanoseconds timeout) const;
-    void clear_history();
     Expected<void> try_clear_history();
     Expected<void> clear_history(std::chrono::nanoseconds timeout);
 

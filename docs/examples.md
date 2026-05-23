@@ -117,7 +117,7 @@ if (!result) {
     switch (error.code) {
         case zoo::ErrorCode::ContextWindowExceeded:
             std::cerr << "Context full!" << std::endl;
-            agent->clear_history();
+            agent->try_clear_history().value();
             break;
         case zoo::ErrorCode::InferenceFailed:
             std::cerr << "Inference failed: " << error.message << std::endl;
