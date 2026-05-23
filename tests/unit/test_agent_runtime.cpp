@@ -117,11 +117,6 @@ class FakeBackend final : public AgentBackend {
         history_.clear();
     }
 
-    void replace_history(HistorySnapshot snapshot) override {
-        std::lock_guard<std::mutex> lock(mutex_);
-        history_ = std::move(snapshot.messages);
-    }
-
     HistorySnapshot swap_history(HistorySnapshot snapshot) override {
         std::lock_guard<std::mutex> lock(mutex_);
         HistorySnapshot previous{std::move(history_)};
@@ -809,7 +804,9 @@ TEST(AgentRuntimeTest, ToolCallingWorksAfterSchemaExtractionRestoresToolGrammar)
         return Expected<GenerationResult>(
             GenerationResult{R"({"name":"Alice","age":30})", 0, false, "", {}});
     });
-    auto extraction = runtime.extract(simple_extraction_schema(), "Alice is 30").await_result();
+    auto extraction =
+        runtime.extract(simple_extraction_schema(), MessageView{Role::User, "Alice is 30"})
+            .await_result();
     ASSERT_TRUE(extraction.has_value()) << extraction.error().to_string();
     EXPECT_EQ(extraction->data["name"], "Alice");
 

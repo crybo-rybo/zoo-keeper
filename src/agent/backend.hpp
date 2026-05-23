@@ -47,10 +47,6 @@ class AgentBackend {
     virtual HistorySnapshot get_history() const = 0;
     virtual void clear_history() = 0;
 
-    /**
-     * @brief Replaces the retained message history without flushing the KV cache.
-     */
-    virtual void replace_history(HistorySnapshot snapshot) = 0;
     virtual HistorySnapshot swap_history(HistorySnapshot snapshot) = 0;
 
     virtual void trim_history(size_t max_non_system_messages) = 0;

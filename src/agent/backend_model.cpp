@@ -37,9 +37,6 @@ class ModelBackend final : public AgentBackend {
     void clear_history() override {
         model_->clear_history();
     }
-    void replace_history(HistorySnapshot snapshot) override {
-        model_->replace_history(std::move(snapshot));
-    }
     HistorySnapshot swap_history(HistorySnapshot snapshot) override {
         return model_->swap_history(std::move(snapshot));
     }

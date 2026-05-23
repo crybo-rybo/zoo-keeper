@@ -39,7 +39,6 @@ Expected<void> Model::add_message(MessageView message) {
     impl_->session_.estimated_tokens +=
         estimate_message_tokens(*impl_, impl_->session_.messages.back());
     note_history_append(*impl_);
-    trim_history_to_fit(*impl_);
     return {};
 }
 
@@ -136,11 +135,6 @@ void Model::trim_history(size_t max_non_system_messages) {
         impl_->session_.messages.begin() + static_cast<std::ptrdiff_t>(system_offset),
         impl_->session_.messages.begin() + static_cast<std::ptrdiff_t>(erase_end));
     note_history_rewrite(*impl_);
-}
-
-void trim_history_to_fit(Model::Impl&) {
-    // Called from add_message() — no longer applies an implicit budget.
-    // The agent runtime owns retention policy via trim_history().
 }
 
 void rollback_last_message(Model::Impl& impl) noexcept {
