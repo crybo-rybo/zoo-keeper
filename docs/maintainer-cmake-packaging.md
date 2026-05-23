@@ -147,9 +147,6 @@ flowchart TB
     CP -->|"points at build dir"| BuildTree
     CP -->|"points at install prefix"| InstallTree
 
-    style Consumer fill:#eef4ff,stroke:#4a6fa5
-    style BuildTree fill:#eef8f0,stroke:#3d8b5a
-    style InstallTree fill:#fff8ee,stroke:#c49a3c
 ```
 
 The build-tree path (left) hand-authors imported targets that point back into

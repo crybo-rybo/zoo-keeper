@@ -43,10 +43,6 @@ flowchart TB
         HF --> LC
     end
 
-    style Hub fill:#f0f4ff,stroke:#4a6fa5
-    style StoreInternals fill:#eef8f0,stroke:#3d8b5a
-    style CoreReuse fill:#f5f0ff,stroke:#7b5ea7
-    style Cache fill:#f4f4f4,stroke:#666
 ```
 
 ## HuggingFace Client

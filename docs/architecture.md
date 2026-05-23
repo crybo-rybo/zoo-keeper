@@ -31,11 +31,6 @@ flowchart TB
     A --> C
     C --> LL
 
-    style L4 fill:#f0f4ff,stroke:#4a6fa5
-    style L3 fill:#eef8f0,stroke:#3d8b5a
-    style L2 fill:#fff8ee,stroke:#c49a3c
-    style L1 fill:#f5f0ff,stroke:#7b5ea7
-    style Engine fill:#f4f4f4,stroke:#666
 ```
 
 ## Public Layers
@@ -152,9 +147,6 @@ flowchart LR
     TE -->|"result"| INF
     AWAIT -->|"poll / block until done"| INF
 
-    style Caller fill:#eef4ff,stroke:#4a6fa5
-    style Runtime fill:#eef8f0,stroke:#3d8b5a
-    style Workers fill:#fff8ee,stroke:#c49a3c
 ```
 
 These guarantees are part of the public behavioral contract. Private runtime
@@ -195,10 +187,6 @@ flowchart TD
     RETRY -->|yes| INJ
     RETRY -->|no| FAIL
 
-    style START fill:#eef4ff,stroke:#4a6fa5
-    style DONE fill:#eef8f0,stroke:#3d8b5a
-    style FAIL fill:#ffecec,stroke:#c44
-    style LIMITFAIL fill:#ffecec,stroke:#c44
 ```
 
 See [tools.md](tools.md) for registration, schema rules, and error codes.

@@ -34,10 +34,6 @@ flowchart TD
     RETRY -->|yes| INJ
     RETRY -->|no| FAIL
 
-    style START fill:#eef4ff,stroke:#4a6fa5
-    style DONE fill:#eef8f0,stroke:#3d8b5a
-    style FAIL fill:#ffecec,stroke:#c44
-    style LIMITFAIL fill:#ffecec,stroke:#c44
 ```
 
 ## Typed Registration

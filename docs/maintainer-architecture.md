@@ -36,10 +36,6 @@ flowchart TB
     RT --> IF
     AD --> MD
 
-    style Public fill:#eef4ff,stroke:#4a6fa5
-    style Private fill:#eef8f0,stroke:#3d8b5a
-    style Seam fill:#fff8ee,stroke:#c49a3c
-    style Core fill:#f5f0ff,stroke:#7b5ea7
 ```
 
 ## Boundary Rules

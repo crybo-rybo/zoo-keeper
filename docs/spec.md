@@ -81,11 +81,6 @@ flowchart TB
     A --> C
     C --> LL
 
-    style L4 fill:#f0f4ff,stroke:#4a6fa5
-    style L3 fill:#eef8f0,stroke:#3d8b5a
-    style L2 fill:#fff8ee,stroke:#c49a3c
-    style L1 fill:#f5f0ff,stroke:#7b5ea7
-    style Engine fill:#f4f4f4,stroke:#666
 ```
 
 | Layer | Namespace | Responsibility |
