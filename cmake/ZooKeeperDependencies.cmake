@@ -2,7 +2,6 @@ include_guard(GLOBAL)
 
 include(FetchContent)
 include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlama.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlamaArchive.cmake")
 set(FETCHCONTENT_QUIET OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
@@ -43,11 +42,10 @@ if(TARGET llama OR TARGET llama-common)
 else()
     zoo_configure_llama_build_options()
     set(ZOO_LLAMA_ARCHIVE_URL "${ZOO_LLAMA_ARCHIVE_BASE_URL}/${ZOO_LLAMA_TAG}.tar.gz")
-    zoo_llama_archive_hash_arg(ZOO_LLAMA_URL_HASH)
     FetchContent_Declare(
         llama_cpp
         URL "${ZOO_LLAMA_ARCHIVE_URL}"
-        URL_HASH "${ZOO_LLAMA_URL_HASH}"
+        URL_HASH "SHA256=${ZOO_LLAMA_SHA256}"
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(llama_cpp)

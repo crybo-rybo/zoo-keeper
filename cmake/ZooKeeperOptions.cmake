@@ -23,13 +23,10 @@ if(ZOO_ENABLE_CRAP)
     set(ZOO_BUILD_TESTS ON CACHE BOOL "Build test suite (implied by ZOO_ENABLE_CRAP)" FORCE)
     set(ZOO_ENABLE_COVERAGE ON CACHE BOOL "Coverage instrumentation (implied by ZOO_ENABLE_CRAP)" FORCE)
 endif()
-set(ZOO_LLAMA_DEFAULT_TAG "b8992")
-set(ZOO_LLAMA_DEFAULT_SHA256 "942c56b7e7389edfd19150f886794e3f54fe7d51001ebb072c805c5d05016a48")
-set(ZOO_LLAMA_DEFAULT_ARCHIVE_BASE_URL "https://github.com/ggerganov/llama.cpp/archive/refs/tags")
-set(ZOO_LLAMA_TAG "${ZOO_LLAMA_DEFAULT_TAG}" CACHE STRING
+set(ZOO_LLAMA_TAG "b8992" CACHE STRING
     "llama.cpp release tag used by FetchContent")
-set(ZOO_LLAMA_SHA256 "${ZOO_LLAMA_DEFAULT_SHA256}" CACHE STRING
+set(ZOO_LLAMA_SHA256 "942c56b7e7389edfd19150f886794e3f54fe7d51001ebb072c805c5d05016a48" CACHE STRING
     "Expected SHA-256 digest for the llama.cpp release archive")
-set(ZOO_LLAMA_ARCHIVE_BASE_URL "${ZOO_LLAMA_DEFAULT_ARCHIVE_BASE_URL}" CACHE STRING
+set(ZOO_LLAMA_ARCHIVE_BASE_URL "https://github.com/ggerganov/llama.cpp/archive/refs/tags" CACHE STRING
     "Base URL for llama.cpp release archives used by FetchContent")
 set(ZOO_INTEGRATION_MODEL "" CACHE FILEPATH "Path to a GGUF model used by live integration smoke tests")

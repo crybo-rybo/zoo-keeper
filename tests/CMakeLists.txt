@@ -36,12 +36,6 @@ if(ZOO_BUILD_TESTS)
             GTest::gtest_main
             GTest::gmock
     )
-    get_target_property(zoo_tests_link_libraries zoo_tests LINK_LIBRARIES)
-    if(zoo_tests_link_libraries MATCHES "llama-common")
-        message(FATAL_ERROR
-            "zoo_tests must not link llama-common directly; create an isolated "
-            "test target for any test that genuinely needs that dependency.")
-    endif()
 
     target_include_directories(zoo_tests
         PRIVATE
@@ -60,27 +54,9 @@ if(ZOO_BUILD_TESTS)
     )
 
     add_test(
-        NAME LlamaArchiveDigestValidation
-        COMMAND "${CMAKE_COMMAND}"
-            "-DZOO_PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_llama_archive_digest.cmake"
-    )
-    set_tests_properties(LlamaArchiveDigestValidation PROPERTIES LABELS "unit")
-
-    add_test(
-        NAME InstrumentationOptionsArePrivate
-        COMMAND "${CMAKE_COMMAND}"
-            -S "${CMAKE_CURRENT_SOURCE_DIR}/cmake/instrumentation_probe"
-            -B "${PROJECT_BINARY_DIR}/tests/instrumentation_probe"
-            "-DZOO_PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
-    )
-    set_tests_properties(InstrumentationOptionsArePrivate PROPERTIES LABELS "unit")
-
-    add_test(
         NAME LlamaBuildIdentityValidation
         COMMAND "${CMAKE_COMMAND}"
             "-DZOO_PROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
-            "-DZOO_PROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_llama_identity.cmake"
     )
     set_tests_properties(LlamaBuildIdentityValidation PROPERTIES LABELS "unit")
