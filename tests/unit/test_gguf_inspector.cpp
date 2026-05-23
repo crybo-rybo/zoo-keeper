@@ -139,12 +139,27 @@ TEST(AutoConfigTest, NoGpuOffloadWhenUnsupported) {
 
 TEST(AutoConfigTest, PartialGpuOffloadWhenVramTooSmall) {
     auto info = make_synthetic_info(8ULL * kGiB, 32, 4096, 8192);
-    auto sys = make_system(64ULL * kGiB, true, 4ULL * kGiB);
+    auto sys = make_system(64ULL * kGiB, true, 6ULL * kGiB);
 
     auto config = zoo::core::GgufInspector::auto_configure(info, sys);
     ASSERT_TRUE(config.has_value());
     EXPECT_GT(config->n_gpu_layers, 0);
     EXPECT_LT(config->n_gpu_layers, info.layer_count);
+}
+
+TEST(AutoConfigTest, LargerContextReducesGpuOffloadRecommendation) {
+    auto small_context = make_synthetic_info(8ULL * kGiB, 32, 4096, 2048, 32, 32);
+    auto large_context = make_synthetic_info(8ULL * kGiB, 32, 4096, 32768, 32, 32);
+    auto sys = make_system(256ULL * kGiB, true, 10ULL * kGiB);
+
+    auto small_cfg = zoo::core::GgufInspector::auto_configure(small_context, sys);
+    auto large_cfg = zoo::core::GgufInspector::auto_configure(large_context, sys);
+    ASSERT_TRUE(small_cfg.has_value());
+    ASSERT_TRUE(large_cfg.has_value());
+
+    EXPECT_GT(small_cfg->n_gpu_layers, large_cfg->n_gpu_layers);
+    EXPECT_GT(small_cfg->n_gpu_layers, 0);
+    EXPECT_EQ(large_cfg->n_gpu_layers, 0);
 }
 
 TEST(AutoConfigTest, ContextCappedByTrainingContext) {
@@ -294,6 +309,54 @@ TEST(LoadModelConfigTest, AutoConfigureFailsForMissingFile) {
     auto config = zoo::load_model_config(j);
     ASSERT_FALSE(config.has_value());
     EXPECT_EQ(config.error().code, zoo::ErrorCode::GgufReadFailed);
+}
+
+TEST(LoadModelConfigTest, MalformedJsonReturnsExpectedError) {
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(nlohmann::json::array()));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, UnknownKeysReturnExpectedError) {
+    const nlohmann::json j = {{"model_path", "/models/example.gguf"}, {"unsupported", true}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, MissingModelPathReturnsExpectedError) {
+    const nlohmann::json j = {{"context_size", 4096}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, BadFieldTypeReturnsExpectedError) {
+    const nlohmann::json j = {{"model_path", "/models/example.gguf"}, {"context_size", "large"}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, AutoConfigureBadModelPathTypeReturnsExpectedError) {
+    const nlohmann::json j = {{"model_path", 123}, {"auto_configure", true}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
 }
 
 TEST(GgufInspectorTest, DoesNotChangeGlobalLoggerDuringInspect) {

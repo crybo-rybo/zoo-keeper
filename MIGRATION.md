@@ -22,7 +22,9 @@ requests externally.
 The primary async callback type is now `AsyncTokenCallback`, which can return
 `TokenAction::Stop` to end generation from inside the callback. Existing
 `void(std::string_view)` callback code remains source-compatible and is treated
-as `TokenAction::Continue`.
+as `TokenAction::Continue`. `AsyncTextCallback` remains a stable
+source-compatible alias for `AsyncTokenCallback` for consumers that adopted the
+older name.
 
 ```cpp
 auto handle = agent->chat(
@@ -95,8 +97,9 @@ CMake's `FetchContent` now downloads llama.cpp at configure time, pinned by
   `git submodule update --init --recursive` step from your local workflow.
 - The first `cmake -B build` (or `scripts/build.sh`) requires network access
   to fetch llama.cpp. Subsequent configures reuse `build/_deps/`.
-- To pin a different llama.cpp release tag, edit `ZOO_LLAMA_TAG` (or override
-  with `-DZOO_LLAMA_TAG=...`) — see `docs/instructions/UPDATE_LLAMA_CPP.md`.
+- To pin a different llama.cpp release tag, edit `ZOO_LLAMA_TAG` and
+  `ZOO_LLAMA_SHA256` together (or override both with `-D...`) — see
+  `docs/instructions/UPDATE_LLAMA_CPP.md`.
 - Parent projects that already define `llama` and `llama-common` targets are
   unaffected; Zoo-Keeper still reuses them and skips its own fetch.
 
@@ -190,9 +193,13 @@ present for backwards compatibility.
 
 ### Hub Layer (Additive)
 
-New optional Layer 4 (`zoo::hub`) adds GGUF inspection, HuggingFace downloading,
-and a local model store. Public headers live under `include/zoo/hub/`. The key
-types are `GgufInspector`, `HuggingFaceClient`, and `ModelStore`.
+New optional Layer 4 (`zoo::hub`) adds HuggingFace downloading and a local model
+store. Public hub headers live under `include/zoo/hub/`. The key hub types are
+`HuggingFaceClient` and `ModelStore`.
+
+GGUF inspection, host probing, and hardware-aware auto-configuration are core
+APIs under `zoo::core` (`GgufInspector` and `SystemProbe`). `ModelStore` reuses
+those core APIs when the hub layer is enabled.
 
 This is a purely additive change — non-hub consumers are unaffected. Enable with
 `-DZOO_BUILD_HUB=ON` at configure time.
@@ -311,6 +318,25 @@ Request-scoped inputs now use `MessageView` and `ConversationView`, while
 retained agent state stays behind `get_history()` and `clear_history()`. Use
 `chat()` for appending a new turn and `complete()` for running against a
 supplied history without mutating the retained conversation.
+
+`OwnedMessage` and `OwnedToolCall` are the ownership-explicit canonical names
+for retained messages and structured tool calls. The older `Message` and
+`ToolCallInfo` names remain stable source-compatible aliases, so existing
+consumers do not need to rename them.
+
+`ToolCallView` and `ToolCallSpan` remain supported for request-scoped borrowed
+tool-call metadata, such as adapters from another chat message representation.
+Those views must not outlive the API call; use `OwnedToolCall` for retained or
+async storage.
+
+### Agent Command APIs
+
+Fallible command-lane forms are the primary Agent API for 2.0-era code. Prefer
+`try_set_system_prompt()`, `try_get_history()`, `try_clear_history()`, and the
+timeout overloads so command failures remain observable. The void
+`set_system_prompt()`, `get_history()`, and `clear_history()` methods remain
+available for source compatibility, but they are best-effort conveniences that
+discard command-lane errors.
 
 ```cpp
 // Before: scoped history passed owning Message values directly.

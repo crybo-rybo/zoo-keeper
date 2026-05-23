@@ -87,8 +87,6 @@ Expected<std::string> render_prompt_delta(Model::Impl& impl) {
         delta = new_prompt;
     }
 
-    impl.session_.prompt_state.dirty = false;
-
     // If native tool calling is active, fully refresh the current
     // format/parsing/grammar state from this render pass. The template output
     // can vary with history. Skip this when in Schema mode (extraction) to
@@ -152,18 +150,18 @@ void clear_kv_cache(Model::Impl& impl) {
 }
 
 void note_history_append(Model::Impl& impl) noexcept {
-    note_history_mutation(PromptHistoryMutation::Append, impl.session_.prompt_state.dirty,
+    note_history_mutation(PromptHistoryMutation::Append,
                           impl.session_.prompt_state.committed_prompt_len);
 }
 
 void note_history_rewrite(Model::Impl& impl) noexcept {
-    note_history_mutation(PromptHistoryMutation::Rewrite, impl.session_.prompt_state.dirty,
+    note_history_mutation(PromptHistoryMutation::Rewrite,
                           impl.session_.prompt_state.committed_prompt_len);
     clear_kv_cache(impl);
 }
 
 void note_history_reset(Model::Impl& impl) noexcept {
-    note_history_mutation(PromptHistoryMutation::Reset, impl.session_.prompt_state.dirty,
+    note_history_mutation(PromptHistoryMutation::Reset,
                           impl.session_.prompt_state.committed_prompt_len);
     clear_kv_cache(impl);
 }

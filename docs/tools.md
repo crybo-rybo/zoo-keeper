@@ -14,6 +14,34 @@ path and no synthetic alternate protocol is introduced.
 (manual schema + `tool_trace`). Build and run:
 [`examples/README.md`](../examples/README.md).
 
+```mermaid
+flowchart TD
+    START(["User request enters tool loop"])
+    GEN["Model generates tokens<br/>(native tool grammar when available)"]
+    PARSE["Extract native tool calls<br/>(template parser format)"]
+    TEXT{"Tool calls<br/>detected?"}
+    DONE(["Return TextResponse<br/>+ optional tool_trace"])
+    VAL["Validate arguments<br/>against registered schema"]
+    OK{"Valid?"}
+    EXEC["ToolExecutor runs<br/>registered handler"]
+    INJ["Inject tool result/error<br/>as tool message"]
+    RETRY{"Retries<br/>remaining?"}
+    FAIL(["Fail: ToolRetriesExhausted"])
+    LIMIT{"Within<br/>iteration budget?"}
+    LIMITFAIL(["Fail: ToolLoopLimitReached"])
+
+    START --> GEN --> PARSE --> TEXT
+    TEXT -->|no| DONE
+    TEXT -->|yes| LIMIT
+    LIMIT -->|no| LIMITFAIL
+    LIMIT -->|yes| VAL --> OK
+    OK -->|yes| EXEC --> INJ --> GEN
+    OK -->|no| RETRY
+    RETRY -->|yes| INJ
+    RETRY -->|no| FAIL
+
+```
+
 ## Typed Registration
 
 Register any supported callable and Zoo-Keeper will derive the argument schema

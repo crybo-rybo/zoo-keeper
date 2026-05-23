@@ -146,8 +146,13 @@ int main(int argc, char** argv) {
         return 1;
     }
     auto agent = std::move(*agent_result);
-    agent->set_system_prompt("You are a precise extraction assistant. "
-                             "Extract exactly the fields requested and nothing else.");
+    auto prompt =
+        agent->try_set_system_prompt("You are a precise extraction assistant. "
+                                     "Extract exactly the fields requested and nothing else.");
+    if (!prompt) {
+        std::cerr << "Error: " << prompt.error().to_string() << "\n";
+        return 1;
+    }
 
     run_entity_extraction(*agent);
     run_sentiment_classification(*agent);

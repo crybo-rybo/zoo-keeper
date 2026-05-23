@@ -2,6 +2,42 @@
 
 This note documents the private module boundaries behind the public Zoo-Keeper API. It is for contributors working on runtime internals, build surface cleanup, and structural refactors. Public-facing guidance stays in [architecture.md](architecture.md).
 
+```mermaid
+flowchart TB
+    subgraph Public["Public API (include/zoo/)"]
+        AG["zoo::Agent facade<br/>agent_facade.cpp"]
+    end
+
+    subgraph Private["Private runtime (src/agent/)"]
+        RT["AgentRuntime<br/>inference thread + orchestration"]
+        MB["RuntimeMailbox"]
+        RS["RequestSlots"]
+        CD["CallbackDispatcher"]
+        TE["ToolExecutor"]
+        HL["runtime_helpers<br/>GenerationRunner · RequestHistoryScope"]
+        RT --> MB
+        RT --> RS
+        RT --> CD
+        RT --> TE
+        RT --> HL
+    end
+
+    subgraph Seam["Backend seam"]
+        IF["AgentBackend (interface)"]
+        AD["AgentBackendModel adapter"]
+        AD -. implements .-> IF
+    end
+
+    subgraph Core["Layer 1 (src/core/)"]
+        MD["zoo::core::Model<br/>llama.cpp wrapper"]
+    end
+
+    AG --> RT
+    RT --> IF
+    AD --> MD
+
+```
+
 ## Boundary Rules
 
 - Only headers under `include/zoo/` are part of the supported installed API.
@@ -27,6 +63,10 @@ This note documents the private module boundaries behind the public Zoo-Keeper A
   - the tool executor worker used for handler invocation
   - the backend seam used to talk to the model layer
 - Calling-thread operations that need model state are routed into the runtime instead of touching the model directly.
+
+The dual-lane `RuntimeMailbox` prioritizes control commands over queued
+requests so model-affecting operations never run mid-generation. Request
+backpressure is enforced externally by `RequestSlots`.
 
 ### Backend seam
 
@@ -79,7 +119,7 @@ Contributor rules:
 ## Hub Internals
 
 `zoo::hub::ModelStore` stays the public facade for catalog operations, local
-imports, HuggingFace pulls, and one-line Model/Agent creation. It reuses
+imports, HuggingFace pulls, and metadata-backed configuration. It reuses
 `zoo::core::GgufInspector` from `src/core/gguf_inspector.cpp` for metadata
 inspection and auto-configuration. Its private hub collaborators live under
 `src/hub/`:
@@ -133,3 +173,16 @@ registry, `ToolExecutor`, and callback dispatcher.
 - `maintainer-cmake-packaging.md` explains build-tree vs install-tree package config generation and usage
 
 If a document starts teaching private command types, mailbox structure, or backend adapter details to normal consumers, that content belongs here instead.
+
+## Docs Drift Checklist
+
+Before release prep or API-facing documentation changes, verify:
+
+- `README.md`, `docs/architecture.md`, and `docs/spec.md` agree on layer
+  ownership and namespaces.
+- `docs/hub.md`, `MIGRATION.md`, and `CHANGELOG.md` describe `ZOO_BUILD_HUB`
+  as enabling HuggingFace downloads and the local model store, not core
+  inspection APIs.
+- `GgufInspector`, `SystemProbe`, and hardware-aware auto-configuration are
+  documented as `zoo::core` APIs.
+- Public examples use names that exist under `include/zoo/` at HEAD.

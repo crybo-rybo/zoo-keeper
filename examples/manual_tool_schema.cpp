@@ -68,7 +68,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    agent->set_system_prompt("You are a retrieval assistant. Use tools when they are relevant.");
+    auto prompt = agent->try_set_system_prompt(
+        "You are a retrieval assistant. Use tools when they are relevant.");
+    if (!prompt) {
+        std::cerr << prompt.error().to_string() << '\n';
+        return 1;
+    }
 
     auto handle = agent->chat(
         "Search the docs for llama.cpp. Use a limit of 5 results and keep the answer brief.");

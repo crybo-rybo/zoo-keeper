@@ -64,7 +64,7 @@ Deep dive: [Tools](tools.md).
 ### Cancellation
 
 ```cpp
-auto handle = agent->chat("Write a long essay");
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Write a long essay"});
 handle.cancel();
 ```
 

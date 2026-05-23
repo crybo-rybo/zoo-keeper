@@ -11,6 +11,11 @@ set(ZOO_BUILD_GGML_OPENMP_ENABLED "${GGML_OPENMP_ENABLED}")
 set(ZOO_BUILD_GGML_BLAS_ENABLED "${GGML_BLAS}")
 set(ZOO_BUILD_BLAS_LIBRARIES "${BLAS_LIBRARIES}")
 set(ZOO_BUILD_BLAS_LINKER_FLAGS "${BLAS_LINKER_FLAGS}")
+set(ZOO_LLAMA_EXPECTED_BUILD_COMMIT "${LLAMA_BUILD_COMMIT}")
+if(ZOO_LLAMA_EXPECTED_BUILD_COMMIT STREQUAL "")
+    set(ZOO_LLAMA_EXPECTED_BUILD_COMMIT "${ZOO_LLAMA_TAG}")
+endif()
+set(ZOO_LLAMA_EXPECTED_BUILD_NUMBER "${LLAMA_BUILD_NUMBER}")
 configure_package_config_file(
     ${CMAKE_CURRENT_LIST_DIR}/ZooKeeperBuildTreeConfig.cmake.in
     ${PROJECT_BINARY_DIR}/ZooKeeperBuildTreeConfig.cmake.in
@@ -40,6 +45,7 @@ write_basic_package_version_file(
 install(FILES
     ${PROJECT_BINARY_DIR}/cmake/ZooKeeperConfig.cmake
     ${PROJECT_BINARY_DIR}/ZooKeeperConfigVersion.cmake
+    ${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlamaIdentity.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ZooKeeper
 )
 

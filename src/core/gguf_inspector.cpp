@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <ggml.h>
 #include <gguf.h>
+#include <limits>
 #include <memory>
 #include <string_view>
 
@@ -291,6 +292,21 @@ uint64_t per_token_kv_bytes(const ModelInfo& info) {
     return static_cast<uint64_t>(info.layer_count) * kv_dim * 4;
 }
 
+uint64_t kv_cache_bytes(const ModelInfo& info, int context_size) {
+    if (context_size <= 0) {
+        return 0;
+    }
+    const uint64_t per_token_kv = per_token_kv_bytes(info);
+    if (per_token_kv == 0) {
+        return 0;
+    }
+    const auto context = static_cast<uint64_t>(context_size);
+    if (per_token_kv > std::numeric_limits<uint64_t>::max() / context) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return per_token_kv * context;
+}
+
 // Returns the RAM that should be assumed available for the KV cache. Prefers
 // MemAvailable when the platform reports it; otherwise falls back to total RAM.
 uint64_t usable_ram_bytes(const SystemInfo& sys) {
@@ -331,7 +347,7 @@ int compute_context_size(const ModelInfo& info, const SystemInfo& sys) {
     return std::max(chosen, kContextFloor);
 }
 
-int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
+int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys, int context_size) {
     if (!sys.gpu_offload_supported || sys.gpus.empty()) {
         return 0;
     }
@@ -339,7 +355,12 @@ int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
     if (vram == 0 || info.file_size_bytes == 0) {
         return 0;
     }
-    if (vram >= info.file_size_bytes + info.file_size_bytes / 5) {
+    const uint64_t reserved_kv = kv_cache_bytes(info, context_size);
+    const uint64_t layer_budget = vram > reserved_kv ? vram - reserved_kv : 0;
+    if (layer_budget == 0) {
+        return 0;
+    }
+    if (layer_budget >= info.file_size_bytes + info.file_size_bytes / 5) {
         return -1; // Full offload with ~20% headroom.
     }
     if (info.layer_count <= 0) {
@@ -349,10 +370,9 @@ int compute_n_gpu_layers(const ModelInfo& info, const SystemInfo& sys) {
     if (bytes_per_layer == 0) {
         return 0;
     }
-    // Reserve ~20% of the layers that would fit for KV cache + activations.
-    // KV at 32k context can be hundreds of MB; a flat 2-layer reserve is too
-    // thin for larger contexts and risks runtime OOM.
-    const int64_t fits = static_cast<int64_t>(vram / bytes_per_layer);
+    // Reserve ~20% of the layers that would fit for activations and metadata
+    // after the selected context window's KV cache has already been budgeted.
+    const int64_t fits = static_cast<int64_t>(layer_budget / bytes_per_layer);
     const int64_t headroom = std::max<int64_t>(2, fits / 5);
     const int64_t usable = fits - headroom;
     return usable > 0 ? static_cast<int>(usable) : 0;
@@ -397,7 +417,7 @@ Expected<ModelConfig> GgufInspector::auto_configure(const ModelInfo& info, const
     config.model_path = info.file_path;
     config.context_size = compute_context_size(info, sys);
     config.n_batch = std::min(config.context_size, kDefaultBatchCap);
-    config.n_gpu_layers = compute_n_gpu_layers(info, sys);
+    config.n_gpu_layers = compute_n_gpu_layers(info, sys, config.context_size);
     config.use_mmap = true;
     // Use available RAM (when known) so mlock doesn't starve other processes
     // already consuming a large share of memory.

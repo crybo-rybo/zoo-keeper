@@ -10,6 +10,7 @@
 #include "zoo/tools/validation.hpp"
 #include <chrono>
 #include <exception>
+#include <future>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,8 @@
 namespace zoo::internal::agent {
 
 namespace {
+
+constexpr auto kToolWaitPollInterval = std::chrono::milliseconds(10);
 
 class ToolLoopController {
   public:
@@ -48,11 +51,11 @@ class ToolLoopController {
             }
 
             ToolDetection detection = detect_tool_call(std::move(pass->generation));
-            if (detection.tool_call.has_value()) {
+            if (!detection.tool_calls.empty()) {
                 auto tool_result =
-                    handle_tool_call(*detection.tool_call, std::move(detection.response_text),
-                                     std::move(detection.structured_tool_calls), iteration,
-                                     request.options->record_tool_trace);
+                    handle_tool_calls(detection.tool_calls, std::move(detection.response_text),
+                                      std::move(detection.structured_tool_calls), iteration,
+                                      request.options->record_tool_trace, request);
                 if (!tool_result) {
                     return std::unexpected(tool_result.error());
                 }
@@ -80,7 +83,7 @@ class ToolLoopController {
 
   private:
     struct ToolDetection {
-        std::optional<tools::ToolCall> tool_call;
+        std::vector<tools::ToolCall> tool_calls;
         std::string response_text;
         std::vector<ToolCallInfo> structured_tool_calls;
     };
@@ -109,22 +112,29 @@ class ToolLoopController {
             return detection;
         }
 
-        const auto& first_tc = detection.structured_tool_calls.front();
-        tools::ToolCall tool_call;
-        tool_call.id = first_tc.id;
-        tool_call.name = first_tc.name;
-        try {
-            tool_call.arguments = nlohmann::json::parse(first_tc.arguments_json);
-        } catch (const nlohmann::json::exception&) {
-            tool_call.arguments = nlohmann::json::object();
+        detection.tool_calls.reserve(detection.structured_tool_calls.size());
+        for (const auto& structured_call : detection.structured_tool_calls) {
+            detection.tool_calls.push_back(to_tool_call(structured_call));
         }
-        detection.tool_call = std::move(tool_call);
         return detection;
     }
 
-    Expected<void> handle_tool_call(const tools::ToolCall& tool_call, std::string response_text,
-                                    std::vector<ToolCallInfo> structured_tool_calls, int iteration,
-                                    bool record_tool_trace) {
+    static tools::ToolCall to_tool_call(const ToolCallInfo& structured_call) {
+        tools::ToolCall tool_call;
+        tool_call.id = structured_call.id;
+        tool_call.name = structured_call.name;
+        try {
+            tool_call.arguments = nlohmann::json::parse(structured_call.arguments_json);
+        } catch (const nlohmann::json::exception&) {
+            tool_call.arguments = nlohmann::json::object();
+        }
+        return tool_call;
+    }
+
+    Expected<void> handle_tool_calls(const std::vector<tools::ToolCall>& tool_calls,
+                                     std::string response_text,
+                                     std::vector<ToolCallInfo> structured_tool_calls, int iteration,
+                                     bool record_tool_trace, const ActiveRequest& request) {
         if (!structured_tool_calls.empty()) {
             backend_.add_message(
                 Message::assistant_with_tool_calls(response_text, structured_tool_calls).view());
@@ -133,9 +143,39 @@ class ToolLoopController {
         }
         backend_.finalize_response();
 
-        std::string args_json = structured_tool_calls.empty()
-                                    ? tool_call.arguments.dump()
-                                    : structured_tool_calls.front().arguments_json;
+        for (size_t index = 0; index < tool_calls.size(); ++index) {
+            std::string args_json = index < structured_tool_calls.size()
+                                        ? structured_tool_calls[index].arguments_json
+                                        : tool_calls[index].arguments.dump();
+            auto result = handle_tool_call(tool_calls[index], std::move(args_json), iteration,
+                                           record_tool_trace, request);
+            if (!result) {
+                if (result.error().code == ErrorCode::RequestCancelled) {
+                    add_cancelled_tool_results(tool_calls, index, result.error());
+                }
+                return std::unexpected(result.error());
+            }
+        }
+        return {};
+    }
+
+    void add_cancelled_tool_results(const std::vector<tools::ToolCall>& tool_calls,
+                                    size_t start_index, const Error& error) {
+        const std::string content = "Error: " + error.message;
+        for (size_t index = start_index; index < tool_calls.size(); ++index) {
+            backend_.add_message(Message::tool(content, tool_calls[index].id).view());
+        }
+        callback_dispatcher_.drain();
+    }
+
+    Expected<void> handle_tool_call(const tools::ToolCall& tool_call, std::string args_json,
+                                    int iteration, bool record_tool_trace,
+                                    const ActiveRequest& request) {
+        if (is_cancelled(request)) {
+            return std::unexpected(
+                Error{ErrorCode::RequestCancelled, "Request cancelled before tool execution"});
+        }
+
         if (auto validation_result = validator_.validate(tool_call, tool_registry_);
             !validation_result) {
             return handle_validation_failure(tool_call, std::move(args_json),
@@ -146,9 +186,13 @@ class ToolLoopController {
                 iteration, use_native_tool_calling_);
         auto handler = tool_registry_.find_handler(tool_call.name);
         Expected<nlohmann::json> invoke_result =
-            handler ? tool_executor_.submit(std::move(*handler), tool_call.arguments).get()
+            handler ? await_tool_result(
+                          tool_executor_.submit(std::move(*handler), tool_call.arguments), request)
                     : std::unexpected(
                           Error{ErrorCode::ToolNotFound, "Tool not found: " + tool_call.name});
+        if (!invoke_result && invoke_result.error().code == ErrorCode::RequestCancelled) {
+            return std::unexpected(invoke_result.error());
+        }
 
         std::string tool_result_str;
         std::optional<std::string> result_json;
@@ -172,6 +216,17 @@ class ToolLoopController {
         }
         callback_dispatcher_.drain();
         return {};
+    }
+
+    Expected<nlohmann::json> await_tool_result(std::future<Expected<nlohmann::json>> future,
+                                               const ActiveRequest& request) const {
+        while (future.wait_for(kToolWaitPollInterval) != std::future_status::ready) {
+            if (is_cancelled(request)) {
+                return std::unexpected(
+                    Error{ErrorCode::RequestCancelled, "Request cancelled during tool execution"});
+            }
+        }
+        return future.get();
     }
 
     Expected<void> handle_validation_failure(const tools::ToolCall& tool_call,
@@ -273,19 +328,20 @@ void AgentRuntime::inference_loop() {
 }
 
 void AgentRuntime::handle_request(QueuedRequest request) {
-    const auto active_request = request_slots_->active_request(request);
-    if (!active_request.has_value()) {
-        return;
-    }
-
-    if (active_request->cancelled && active_request->cancelled->load(std::memory_order_acquire)) {
-        request_slots_->resolve_error(
-            request.slot, request.generation,
-            Error{ErrorCode::RequestCancelled, "Request cancelled before processing"});
-        return;
-    }
-
     try {
+        const auto active_request = request_slots_->active_request(request);
+        if (!active_request.has_value()) {
+            return;
+        }
+
+        if (active_request->cancelled &&
+            active_request->cancelled->load(std::memory_order_acquire)) {
+            request_slots_->resolve_error(
+                request.slot, request.generation,
+                Error{ErrorCode::RequestCancelled, "Request cancelled before processing"});
+            return;
+        }
+
         if (active_request->result_kind == ResultKind::Extraction) {
             request_slots_->resolve_extraction(request.slot, request.generation,
                                                process_extraction_request(*active_request));

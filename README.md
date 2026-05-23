@@ -27,10 +27,10 @@ Think of it this way: **llama.cpp is the engine. Zoo-Keeper is the SDK.**
 // Minimal agent flow with a native C++ tool
 zoo::ModelConfig config{.model_path = "models/llama-3-8b.gguf"};
 auto agent = zoo::Agent::create(config).value();
-agent->set_system_prompt("You are a helpful assistant.");
+agent->try_set_system_prompt("You are a helpful assistant.").value();
 agent->register_tool("search", "Search local docs", {"query"},
                      [](std::string query) { return "results for: " + query; });
-auto handle = agent->chat("Find flights to Tokyo");
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Find flights to Tokyo"});
 auto result = handle.await_result().value();
 ```
 
@@ -67,7 +67,7 @@ zoo::ModelConfig config{.model_path = "models/llama-3-8b.gguf"};
 auto agent = zoo::Agent::create(config).value();
 agent->register_tool("add", "Add numbers",
     {"a", "b"}, [](int a, int b) { return a + b; });
-auto handle = agent->chat("What is 2+2?");
+auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "What is 2+2?"});
 auto response = handle.await_result().value();
 // Tool was called, result fed back, final
 // answer generated — all automatically.
@@ -112,6 +112,8 @@ Each layer depends only on the layers below it. Consumers can stop at whichever 
 | **Core** | `zoo::core` | Direct synchronous llama.cpp wrapper — model loading, prompt rendering, generation, chat history, KV cache management | `Model`, `ModelConfig`, `GenerationOptions` |
 
 **Threading model:** The Agent owns a single inference thread. Callers submit requests via `chat()`, `complete()`, or `extract()` and receive a `RequestHandle<T>`. Model access is confined to that thread, streaming callbacks run on a callback dispatcher, and tool handlers run on a tool executor worker.
+
+See [Architecture](docs/architecture.md) for layer diagrams, threading guarantees, and the request lifecycle.
 
 ## Use Cases
 
@@ -164,6 +166,8 @@ scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 
 Source and more programs: [`examples/README.md`](examples/README.md) (includes
 `demo_chat` with tools, streaming, and metrics).
+
+For CMake integration, configuration, tools, streaming, and error handling, see [Getting Started](docs/getting-started.md) and [Building](docs/building.md).
 
 ## Feature Highlights
 
@@ -245,6 +249,21 @@ if (!result) {
 | `zoo::hub::ModelStore` | Local model catalog with aliases and auto-configuration |
 | `zoo::hub::HuggingFaceClient` | HuggingFace downloading with shared llama.cpp cache |
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/getting-started.md) | First build, first agent, core API walkthrough |
+| [Building](docs/building.md) | CMake setup, FetchContent, Metal/CUDA, sanitizers, install/package |
+| [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, history budgets |
+| [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
+| [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
+| [Hub Layer](docs/hub.md) | HuggingFace downloading, local model store, and how hub code uses core inspection |
+| [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
+| [Examples](docs/examples.md) | Runnable programs under `examples/`; API sketches in docs |
+| [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
+| [Migration](MIGRATION.md) | Upgrade notes for major API changes |
+
 ## Testing
 
 ```bash
@@ -259,20 +278,7 @@ scripts/build.sh -DZOO_BUILD_INTEGRATION_TESTS=ON
 ZOO_INTEGRATION_MODEL=/path/to/model.gguf scripts/test.sh
 ```
 
-## Documentation
-
-| Guide | Description |
-|-------|-------------|
-| [Getting Started](docs/getting-started.md) | First build, first agent, core API walkthrough |
-| [Building](docs/building.md) | CMake setup, FetchContent, Metal/CUDA, sanitizers, install/package |
-| [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, history budgets |
-| [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
-| [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
-| [Hub Layer](docs/hub.md) | GGUF inspection, HuggingFace downloading, local model store, auto-configuration |
-| [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
-| [Examples](docs/examples.md) | Runnable programs under `examples/`; API sketches in docs |
-| [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
-| [Migration](MIGRATION.md) | Upgrade notes for major API changes |
+See [Building](docs/building.md) for hub builds, integration tests, and sanitizers.
 
 ## Acknowledgments
 

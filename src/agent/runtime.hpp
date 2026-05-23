@@ -47,10 +47,6 @@ class AgentRuntime {
                                          GenerationOverride generation = {},
                                          AsyncTokenCallback callback = {});
     RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
-                                              std::string_view user_message,
-                                              GenerationOverride generation = {},
-                                              AsyncTokenCallback callback = {});
-    RequestHandle<ExtractionResponse> extract(const nlohmann::json& output_schema,
                                               MessageView message,
                                               GenerationOverride generation = {},
                                               AsyncTokenCallback callback = {});

@@ -41,7 +41,7 @@ struct ActiveRequest {
     HistoryMode history_mode = HistoryMode::Append;
     const std::vector<Message>* messages = nullptr;
     const GenerationOptions* options = nullptr;
-    AsyncTokenCallback* streaming_callback = nullptr;
+    std::shared_ptr<AsyncTokenCallback> streaming_callback;
     const std::optional<nlohmann::json>* extraction_schema = nullptr;
     const std::atomic<bool>* cancelled = nullptr;
     ResultKind result_kind = ResultKind::Text;
@@ -96,8 +96,7 @@ class RequestSlots {
         };
     }
 
-    [[nodiscard]] std::optional<ActiveRequest>
-    active_request(const QueuedRequest& request) noexcept {
+    [[nodiscard]] std::optional<ActiveRequest> active_request(const QueuedRequest& request) {
         if (request.slot >= slots_.size()) {
             return std::nullopt;
         }
@@ -108,16 +107,21 @@ class RequestSlots {
             return std::nullopt;
         }
 
-        return ActiveRequest{
-            slot.request_id,
-            slot.payload.history_mode,
-            &slot.payload.messages,
-            &slot.payload.options,
-            &slot.payload.streaming_callback,
-            &slot.payload.extraction_schema,
-            &slot.cancelled,
-            slot.payload.result_kind,
-        };
+        std::shared_ptr<AsyncTokenCallback> callback;
+        if (slot.payload.streaming_callback) {
+            callback = std::make_shared<AsyncTokenCallback>(slot.payload.streaming_callback);
+        }
+
+        ActiveRequest active;
+        active.id = slot.request_id;
+        active.history_mode = slot.payload.history_mode;
+        active.messages = &slot.payload.messages;
+        active.options = &slot.payload.options;
+        active.streaming_callback = std::move(callback);
+        active.extraction_schema = &slot.payload.extraction_schema;
+        active.cancelled = &slot.cancelled;
+        active.result_kind = slot.payload.result_kind;
+        return active;
     }
 
     void cancel(RequestId id) {
@@ -135,6 +139,16 @@ class RequestSlots {
         std::lock_guard<std::mutex> slot_lock(slot.mutex);
         if (slot.occupied && slot.request_id == id) {
             slot.cancelled.store(true, std::memory_order_release);
+        }
+    }
+
+    void cancel_all() {
+        for (auto& slot_ptr : slots_) {
+            Slot& slot = *slot_ptr;
+            std::lock_guard<std::mutex> slot_lock(slot.mutex);
+            if (slot.occupied && !slot.ready) {
+                slot.cancelled.store(true, std::memory_order_release);
+            }
         }
     }
 

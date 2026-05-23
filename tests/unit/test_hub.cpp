@@ -162,6 +162,30 @@ TEST(HuggingFaceParseTest, EmptyFilenameAfterSeparator) {
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
 }
 
+TEST(HuggingFaceParseTest, RejectsUnsafeExplicitFilenames) {
+    std::vector<std::string> identifiers = {
+        "owner/repo::.",
+        "owner/repo::..",
+        "owner/repo::subdir/model.gguf",
+        "owner/repo::subdir\\model.gguf",
+    };
+    identifiers.push_back(std::string("owner/repo::bad") + '\0' + "name.gguf");
+
+    for (const auto& identifier : identifiers) {
+        auto result = zoo::hub::HuggingFaceClient::parse_identifier(identifier);
+        EXPECT_FALSE(result.has_value()) << identifier;
+        EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+    }
+}
+
+TEST(HuggingFaceParseTest, ParseSingleSegmentExplicitFilename) {
+    auto result =
+        zoo::hub::HuggingFaceClient::parse_identifier("owner/repo::model.name-v2.Q4_K_M.gguf");
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->filename.has_value());
+    EXPECT_EQ(*result->filename, "model.name-v2.Q4_K_M.gguf");
+}
+
 TEST(HuggingFaceParseTest, MultipleSlashes) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("a/b/c");
     ASSERT_FALSE(result.has_value());
@@ -495,6 +519,43 @@ TEST(ModelStoreCatalogTest, OpenRejectsDuplicateAliasesInCatalog) {
     EXPECT_EQ(store.error().code, zoo::ErrorCode::StoreCorrupted);
 }
 
+TEST(ModelStoreCatalogTest, OpenRejectsUnsupportedCatalogVersion) {
+    TempDir temp_dir;
+
+    write_catalog(temp_dir.path(),
+                  nlohmann::json{{"version", 2}, {"models", nlohmann::json::array()}});
+
+    zoo::hub::ModelStoreConfig config;
+    config.store_directory = temp_dir.path().string();
+
+    auto store = zoo::hub::ModelStore::open(config);
+    ASSERT_FALSE(store.has_value());
+    EXPECT_EQ(store.error().code, zoo::ErrorCode::StoreCorrupted);
+}
+
+TEST(ModelStoreCatalogTest, OpenRejectsMissingRequiredEntryFields) {
+    TempDir temp_dir;
+
+    write_catalog(
+        temp_dir.path(),
+        nlohmann::json{
+            {"version", 1},
+            {"models", nlohmann::json::array({nlohmann::json{
+                           {"file_path", "/tmp/model.gguf"},
+                           {"info", {{"file_path", "/tmp/model.gguf"}, {"name", "model"}}},
+                           {"aliases", nlohmann::json::array()},
+                           {"added_at", "2026-03-31T12:00:00Z"},
+                       }})},
+        });
+
+    zoo::hub::ModelStoreConfig config;
+    config.store_directory = temp_dir.path().string();
+
+    auto store = zoo::hub::ModelStore::open(config);
+    ASSERT_FALSE(store.has_value());
+    EXPECT_EQ(store.error().code, zoo::ErrorCode::StoreCorrupted);
+}
+
 TEST(ModelStoreCatalogTest, AddAliasRejectsEmptyAlias) {
     TempDir temp_dir;
 
@@ -548,4 +609,34 @@ TEST(ModelStoreCatalogTest, AddRejectsDuplicateAndEmptyAliases) {
     auto duplicate_within_add = (*store)->add(second_copy.string(), {"fixture", "fixture"});
     ASSERT_FALSE(duplicate_within_add.has_value());
     EXPECT_EQ(duplicate_within_add.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(ModelStoreCatalogTest, MutationsReloadCatalogToAvoidLostUpdates) {
+    const auto fixture_path = fixture_vocab_model_path();
+    ASSERT_TRUE(std::filesystem::exists(fixture_path)) << fixture_path.string();
+
+    TempDir temp_dir;
+    const auto first_copy = temp_dir.path() / "first.gguf";
+    const auto second_copy = temp_dir.path() / "second.gguf";
+    std::filesystem::copy_file(fixture_path, first_copy);
+    std::filesystem::copy_file(fixture_path, second_copy);
+
+    zoo::hub::ModelStoreConfig config;
+    config.store_directory = temp_dir.path().string();
+
+    auto first_store = zoo::hub::ModelStore::open(config);
+    ASSERT_TRUE(first_store.has_value()) << first_store.error().to_string();
+    auto second_store = zoo::hub::ModelStore::open(config);
+    ASSERT_TRUE(second_store.has_value()) << second_store.error().to_string();
+
+    auto first = (*first_store)->add(first_copy.string(), {"first"});
+    ASSERT_TRUE(first.has_value()) << first.error().to_string();
+    auto second = (*second_store)->add(second_copy.string(), {"second"});
+    ASSERT_TRUE(second.has_value()) << second.error().to_string();
+
+    auto reopened = zoo::hub::ModelStore::open(config);
+    ASSERT_TRUE(reopened.has_value()) << reopened.error().to_string();
+    EXPECT_EQ((*reopened)->list().size(), 2u);
+    EXPECT_TRUE((*reopened)->find("first").has_value());
+    EXPECT_TRUE((*reopened)->find("second").has_value());
 }
