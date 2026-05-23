@@ -311,6 +311,54 @@ TEST(LoadModelConfigTest, AutoConfigureFailsForMissingFile) {
     EXPECT_EQ(config.error().code, zoo::ErrorCode::GgufReadFailed);
 }
 
+TEST(LoadModelConfigTest, MalformedJsonReturnsExpectedError) {
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(nlohmann::json::array()));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, UnknownKeysReturnExpectedError) {
+    const nlohmann::json j = {{"model_path", "/models/example.gguf"}, {"unsupported", true}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, MissingModelPathReturnsExpectedError) {
+    const nlohmann::json j = {{"context_size", 4096}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, BadFieldTypeReturnsExpectedError) {
+    const nlohmann::json j = {{"model_path", "/models/example.gguf"}, {"context_size", "large"}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
+TEST(LoadModelConfigTest, AutoConfigureBadModelPathTypeReturnsExpectedError) {
+    const nlohmann::json j = {{"model_path", 123}, {"auto_configure", true}};
+
+    zoo::Expected<zoo::ModelConfig> config;
+    EXPECT_NO_THROW(config = zoo::load_model_config(j));
+
+    ASSERT_FALSE(config.has_value());
+    EXPECT_EQ(config.error().code, zoo::ErrorCode::InvalidConfig);
+}
+
 TEST(GgufInspectorTest, DoesNotChangeGlobalLoggerDuringInspect) {
     const auto model_path = fixture_vocab_model_path();
     ASSERT_TRUE(std::filesystem::exists(model_path)) << model_path.string();

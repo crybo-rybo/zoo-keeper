@@ -93,6 +93,10 @@ inline void to_json(nlohmann::json& j, const ModelConfig& config) {
 
 namespace detail {
 
+inline constexpr std::array<const char*, 7> kModelConfigKeys = {
+    "model_path", "context_size", "n_batch",       "n_gpu_layers",
+    "use_mmap",   "use_mlock",    "auto_configure"};
+
 // Applies explicit JSON overrides on top of an existing ModelConfig. Used by
 // both the pure deserializer and the auto-configure resolver.
 inline void apply_model_config_overrides(const nlohmann::json& j, ModelConfig& config) {
@@ -121,11 +125,7 @@ inline void apply_model_config_overrides(const nlohmann::json& j, ModelConfig& c
 inline void from_json(const nlohmann::json& j, ModelConfig& config) {
     // "auto_configure" is consumed by `load_model_config`, not here. Listed so
     // strict key validation does not reject configs that opt into auto-config.
-    static constexpr std::array<const char*, 7> kAllowedKeys = {
-        "model_path", "context_size", "n_batch",       "n_gpu_layers",
-        "use_mmap",   "use_mlock",    "auto_configure"};
-
-    detail::reject_unknown_keys(j, "model config", kAllowedKeys);
+    detail::reject_unknown_keys(j, "model config", detail::kModelConfigKeys);
 
     if (!j.contains("model_path")) {
         throw std::invalid_argument("ModelConfig JSON must contain required key: model_path");
@@ -163,23 +163,37 @@ inline Expected<ModelConfig> auto_configure_model_path(const std::string& model_
 // callers should treat it as an explicit configuration step rather than pure
 // parsing.
 inline Expected<ModelConfig> load_model_config(const nlohmann::json& j) {
-    if (!j.is_object() || !j.value("auto_configure", false)) {
-        return j.get<ModelConfig>();
-    }
+    try {
+        detail::reject_unknown_keys(j, "model config", detail::kModelConfigKeys);
 
-    // Auto-configure path: skip the regular deserializer (its derived values
-    // would be discarded) and resolve hardware-aware defaults from the GGUF
-    // file, then layer explicit overrides on top.
-    detail::require_object(j, "model config");
-    if (!j.contains("model_path")) {
-        throw std::invalid_argument("ModelConfig JSON must contain required key: model_path");
+        bool auto_configure = false;
+        if (auto it = j.find("auto_configure"); it != j.end()) {
+            it->get_to(auto_configure);
+        }
+        if (!auto_configure) {
+            return j.get<ModelConfig>();
+        }
+
+        // Auto-configure path: skip the regular deserializer (its derived values
+        // would be discarded) and resolve hardware-aware defaults from the GGUF
+        // file, then layer explicit overrides on top.
+        if (!j.contains("model_path")) {
+            return std::unexpected(Error{ErrorCode::InvalidConfig,
+                                         "ModelConfig JSON must contain required key: model_path"});
+        }
+        auto resolved = detail::auto_configure_model_path(j.at("model_path").get<std::string>());
+        if (!resolved) {
+            return std::unexpected(resolved.error());
+        }
+        detail::apply_model_config_overrides(j, *resolved);
+        return *resolved;
+    } catch (const nlohmann::json::exception& e) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidConfig, "Invalid model config JSON", e.what()});
+    } catch (const std::exception& e) {
+        return std::unexpected(
+            Error{ErrorCode::InvalidConfig, "Invalid model config JSON", e.what()});
     }
-    auto resolved = detail::auto_configure_model_path(j.at("model_path").get<std::string>());
-    if (!resolved) {
-        return std::unexpected(resolved.error());
-    }
-    detail::apply_model_config_overrides(j, *resolved);
-    return *resolved;
 }
 
 inline void to_json(nlohmann::json& j, const AgentConfig& config) {
