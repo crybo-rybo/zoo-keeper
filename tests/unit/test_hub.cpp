@@ -3,6 +3,7 @@
  * @brief Unit tests for hub layer: identifier parsing, auto-config, catalog JSON.
  */
 
+#include "core/hf_download.hpp"
 #include "hub/download_validation.hpp"
 #include "hub/hf_cache_paths.hpp"
 #include "hub/store_internals.hpp"
@@ -202,6 +203,19 @@ TEST(HuggingFaceParseTest, SlashAtEnd) {
     auto result = zoo::hub::HuggingFaceClient::parse_identifier("owner/");
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+}
+
+TEST(HfDownloadAdapterTest, SplitRepoTagRejectsInvalidIdentifier) {
+    auto result = zoo::core::detail::split_repo_tag("not-a-repo");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, zoo::ErrorCode::InvalidModelIdentifier);
+}
+
+TEST(HfDownloadAdapterTest, SplitRepoTagParsesOwnerRepoTag) {
+    auto result = zoo::core::detail::split_repo_tag("owner/repo:Q4_K_M");
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+    EXPECT_EQ(result->repo, "owner/repo");
+    EXPECT_EQ(result->tag, "Q4_K_M");
 }
 
 // ---- ModelStoreConfig validation ----
