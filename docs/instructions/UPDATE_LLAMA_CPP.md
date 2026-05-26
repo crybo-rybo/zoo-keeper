@@ -23,11 +23,12 @@ can affect Core, Hub, and packaging code.
        "Expected SHA-256 digest for the llama.cpp release archive")
    ```
 
-3. **Force a fresh fetch and build.** FetchContent verifies the downloaded
-   archive against `ZOO_LLAMA_SHA256` and caches sources under
-   `build/_deps/`; clear them before reconfiguring so the new SHA is
-   actually picked up:
+3. **Force a fresh configure, fetch, and build.** FetchContent verifies the
+   downloaded archive against `ZOO_LLAMA_SHA256`, while CMake caches the
+   selected tag and digest in `build/CMakeCache.txt`. Clear both the cache and
+   fetched sources before reconfiguring so the new SHA is actually picked up:
    ```bash
+   rm -f build/CMakeCache.txt
    rm -rf build/_deps/llama_cpp-* build/_deps/llama_cpp-build
    scripts/build.sh -DZOO_BUILD_TESTS=ON -DZOO_BUILD_HUB=ON -DZOO_BUILD_EXAMPLES=ON
    ```
