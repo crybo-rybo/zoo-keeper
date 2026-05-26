@@ -171,6 +171,7 @@ registry, `ToolExecutor`, and callback dispatcher.
 - `architecture.md` explains the public layers, targets, and user-visible threading guarantees
 - `maintainer-architecture.md` explains private ownership and implementation seams
 - `maintainer-cmake-packaging.md` explains build-tree vs install-tree package config generation and usage
+- `maintainer-2.0-cleanup.md` records the completed audit findings and branch mapping
 
 If a document starts teaching private command types, mailbox structure, or backend adapter details to normal consumers, that content belongs here instead.
 
