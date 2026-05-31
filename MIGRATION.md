@@ -246,8 +246,6 @@ a subdirectory build, pass `-DZOO_ENABLE_INSTALL=ON` explicitly.
 
 The build system was refactored into dedicated files under `cmake/`. The public
 CMake interface (`ZooKeeper::zoo`, `ZooKeeper::zoo_core`, option names) is unchanged.
-`FetchDependencies.cmake` now delegates to `ZooKeeperDependencies.cmake`; both remain
-present for backwards compatibility.
 
 ## v1.1.0 → v1.1.1
 

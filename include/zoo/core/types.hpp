@@ -579,9 +579,6 @@ class AsyncTokenCallback {
     bool returns_action_ = false;
 };
 
-/// Stable source-compatible alias for the pre-`TokenAction` async callback name.
-using AsyncTextCallback = AsyncTokenCallback;
-
 /**
  * @brief Model loading and backend configuration.
  */

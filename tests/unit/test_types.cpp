@@ -76,7 +76,6 @@ TEST(ToolCallTest, OwnedToolCallProducesBorrowedView) {
 TEST(CoreAliasTest, StableCompatibilityAliasesNameOwningTypes) {
     static_assert(std::same_as<zoo::Message, zoo::OwnedMessage>);
     static_assert(std::same_as<zoo::ToolCallInfo, zoo::OwnedToolCall>);
-    static_assert(std::same_as<zoo::AsyncTextCallback, zoo::AsyncTokenCallback>);
 }
 
 TEST(ToolCallTest, ToolCallSpanSupportsBorrowedAndOwnedStorage) {

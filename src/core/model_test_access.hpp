@@ -59,11 +59,6 @@ struct ModelTestAccess {
     }
 
     static GenerationOptions resolve_generation_options(Model& model,
-                                                        const GenerationOptions& overrides) {
-        return zoo::core::resolve_generation_options(*model.impl_, GenerationOverride(overrides));
-    }
-
-    static GenerationOptions resolve_generation_options(Model& model,
                                                         GenerationOverride generation) {
         return zoo::core::resolve_generation_options(*model.impl_, generation);
     }

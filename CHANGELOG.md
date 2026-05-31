@@ -7,6 +7,11 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- Dropped the deprecated `zoo::AsyncTextCallback` source-compatibility alias;
+  use `zoo::AsyncTokenCallback` directly.
+
 ## [1.1.6] - 2026-05-23
 
 ### Added
