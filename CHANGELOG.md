@@ -7,6 +7,11 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- Dropped the unused reserved `zoo::hub::CachedModelInfo::size_bytes` field;
+  llama.cpp no longer reports cache size and nothing consumed the value.
+
 ## [1.1.6] - 2026-05-23
 
 ### Added

@@ -196,7 +196,6 @@ std::vector<CachedModelInfo> HuggingFaceClient::list_cached_models() {
         info.user = entry.repo.substr(0, slash);
         info.model = entry.repo.substr(slash + 1);
         info.tag = entry.tag.empty() ? "latest" : std::move(entry.tag);
-        info.size_bytes = 0;
         result.push_back(std::move(info));
     }
 
