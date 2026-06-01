@@ -2,6 +2,26 @@
 
 This document covers what consumers need to know when upgrading Zoo-Keeper.
 
+## Unreleased
+
+### Source Compatibility Shims Removed
+
+The compatibility-only names and forwarding surfaces have been removed. Update
+call sites to the canonical API before upgrading:
+
+- `zoo::Message` → `zoo::OwnedMessage`
+- `zoo::ToolCallInfo` → `zoo::OwnedToolCall`
+- `zoo::AsyncTextCallback` → `zoo::AsyncTokenCallback`
+- `ZooKeeper::zoo_core` → `ZooKeeper::zoo`
+
+`CachedModelInfo::size_bytes` has also been removed because llama.cpp's cache
+listing no longer reports cache entry sizes.
+
+`GenerationOverride` no longer accepts implicit construction from
+`GenerationOptions`. Use `GenerationOverride::inherit_defaults()` to inherit
+model or agent defaults, or
+`GenerationOverride::explicit_options(options)` to apply request options exactly.
+
 ## v1.1.5 → v1.1.6
 
 ### llama.cpp b9296
@@ -79,11 +99,8 @@ requests externally.
 ### Streaming Callbacks
 
 The primary async callback type is now `AsyncTokenCallback`, which can return
-`TokenAction::Stop` to end generation from inside the callback. Existing
-`void(std::string_view)` callback code remains source-compatible and is treated
-as `TokenAction::Continue`. `AsyncTextCallback` remains a stable
-source-compatible alias for `AsyncTokenCallback` for consumers that adopted the
-older name.
+`TokenAction::Stop` to end generation from inside the callback. Void-returning
+callbacks are accepted and are treated as `TokenAction::Continue`.
 
 ```cpp
 auto handle = agent->chat(
@@ -98,9 +115,8 @@ auto handle = agent->chat(
 ### Explicit Generation Overrides
 
 `GenerationOverride` distinguishes "inherit configured defaults" from "use
-these exact request options." Existing overloads that accept `GenerationOptions`
-still compile and keep their legacy inheritance behavior when passed
-`GenerationOptions{}`.
+these exact request options." Pass the explicit override wrapper at request
+call sites.
 
 Use:
 
@@ -191,9 +207,9 @@ but `ModelEntry::file_path` may now point under a path like:
 .../models--owner--repo/snapshots/<commit>/<file>.gguf
 ```
 
-`CachedModelInfo::size_bytes` is retained for source compatibility but now
-reports `0`, because llama.cpp b8992 cache listing entries expose repository and
-tag only.
+Cache listing entries expose repository and tag. The compatibility-only
+`CachedModelInfo::size_bytes` member was later removed because llama.cpp no
+longer reports cache sizes.
 
 ### HuggingFace Identifiers
 
@@ -245,7 +261,7 @@ a subdirectory build, pass `-DZOO_ENABLE_INSTALL=ON` explicitly.
 ### CMake Module Restructure (Internal)
 
 The build system was refactored into dedicated files under `cmake/`. The public
-CMake interface (`ZooKeeper::zoo`, `ZooKeeper::zoo_core`, option names) is unchanged.
+CMake interface (`ZooKeeper::zoo`, option names) is unchanged.
 `FetchDependencies.cmake` now delegates to `ZooKeeperDependencies.cmake`; both remain
 present for backwards compatibility.
 
@@ -380,9 +396,8 @@ retained agent state stays behind `get_history()` and `clear_history()`. Use
 supplied history without mutating the retained conversation.
 
 `OwnedMessage` and `OwnedToolCall` are the ownership-explicit canonical names
-for retained messages and structured tool calls. The older `Message` and
-`ToolCallInfo` names remain stable source-compatible aliases, so existing
-consumers do not need to rename them.
+for retained messages and structured tool calls. The older compatibility aliases
+were removed; use the canonical names in retained-history code.
 
 `ToolCallView` and `ToolCallSpan` remain supported for request-scoped borrowed
 tool-call metadata, such as adapters from another chat message representation.
@@ -424,11 +439,11 @@ if (auto history = agent->get_history(std::chrono::seconds{5}); !history) {
 ```
 
 ```cpp
-// Before: scoped history passed owning Message values directly.
-std::vector<zoo::Message> history = {
-    zoo::Message::user("Hello"),
-    zoo::Message::assistant("Hi there"),
-    zoo::Message::user("What did I just say?")
+// Before: scoped history passed owning message values directly.
+std::vector<zoo::OwnedMessage> history = {
+    zoo::OwnedMessage::user("Hello"),
+    zoo::OwnedMessage::assistant("Hi there"),
+    zoo::OwnedMessage::user("What did I just say?")
 };
 
 auto scoped = agent->complete(history);
@@ -473,7 +488,8 @@ Source files (`src/`) and CMake packaging internals are not part of the compatib
 
 `ZooKeeper::zoo` is and has been the primary consumer target throughout 0.2.x and into 1.0.0.
 
-`ZooKeeper::zoo_core` remains available as a compatibility alias that forwards to `ZooKeeper::zoo`. New consumers should use `ZooKeeper::zoo` directly.
+The old `ZooKeeper::zoo_core` compatibility target has been removed. Consumers
+should link `ZooKeeper::zoo` directly.
 
 ### C++ Standard
 
@@ -489,7 +505,7 @@ CMake `FetchContent` instead; see the v1.1.2 → v1.1.3 notes above.
 ### What Has Not Changed
 
 - All public headers: `zoo/zoo.hpp`, `zoo/agent.hpp`, `zoo/core/model.hpp`, `zoo/core/types.hpp`, `zoo/tools/registry.hpp`, `zoo/tools/parser.hpp`, `zoo/tools/validation.hpp`
-- All public types: `zoo::Agent`, `zoo::core::Model`, `zoo::Message`, `zoo::Role`, `zoo::Config`, `zoo::Response`, `zoo::Error` (note: `zoo::Config` and `zoo::Response` were later split in v1.1.0 — see the v1.0.3 → v1.1.0 section for the current API surface)
+- All public types: `zoo::Agent`, `zoo::core::Model`, `zoo::OwnedMessage`, `zoo::Role`, `zoo::Config`, `zoo::Response`, `zoo::Error` (note: `zoo::Config` and `zoo::Response` were later split in v1.1.0 — see the v1.0.3 → v1.1.0 section for the current API surface)
 - Error handling: `std::expected`-based throughout
 - Include paths: unchanged
 

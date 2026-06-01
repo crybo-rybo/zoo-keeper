@@ -22,7 +22,8 @@ class ModelBackend final : public AgentBackend {
     Expected<GenerationResult> generate_from_history(const GenerationOptions& options,
                                                      TokenCallback on_token,
                                                      CancellationCallback should_cancel) override {
-        return model_->generate_from_history(options, on_token, should_cancel);
+        return model_->generate_from_history(GenerationOverride::explicit_options(options),
+                                             on_token, should_cancel);
     }
 
     void finalize_response() override {

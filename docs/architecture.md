@@ -206,7 +206,6 @@ See [tools.md](tools.md) for registration, schema rules, and error codes.
 | Target | Status | Notes |
 |--------|--------|-------|
 | `ZooKeeper::zoo` | Primary | Recommended target for new consumers |
-| `ZooKeeper::zoo_core` | Compatibility only | Forwarding target retained for existing consumers |
 
 ## Design Goals
 

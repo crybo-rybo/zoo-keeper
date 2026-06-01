@@ -21,9 +21,9 @@ using zoo::Expected;
 using zoo::ExtractionResponse;
 using zoo::GenerationOptions;
 using zoo::HistorySnapshot;
-using zoo::Message;
 using zoo::MessageView;
 using zoo::ModelConfig;
+using zoo::OwnedMessage;
 using zoo::Role;
 using zoo::TokenAction;
 using zoo::TokenCallback;
@@ -44,7 +44,7 @@ class FakeBackend final : public AgentBackend {
 
     Expected<void> add_message(MessageView message) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        history_.push_back(Message::from_view(message));
+        history_.push_back(OwnedMessage::from_view(message));
         return {};
     }
 
@@ -68,7 +68,7 @@ class FakeBackend final : public AgentBackend {
 
     void set_system_prompt(std::string_view prompt) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        Message system_message = Message::system(std::string(prompt));
+        OwnedMessage system_message = OwnedMessage::system(std::string(prompt));
         if (!history_.empty() && history_.front().role == Role::System) {
             history_.front() = std::move(system_message);
         } else {
@@ -126,7 +126,7 @@ class FakeBackend final : public AgentBackend {
   private:
     mutable std::mutex mutex_;
     std::deque<GenerationAction> generations_;
-    std::vector<Message> history_;
+    std::vector<OwnedMessage> history_;
 };
 
 ModelConfig make_model_config() {
@@ -199,10 +199,10 @@ TEST(ExtractionRuntimeTest, StatelessExtractDoesNotMutateHistory) {
     ASSERT_TRUE(before_result.has_value()) << before_result.error().to_string();
     const auto before = *before_result;
 
-    const std::array<Message, 2> scoped_messages = {Message::system("Extract entities."),
-                                                    Message::user("Bob is 42")};
-    auto handle = runtime.extract(simple_schema(),
-                                  zoo::ConversationView{std::span<const Message>(scoped_messages)});
+    const std::array<OwnedMessage, 2> scoped_messages = {OwnedMessage::system("Extract entities."),
+                                                         OwnedMessage::user("Bob is 42")};
+    auto handle = runtime.extract(
+        simple_schema(), zoo::ConversationView{std::span<const OwnedMessage>(scoped_messages)});
     auto result = handle.await_result();
 
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
@@ -229,7 +229,7 @@ TEST(ExtractionRuntimeTest, ExtractStreamsTokens) {
 
     std::string streamed;
     auto handle = runtime.extract(simple_schema(), MessageView{Role::User, "Alice is 30"},
-                                  GenerationOptions{},
+                                  zoo::GenerationOverride::inherit_defaults(),
                                   [&](std::string_view token) { streamed.append(token); });
     auto result = handle.await_result();
 

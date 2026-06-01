@@ -309,11 +309,6 @@ struct OwnedMessage {
     bool operator==(const OwnedMessage& other) const = default;
 };
 
-/// Stable source-compatible alias for the owning retained-history message type.
-using Message = OwnedMessage;
-/// Stable source-compatible alias for the owning structured tool-call type.
-using ToolCallInfo = OwnedToolCall;
-
 /**
  * @brief Borrowed read-only message sequence used by request-scoped APIs.
  */
@@ -579,9 +574,6 @@ class AsyncTokenCallback {
     bool returns_action_ = false;
 };
 
-/// Stable source-compatible alias for the pre-`TokenAction` async callback name.
-using AsyncTextCallback = AsyncTokenCallback;
-
 /**
  * @brief Model loading and backend configuration.
  */
@@ -687,19 +679,6 @@ struct GenerationOptions {
 class GenerationOverride {
   public:
     GenerationOverride() noexcept = default;
-
-    /// Implicit conversion from `GenerationOptions` for source-compatibility with
-    /// pre-`GenerationOverride` overloads. A default-constructed `GenerationOptions{}`
-    /// (`is_default()` true) maps to `inherit_defaults()`; any non-default value maps
-    /// to `explicit_options()`. Use the static factories below when you need that
-    /// distinction made unambiguously at the call site.
-    GenerationOverride(const GenerationOptions& options)
-        : options_(options.is_default() ? std::nullopt
-                                        : std::optional<GenerationOptions>(options)) {}
-
-    GenerationOverride(GenerationOptions&& options)
-        : options_(options.is_default() ? std::nullopt
-                                        : std::optional<GenerationOptions>(std::move(options))) {}
 
     [[nodiscard]] static GenerationOverride inherit_defaults() noexcept {
         return {};

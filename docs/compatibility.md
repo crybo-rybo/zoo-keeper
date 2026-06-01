@@ -26,8 +26,6 @@ The following are not part of the compatibility boundary:
 - Behavior described in the user-facing docs is the supported contract.
 - Undocumented implementation details may change without notice.
 - `ZooKeeper::zoo` is the primary supported consumer target.
-- `ZooKeeper::zoo_core` may remain as a compatibility shim, but it is not the
-  primary user story.
 
 ## Release Guidance
 

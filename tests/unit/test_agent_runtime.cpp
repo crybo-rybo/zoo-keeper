@@ -32,15 +32,15 @@ using zoo::Expected;
 using zoo::ExtractionResponse;
 using zoo::GenerationOptions;
 using zoo::HistorySnapshot;
-using zoo::Message;
 using zoo::MessageView;
 using zoo::ModelConfig;
+using zoo::OwnedMessage;
+using zoo::OwnedToolCall;
 using zoo::RequestHandle;
 using zoo::Role;
 using zoo::TextResponse;
 using zoo::TokenAction;
 using zoo::TokenCallback;
-using zoo::ToolCallInfo;
 using zoo::ToolInvocationStatus;
 using zoo::internal::agent::AgentBackend;
 using zoo::internal::agent::AgentRuntime;
@@ -82,7 +82,7 @@ class FakeBackend final : public AgentBackend {
 
     Expected<void> add_message(MessageView message) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        history_.push_back(Message::from_view(message));
+        history_.push_back(OwnedMessage::from_view(message));
         return {};
     }
 
@@ -112,7 +112,7 @@ class FakeBackend final : public AgentBackend {
 
     void set_system_prompt(std::string_view prompt) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        Message system_message = Message::system(std::string(prompt));
+        OwnedMessage system_message = OwnedMessage::system(std::string(prompt));
         if (!history_.empty() && history_.front().role == Role::System) {
             history_.front() = std::move(system_message);
         } else {
@@ -198,7 +198,7 @@ class FakeBackend final : public AgentBackend {
   private:
     mutable std::mutex mutex_;
     std::deque<GenerationAction> generations_;
-    std::vector<Message> history_;
+    std::vector<OwnedMessage> history_;
     GenerationOptions last_options_;
     bool tool_calling_supported_ = true;
 };
@@ -224,11 +224,11 @@ GenerationResult tool_call_generation(const std::string& tool_name, const nlohma
     return GenerationResult{"<tool_call>" + payload.dump() + "</tool_call>", 0, true, "", {}};
 }
 
-ToolCallInfo tool_call_info(std::string id, std::string name, const nlohmann::json& arguments) {
-    return ToolCallInfo{std::move(id), std::move(name), arguments.dump()};
+OwnedToolCall tool_call_info(std::string id, std::string name, const nlohmann::json& arguments) {
+    return OwnedToolCall{std::move(id), std::move(name), arguments.dump()};
 }
 
-GenerationResult structured_tool_call_generation(std::vector<ToolCallInfo> calls,
+GenerationResult structured_tool_call_generation(std::vector<OwnedToolCall> calls,
                                                  std::string content = "") {
     GenerationResult result;
     result.text = content;
@@ -489,10 +489,11 @@ TEST(AgentRuntimeTest, CompleteDoesNotMutatePersistentHistory) {
     const auto before = require_history(runtime);
     ASSERT_FALSE(before.empty());
 
-    const std::array<Message, 2> scoped_messages = {Message::system("request prompt"),
-                                                    Message::user("request user")};
-    auto scoped = runtime.complete(zoo::ConversationView{std::span<const Message>(scoped_messages)},
-                                   GenerationOptions{});
+    const std::array<OwnedMessage, 2> scoped_messages = {OwnedMessage::system("request prompt"),
+                                                         OwnedMessage::user("request user")};
+    auto scoped =
+        runtime.complete(zoo::ConversationView{std::span<const OwnedMessage>(scoped_messages)},
+                         zoo::GenerationOverride::inherit_defaults());
     auto scoped_result = scoped.await_result();
     ASSERT_TRUE(scoped_result.has_value());
     EXPECT_EQ(scoped_result->text, "scoped reply");
@@ -516,9 +517,9 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackSurvivesTokenStreaming) {
     });
 
     std::string streamed;
-    auto handle = runtime.chat("Tell me a story", GenerationOptions{}, [&](std::string_view token) {
-        streamed.append(token.data(), token.size());
-    });
+    auto handle =
+        runtime.chat("Tell me a story", zoo::GenerationOverride::inherit_defaults(),
+                     [&](std::string_view token) { streamed.append(token.data(), token.size()); });
 
     auto result = handle.await_result();
     ASSERT_TRUE(result.has_value());
@@ -543,10 +544,11 @@ TEST(AgentRuntimeTest, ChatStreamingTokenCallbackCanStopGeneration) {
 
     std::string streamed;
     auto handle =
-        runtime.chat("Tell me something short", GenerationOptions{}, [&](std::string_view token) {
-            streamed.append(token.data(), token.size());
-            return TokenAction::Stop;
-        });
+        runtime.chat("Tell me something short", zoo::GenerationOverride::inherit_defaults(),
+                     [&](std::string_view token) {
+                         streamed.append(token.data(), token.size());
+                         return TokenAction::Stop;
+                     });
 
     auto result = handle.await_result();
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
@@ -623,7 +625,7 @@ TEST(AgentRuntimeTest, ChatStreamingCallbackFailureFailsRequest) {
         return Expected<GenerationResult>(GenerationResult{"boom", 1, false, "", {}});
     });
 
-    auto handle = runtime.chat("trigger callback", GenerationOptions{},
+    auto handle = runtime.chat("trigger callback", zoo::GenerationOverride::inherit_defaults(),
                                [](std::string_view) { throw std::runtime_error("callback boom"); });
     auto result = handle.await_result();
 
@@ -641,7 +643,8 @@ TEST(AgentRuntimeTest, StreamingCallbackCopyFailureFailsRequest) {
     AsyncTokenCallback callback{CopyFailingCallback{fail_on_copy}};
     fail_on_copy->store(true, std::memory_order_release);
 
-    auto handle = runtime.chat("trigger callback copy", GenerationOptions{}, std::move(callback));
+    auto handle = runtime.chat("trigger callback copy", zoo::GenerationOverride::inherit_defaults(),
+                               std::move(callback));
     auto result = handle.await_result(1s);
 
     ASSERT_FALSE(result.has_value());
@@ -671,7 +674,7 @@ TEST(AgentRuntimeTest, QueuedStreamingCallbackOutlivesRequestSlotAfterGeneration
     auto done_future = done.get_future();
     std::atomic<bool> observed{false};
 
-    auto handle = runtime.chat("trigger callback", GenerationOptions{},
+    auto handle = runtime.chat("trigger callback", zoo::GenerationOverride::inherit_defaults(),
                                [&, release_future](std::string_view token) mutable {
                                    EXPECT_EQ(token, "late");
                                    entered.set_value();
@@ -707,7 +710,7 @@ TEST(AgentRuntimeTest, StopWaitsForQueuedStreamingCallback) {
     std::promise<void> release;
     auto release_future = release.get_future().share();
 
-    auto handle = runtime.chat("trigger callback", GenerationOptions{},
+    auto handle = runtime.chat("trigger callback", zoo::GenerationOverride::inherit_defaults(),
                                [&, release_future](std::string_view token) mutable {
                                    EXPECT_EQ(token, "late");
                                    entered.set_value();
@@ -771,7 +774,7 @@ TEST(AgentRuntimeTest, ToolLoopReturnsTraceOnlyWhenRequested) {
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto handle = runtime.chat("double 5", options);
+    auto handle = runtime.chat("double 5", zoo::GenerationOverride::explicit_options(options));
     auto result = handle.await_result();
 
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
@@ -810,7 +813,8 @@ TEST(AgentRuntimeTest, StructuredTurnExecutesAllToolCallsInOrder) {
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto result = runtime.chat("run both tools", options).await_result();
+    auto result = runtime.chat("run both tools", zoo::GenerationOverride::explicit_options(options))
+                      .await_result();
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     EXPECT_EQ(result->text, "done");
     ASSERT_TRUE(result->tool_trace.has_value());
@@ -857,7 +861,8 @@ TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterValidationFailure) {
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto result = runtime.chat("run both tools", options).await_result();
+    auto result = runtime.chat("run both tools", zoo::GenerationOverride::explicit_options(options))
+                      .await_result();
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     ASSERT_TRUE(result->tool_trace.has_value());
     ASSERT_EQ(result->tool_trace->invocations.size(), 2u);
@@ -911,7 +916,8 @@ TEST(AgentRuntimeTest, StructuredTurnRunsValidSiblingAfterHandlerFailure) {
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto result = runtime.chat("run both tools", options).await_result();
+    auto result = runtime.chat("run both tools", zoo::GenerationOverride::explicit_options(options))
+                      .await_result();
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     ASSERT_TRUE(result->tool_trace.has_value());
     ASSERT_EQ(result->tool_trace->invocations.size(), 2u);
@@ -960,7 +966,8 @@ TEST(AgentRuntimeTest, ToolCallingWorksAfterSchemaExtractionRestoresToolGrammar)
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto result = runtime.chat("double 5", options).await_result();
+    auto result =
+        runtime.chat("double 5", zoo::GenerationOverride::explicit_options(options)).await_result();
 
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     EXPECT_EQ(result->text, "10");
@@ -1160,7 +1167,7 @@ TEST(AgentRuntimeTest, RegisterToolsBatchRegistersAllToolsWithSingleUpdate) {
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto handle = runtime.chat("add 3 and 4", options);
+    auto handle = runtime.chat("add 3 and 4", zoo::GenerationOverride::explicit_options(options));
     auto chat_result = handle.await_result();
     ASSERT_TRUE(chat_result.has_value()) << chat_result.error().to_string();
     EXPECT_EQ(chat_result->text, "7");
@@ -1361,9 +1368,9 @@ TEST(AgentRuntimeTest, StreamingCallbackRunsOffInferenceThread) {
             return Expected<GenerationResult>(GenerationResult{"hello", 5, false, "", {}});
         });
 
-    auto handle = runtime.chat("test", GenerationOptions{}, [&](std::string_view) {
-        callback_thread_id = std::this_thread::get_id();
-    });
+    auto handle =
+        runtime.chat("test", zoo::GenerationOverride::inherit_defaults(),
+                     [&](std::string_view) { callback_thread_id = std::this_thread::get_id(); });
 
     auto result = handle.await_result();
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
@@ -1586,7 +1593,8 @@ TEST(AgentRuntimeTest, ToolHandlerExceptionsBecomeExecutionFailedErrors) {
 
     GenerationOptions options;
     options.record_tool_trace = true;
-    auto result = runtime.chat("go", options).await_result();
+    auto result =
+        runtime.chat("go", zoo::GenerationOverride::explicit_options(options)).await_result();
 
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     ASSERT_TRUE(result->tool_trace.has_value());
@@ -1596,17 +1604,18 @@ TEST(AgentRuntimeTest, ToolHandlerExceptionsBecomeExecutionFailedErrors) {
 
 TEST(RequestHistoryScopeTest, ReplaceRestoresOriginalHistoryOnExit) {
     FakeBackend backend;
-    ASSERT_TRUE(backend.add_message(Message::system("base prompt").view()).has_value());
-    ASSERT_TRUE(backend.add_message(Message::user("persistent user").view()).has_value());
+    ASSERT_TRUE(backend.add_message(OwnedMessage::system("base prompt").view()).has_value());
+    ASSERT_TRUE(backend.add_message(OwnedMessage::user("persistent user").view()).has_value());
     const auto before = backend.get_history();
 
-    const std::vector<Message> scoped_messages = {Message::system("scoped prompt"),
-                                                  Message::user("scoped user")};
+    const std::vector<OwnedMessage> scoped_messages = {OwnedMessage::system("scoped prompt"),
+                                                       OwnedMessage::user("scoped user")};
     {
         auto scope =
             RequestHistoryScope::enter(backend, HistoryMode::Replace, scoped_messages, 64, "chat");
         ASSERT_TRUE(scope.has_value()) << scope.error().to_string();
-        ASSERT_TRUE(backend.add_message(Message::assistant("scoped reply").view()).has_value());
+        ASSERT_TRUE(
+            backend.add_message(OwnedMessage::assistant("scoped reply").view()).has_value());
         const auto scoped = backend.get_history();
         ASSERT_EQ(scoped.size(), 3u);
         EXPECT_EQ(scoped[0].content, "scoped prompt");
@@ -1619,15 +1628,15 @@ TEST(RequestHistoryScopeTest, ReplaceRestoresOriginalHistoryOnExit) {
 TEST(RequestHistoryScopeTest, AppendTrimsRetainedHistoryOnExit) {
     FakeBackend backend;
     backend.set_system_prompt("retain system");
-    ASSERT_TRUE(backend.add_message(Message::user("old user").view()).has_value());
-    ASSERT_TRUE(backend.add_message(Message::assistant("old reply").view()).has_value());
+    ASSERT_TRUE(backend.add_message(OwnedMessage::user("old user").view()).has_value());
+    ASSERT_TRUE(backend.add_message(OwnedMessage::assistant("old reply").view()).has_value());
 
-    const std::vector<Message> request_messages = {Message::user("new user")};
+    const std::vector<OwnedMessage> request_messages = {OwnedMessage::user("new user")};
     {
         auto scope =
             RequestHistoryScope::enter(backend, HistoryMode::Append, request_messages, 2, "chat");
         ASSERT_TRUE(scope.has_value()) << scope.error().to_string();
-        ASSERT_TRUE(backend.add_message(Message::assistant("new reply").view()).has_value());
+        ASSERT_TRUE(backend.add_message(OwnedMessage::assistant("new reply").view()).has_value());
         ASSERT_EQ(backend.get_history().size(), 5u);
     }
 

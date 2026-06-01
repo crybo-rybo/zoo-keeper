@@ -15,8 +15,8 @@ namespace zoo::core {
 
 namespace {
 
-/// Converts zoo::Message history to common_chat_msg for the common layer.
-std::vector<common_chat_msg> to_chat_msgs(const std::vector<Message>& messages) {
+/// Converts zoo::OwnedMessage history to common_chat_msg for the common layer.
+std::vector<common_chat_msg> to_chat_msgs(const std::vector<OwnedMessage>& messages) {
     std::vector<common_chat_msg> result;
     result.reserve(messages.size());
     for (const auto& msg : messages) {

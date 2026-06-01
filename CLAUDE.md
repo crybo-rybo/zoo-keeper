@@ -48,7 +48,7 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 
 **Tool calling:** Model initializes chat templates via `common_chat_templates_init()` (from the llama.cpp `common` library). Prompt rendering uses `common_chat_templates_apply()`. Tool calling is template-driven: `Model::set_tool_calling()` detects the model's native format (29+ formats recognized) and activates a lazy grammar with format-specific triggers. Models without a recognized native tool calling format have tool calling disabled (`set_tool_calling()` returns `false`). Parsed tool calls are returned inside a `ParsedResponse` struct (containing `std::vector<OwnedToolCall>`) via `Model::parse_tool_response()`. The old hardcoded `<tool_call>` sentinel approach and generic fallback format have been removed.
 
-**CMake targets:** `zoo` (static lib), `zoo_core` (interface compat alias). Consumers use `ZooKeeper::zoo`. The build requires `LLAMA_BUILD_COMMON=ON` to link the `common` library from llama.cpp.
+**CMake targets:** `zoo` (static lib). Consumers use `ZooKeeper::zoo`. The build requires `LLAMA_BUILD_COMMON=ON` to link the `common` library from llama.cpp.
 
 ## Key Conventions
 
@@ -58,7 +58,7 @@ C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, 
 - `role_to_string()` returns `const char*` (static storage) — safe for `llama_chat_message`
 - `ZOO_LOG` is a no-op when `ZOO_LOGGING_ENABLED` is not defined
 - `validate_role_sequence()` is a free function in `types.hpp` (pure logic, unit testable)
-- `ToolCallInfo` in `types.hpp` carries parsed tool call data (id, name, arguments_json) from model output
+- `OwnedToolCall` in `types.hpp` carries parsed tool call data (id, name, arguments_json) from model output
 - `CoreToolInfo` in `types.hpp` is the Layer 1 tool descriptor — the agent converts `tools::ToolMetadata` to this before calling `Model::set_tool_calling()`
 
 ## Testing

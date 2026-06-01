@@ -153,8 +153,6 @@ This file creates imported targets that point back into the producer build tree:
   - links transitively to `ZooKeeper::llama` and `ZooKeeper::nlohmann_json`
 - `ZooKeeper::llama`
   - points at the built llama/llama-common/ggml archives and platform link flags
-- `ZooKeeper::zoo_core`
-  - compatibility forwarding target to `ZooKeeper::zoo`
 
 Use this when:
 

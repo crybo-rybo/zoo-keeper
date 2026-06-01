@@ -14,11 +14,11 @@ namespace zoo::internal::agent {
 
 namespace {
 
-std::vector<Message> materialize_conversation(ConversationView messages) {
-    std::vector<Message> owned;
+std::vector<OwnedMessage> materialize_conversation(ConversationView messages) {
+    std::vector<OwnedMessage> owned;
     owned.reserve(messages.size());
     for (size_t index = 0; index < messages.size(); ++index) {
-        owned.push_back(Message::from_view(messages[index]));
+        owned.push_back(OwnedMessage::from_view(messages[index]));
     }
     return owned;
 }
@@ -34,7 +34,7 @@ RequestHandle<TextResponse> AgentRuntime::chat(std::string_view user_message,
 RequestHandle<TextResponse> AgentRuntime::chat(MessageView message, GenerationOverride generation,
                                                AsyncTokenCallback callback) {
     RequestPayload payload;
-    payload.messages.push_back(Message::from_view(message));
+    payload.messages.push_back(OwnedMessage::from_view(message));
     payload.history_mode = HistoryMode::Append;
     payload.options = resolve_generation_options(generation);
     payload.streaming_callback = std::move(callback);
@@ -71,7 +71,7 @@ RequestHandle<ExtractionResponse> AgentRuntime::extract(const nlohmann::json& ou
     }
 
     RequestPayload payload;
-    payload.messages.push_back(Message::from_view(message));
+    payload.messages.push_back(OwnedMessage::from_view(message));
     payload.history_mode = HistoryMode::Append;
     payload.options = resolve_generation_options(generation);
     payload.streaming_callback = std::move(callback);

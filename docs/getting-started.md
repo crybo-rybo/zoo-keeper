@@ -78,10 +78,10 @@ Create the async orchestration layer with `Agent::create(model_config, agent_con
 Command-lane methods return `Expected<T>` so callers can handle `AgentNotRunning`,
 `RequestTimeout`, and other failures explicitly.
 
-Existing code that passes `GenerationOptions` remains source-compatible. For
-legacy `GenerationOptions{}` arguments, the request still inherits configured
-defaults; use `GenerationOverride::explicit_options(GenerationOptions{})` when
-you need the built-in defaults literally.
+Per-request overrides use `GenerationOverride`. Pass
+`GenerationOverride::inherit_defaults()` to use configured defaults, or
+`GenerationOverride::explicit_options(options)` to apply a `GenerationOptions`
+value exactly.
 
 ### `RequestHandle<Result>`
 
@@ -108,7 +108,7 @@ Runnable sample: [`examples/model_generate.cpp`](../examples/model_generate.cpp)
 
 ### `zoo::MessageView`, `ConversationView`, and `HistorySnapshot`
 
-`MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type; `Message` remains a stable alias for it. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::try_get_history()` return.
+`MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::try_get_history()` return.
 
 Assistant `MessageView` values may carry borrowed `ToolCallView` records via
 `ToolCallSpan`. This is intended for request-scoped adapters that already have

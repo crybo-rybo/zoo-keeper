@@ -7,6 +7,19 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Removed
+
+- Removed compatibility-only public aliases `zoo::Message`,
+  `zoo::ToolCallInfo`, and `zoo::AsyncTextCallback`; use
+  `zoo::OwnedMessage`, `zoo::OwnedToolCall`, and `zoo::AsyncTokenCallback`.
+- Removed implicit `GenerationOptions` construction of `GenerationOverride`;
+  use `GenerationOverride::inherit_defaults()` or
+  `GenerationOverride::explicit_options(options)`.
+- Removed `CachedModelInfo::size_bytes`, which no longer mapped to data exposed
+  by llama.cpp cache listing.
+- Removed the `ZooKeeper::zoo_core` CMake compatibility target; link
+  `ZooKeeper::zoo` directly.
+
 ## [1.1.6] - 2026-05-23
 
 ### Added

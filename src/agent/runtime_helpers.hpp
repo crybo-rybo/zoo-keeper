@@ -44,14 +44,15 @@ template <typename Callback> class ScopeExit {
 template <typename Callback> ScopeExit(Callback) -> ScopeExit<Callback>;
 
 /// Replace backend history with the given messages. Returns error on failure.
-inline HistorySnapshot snapshot_from_messages(const std::vector<Message>& messages) {
+inline HistorySnapshot snapshot_from_messages(const std::vector<OwnedMessage>& messages) {
     HistorySnapshot snapshot;
     snapshot.messages = messages;
     return snapshot;
 }
 
 /// Replace backend history while returning the previous snapshot.
-inline HistorySnapshot swap_history(AgentBackend& backend, const std::vector<Message>& messages) {
+inline HistorySnapshot swap_history(AgentBackend& backend,
+                                    const std::vector<OwnedMessage>& messages) {
     return backend.swap_history(snapshot_from_messages(messages));
 }
 
@@ -59,7 +60,7 @@ inline HistorySnapshot swap_history(AgentBackend& backend, const std::vector<Mes
 class RequestHistoryScope {
   public:
     static Expected<RequestHistoryScope> enter(AgentBackend& backend, HistoryMode mode,
-                                               const std::vector<Message>& messages,
+                                               const std::vector<OwnedMessage>& messages,
                                                size_t max_retained_messages,
                                                std::string_view stateful_request_name) {
         RequestHistoryScope scope(backend, mode, max_retained_messages);

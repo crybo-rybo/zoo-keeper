@@ -52,7 +52,7 @@ TEST(ModelToolCallingTest, RenderPromptDeltaRefreshesParserAndGrammarState) {
     ModelTestAccess::tool_state(*model) = std::move(state);
     ModelTestAccess::set_sampler_policy(
         *model, ModelTestAccess::SamplerPolicy::native_tool_call("stale-grammar"));
-    ModelTestAccess::messages(*model).push_back(zoo::Message::user("hello"));
+    ModelTestAccess::messages(*model).push_back(zoo::OwnedMessage::user("hello"));
 
     auto prompt = ModelTestAccess::render_prompt_delta(*model);
     ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();
@@ -128,7 +128,7 @@ TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
     ModelTestAccess::tool_state(*model) = std::move(state);
     ModelTestAccess::set_sampler_policy(
         *model, ModelTestAccess::SamplerPolicy::native_tool_call("stale-grammar"));
-    ModelTestAccess::messages(*model).push_back(zoo::Message::user("hello"));
+    ModelTestAccess::messages(*model).push_back(zoo::OwnedMessage::user("hello"));
 
     auto prompt = ModelTestAccess::render_prompt_delta(*model);
     ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();
@@ -144,8 +144,8 @@ TEST(ModelToolCallingTest, ParseToolResponseExtractsStructuredCalls) {
 }
 
 TEST(ModelToolCallingTest, AssistantWithToolCallsPreservesStructure) {
-    std::vector<zoo::ToolCallInfo> calls = {{"call_1", "echo", R"({"text":"hi"})"}};
-    auto msg = zoo::Message::assistant_with_tool_calls("visible text", calls);
+    std::vector<zoo::OwnedToolCall> calls = {{"call_1", "echo", R"({"text":"hi"})"}};
+    auto msg = zoo::OwnedMessage::assistant_with_tool_calls("visible text", calls);
 
     EXPECT_EQ(msg.role, zoo::Role::Assistant);
     EXPECT_EQ(msg.content, "visible text");
@@ -162,10 +162,10 @@ TEST(ModelToolCallingTest, PlainAssistantMessageWhenNoToolState) {
     EXPECT_EQ(ModelTestAccess::tool_state(*model), nullptr);
 
     std::string generated_text = "Hello, world!";
-    zoo::Message msg = (ModelTestAccess::sampler_policy(*model).is_native_tool_call() &&
-                        ModelTestAccess::tool_state(*model))
-                           ? zoo::Message::assistant_with_tool_calls("", {})
-                           : zoo::Message::assistant(generated_text);
+    zoo::OwnedMessage msg = (ModelTestAccess::sampler_policy(*model).is_native_tool_call() &&
+                             ModelTestAccess::tool_state(*model))
+                                ? zoo::OwnedMessage::assistant_with_tool_calls("", {})
+                                : zoo::OwnedMessage::assistant(generated_text);
 
     EXPECT_EQ(msg.role, zoo::Role::Assistant);
     EXPECT_EQ(msg.content, "Hello, world!");
@@ -189,7 +189,7 @@ TEST(ModelToolCallingTest, RenderPromptDeltaDoesNotOverwriteSchemaPolicy) {
     ModelTestAccess::tool_state(*model) = std::move(state);
     ModelTestAccess::set_sampler_policy(*model,
                                         ModelTestAccess::SamplerPolicy::schema("schema-grammar"));
-    ModelTestAccess::messages(*model).push_back(zoo::Message::user("extract"));
+    ModelTestAccess::messages(*model).push_back(zoo::OwnedMessage::user("extract"));
 
     auto prompt = ModelTestAccess::render_prompt_delta(*model);
     ASSERT_TRUE(prompt.has_value()) << prompt.error().to_string();

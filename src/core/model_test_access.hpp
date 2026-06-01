@@ -46,7 +46,7 @@ struct ModelTestAccess {
         return model.impl_->session_.estimated_tokens;
     }
 
-    static int estimate_message_tokens(Model& model, const Message& message) {
+    static int estimate_message_tokens(Model& model, const OwnedMessage& message) {
         return zoo::core::estimate_message_tokens(*model.impl_, message);
     }
 
@@ -56,11 +56,6 @@ struct ModelTestAccess {
 
     static Expected<std::string> render_prompt_delta(Model& model) {
         return zoo::core::render_prompt_delta(*model.impl_);
-    }
-
-    static GenerationOptions resolve_generation_options(Model& model,
-                                                        const GenerationOptions& overrides) {
-        return zoo::core::resolve_generation_options(*model.impl_, GenerationOverride(overrides));
     }
 
     static GenerationOptions resolve_generation_options(Model& model,

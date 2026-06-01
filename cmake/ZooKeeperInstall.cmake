@@ -6,7 +6,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/ZooKeeperLlama.cmake")
 
-install(TARGETS zoo zoo_core
+install(TARGETS zoo
     EXPORT ZooKeeperTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

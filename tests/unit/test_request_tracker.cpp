@@ -30,7 +30,7 @@ using zoo::ErrorCode;
 using zoo::Expected;
 using zoo::GenerationOptions;
 using zoo::HistorySnapshot;
-using zoo::Message;
+using zoo::OwnedMessage;
 using zoo::TextResponse;
 using zoo::internal::agent::HistoryMode;
 using zoo::internal::agent::QueuedRequest;
@@ -41,7 +41,7 @@ using zoo::internal::agent::ResultKind;
 
 RequestPayload make_text_request(std::string text) {
     RequestPayload payload;
-    payload.messages.push_back(Message::user(std::move(text)));
+    payload.messages.push_back(OwnedMessage::user(std::move(text)));
     payload.history_mode = HistoryMode::Append;
     payload.options = GenerationOptions{};
     payload.result_kind = ResultKind::Text;

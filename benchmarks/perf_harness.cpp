@@ -30,8 +30,8 @@ using Clock = std::chrono::steady_clock;
 using zoo::Expected;
 using zoo::GenerationOptions;
 using zoo::HistorySnapshot;
-using zoo::Message;
 using zoo::ModelConfig;
+using zoo::OwnedMessage;
 using zoo::TextResponse;
 
 volatile std::size_t g_benchmark_sink = 0;
@@ -222,12 +222,13 @@ GenerationOptions make_generation_options() {
 HistorySnapshot make_history_snapshot(std::string final_user_prompt) {
     HistorySnapshot history;
     history.messages.reserve(16);
-    history.messages.push_back(Message::system("You are benchmarking real-model generation."));
+    history.messages.push_back(OwnedMessage::system("You are benchmarking real-model generation."));
     for (int index = 0; index < 7; ++index) {
-        history.messages.push_back(Message::user("User turn " + std::to_string(index)));
-        history.messages.push_back(Message::assistant("Assistant turn " + std::to_string(index)));
+        history.messages.push_back(OwnedMessage::user("User turn " + std::to_string(index)));
+        history.messages.push_back(
+            OwnedMessage::assistant("Assistant turn " + std::to_string(index)));
     }
-    history.messages.push_back(Message::user(std::move(final_user_prompt)));
+    history.messages.push_back(OwnedMessage::user(std::move(final_user_prompt)));
     return history;
 }
 

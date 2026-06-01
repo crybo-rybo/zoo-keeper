@@ -79,7 +79,7 @@ AgentRuntime::process_extraction_request(const ActiveRequest& request) {
     }
 
     // Commit the assistant response to history
-    backend_->add_message(Message::assistant(generated.text).view());
+    backend_->add_message(OwnedMessage::assistant(generated.text).view());
     backend_->finalize_response();
 
     auto end_time = std::chrono::steady_clock::now();
