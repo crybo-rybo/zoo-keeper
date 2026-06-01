@@ -20,14 +20,14 @@ bool is_blank(std::string_view value) {
     return value.find_first_not_of(" \t\n\r\f\v") == std::string_view::npos;
 }
 
+} // namespace
+
 Expected<void> validate_alias_value(std::string_view alias) {
     if (is_blank(alias)) {
         return std::unexpected(Error{ErrorCode::InvalidConfig, "Alias cannot be empty"});
     }
     return {};
 }
-
-} // namespace
 
 Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries,
                                           std::span<const std::string> aliases,
