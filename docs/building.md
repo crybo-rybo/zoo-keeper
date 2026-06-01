@@ -266,8 +266,8 @@ so model-dependent functions can remain over the threshold.
 Functions exceeding the threshold are flagged with `<-- over threshold` and
 the process exits non-zero, making this suitable as a CI gate.
 
-A timestamped JSON report (`<YYYYMMDD_HHMMSS>_crap_report.json`) is written
-automatically to the working directory on every run alongside the console output.
+The console table is the default output. To also write the per-function JSON
+report, call the report script directly with `--json-out /path/to/report.json`.
 
 ## API Reference
 

@@ -20,4 +20,5 @@ compile_commands.json
 *.a
 *.so
 *.dylib
-*_crap_report.json
+__pycache__/
+*.pyc
