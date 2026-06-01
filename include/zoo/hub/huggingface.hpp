@@ -20,9 +20,10 @@ namespace zoo::hub {
  * @brief Cached model entry discovered from the llama.cpp download cache.
  */
 struct CachedModelInfo {
-    std::string user;  ///< HuggingFace user/org name.
-    std::string model; ///< Model name within the repository.
-    std::string tag;   ///< Version tag (e.g. "Q4_K_M", "latest").
+    std::string user;      ///< HuggingFace user/org name.
+    std::string model;     ///< Model name within the repository.
+    std::string tag;       ///< Version tag (e.g. "Q4_K_M", "latest").
+    size_t size_bytes = 0; ///< Reserved for compatibility; llama.cpp no longer reports cache size.
 
     /// Returns "user/model" or "user/model:tag" if tag is not "latest".
     [[nodiscard]] std::string to_string() const {
