@@ -244,36 +244,9 @@ void read_gguf_metadata(const gguf_context* ctx, ModelInfo& info) {
     }
     if (info.description.empty()) {
         info.description = info.architecture;
-        if (!info.description.empty() && !info.quantization.empty()) {
-            info.description += " " + info.quantization;
-        }
     }
 
     collect_all_metadata(ctx, info.metadata);
-}
-
-// Derives quantization label from the model description (e.g. "7B Q4_K_M" → "Q4_K_M").
-// Requires a digit immediately after the Q/F/I prefix to avoid misclassifying
-// arbitrary trailing tokens like "Foo".
-void derive_quantization(ModelInfo& info) {
-    if (!info.quantization.empty()) {
-        return;
-    }
-    const auto pos = info.description.find_last_of(' ');
-    if (pos == std::string::npos) {
-        return;
-    }
-    const auto candidate = info.description.substr(pos + 1);
-    if (candidate.size() < 2) {
-        return;
-    }
-    const bool has_quant_prefix =
-        std::string_view("QFI").find(candidate[0]) != std::string_view::npos;
-    const bool has_digit_after = static_cast<unsigned char>(candidate[1]) >= '0' &&
-                                 static_cast<unsigned char>(candidate[1]) <= '9';
-    if (has_quant_prefix && has_digit_after) {
-        info.quantization = candidate;
-    }
 }
 
 uint64_t per_token_kv_bytes(const ModelInfo& info) {
@@ -402,8 +375,6 @@ Expected<ModelInfo> GgufInspector::inspect(const std::string& file_path) {
     info.file_path = ec ? file_path : absolute.string();
     read_gguf_metadata(gguf_ctx.get(), info);
     read_tensor_stats(gguf_ctx.get(), info);
-
-    derive_quantization(info);
     return info;
 }
 
