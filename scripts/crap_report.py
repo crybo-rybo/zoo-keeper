@@ -11,7 +11,6 @@ is both complex and poorly tested — high change risk.
 
 import argparse
 import csv
-import datetime
 import io
 import json
 import os
@@ -144,6 +143,8 @@ def main() -> int:
     parser.add_argument("--source-dir", required=True, type=Path)
     parser.add_argument("--threshold", type=float, default=30.0,
                         help="CRAP score at which a function is flagged (default: 30)")
+    parser.add_argument("--json-out", type=Path, default=None,
+                        help="Write the per-function report as JSON to this path (default: none)")
     args = parser.parse_args()
 
     source_dir = args.source_dir.resolve()
@@ -201,10 +202,9 @@ def main() -> int:
         }
         for f in functions
     ]
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    auto_out = Path.cwd() / f"{timestamp}_crap_report.json"
-    auto_out.write_text(json.dumps(report, indent=2))
-    print(f"  JSON report     : {auto_out}")
+    if args.json_out is not None:
+        args.json_out.write_text(json.dumps(report, indent=2))
+        print(f"  JSON report     : {args.json_out}")
 
     if over_threshold:
         print(

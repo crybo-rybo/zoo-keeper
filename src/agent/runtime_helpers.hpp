@@ -43,7 +43,7 @@ template <typename Callback> class ScopeExit {
 
 template <typename Callback> ScopeExit(Callback) -> ScopeExit<Callback>;
 
-/// Replace backend history with the given messages. Returns error on failure.
+/// Builds a HistorySnapshot from the given messages.
 inline HistorySnapshot snapshot_from_messages(const std::vector<OwnedMessage>& messages) {
     HistorySnapshot snapshot;
     snapshot.messages = messages;

@@ -7,6 +7,11 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- CRAP score JSON reports are now opt-in via `scripts/crap_report.py --json-out`
+  instead of being written automatically on every `scripts/crap.sh` run.
+
 ### Removed
 
 - Removed compatibility-only public aliases `zoo::Message`,

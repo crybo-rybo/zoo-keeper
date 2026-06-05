@@ -11,10 +11,14 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
 namespace zoo::hub {
+
+/// Rejects blank/whitespace-only alias values.
+Expected<void> validate_alias_value(std::string_view alias);
 
 /// Validates alias uniqueness across the catalog and within a single request.
 Expected<void> validate_aliases_for_store(const std::vector<ModelEntry>& entries,
