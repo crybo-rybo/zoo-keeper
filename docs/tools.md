@@ -1,65 +1,34 @@
-# Tool System
+# Tool Utilities
 
-Zoo-Keeper's tool story is native-only: register tools on `zoo::Agent`, let
-the agent route native tool calls through the runtime, and inspect an optional
-`tool_trace` when you want to see what happened.
+Zoo-Keeper exposes native tool-call formatting and parsing, but it does not run
+an autonomous tool loop. Applications own tool execution.
 
-Zoo-Keeper only executes native tool calls emitted by the active model or
-template. If native tool calling is unavailable, the request stays on the text
-path and no synthetic alternate protocol is introduced.
+Runnable reference: [`examples/manual_tool_schema.cpp`](../examples/manual_tool_schema.cpp)
 
-**Runnable references:** [`examples/demo_chat.cpp`](../examples/demo_chat.cpp)
-(typed tools in the interactive loop),
-[`examples/manual_tool_schema.cpp`](../examples/manual_tool_schema.cpp)
-(manual schema + `tool_trace`). Build and run:
-[`examples/README.md`](../examples/README.md).
+## Flow
 
 ```mermaid
 flowchart TD
-    START(["User request enters tool loop"])
-    GEN["Model generates tokens<br/>(native tool grammar when available)"]
-    PARSE["Extract native tool calls<br/>(template parser format)"]
-    TEXT{"Tool calls<br/>detected?"}
-    DONE(["Return TextResponse<br/>+ optional tool_trace"])
-    VAL["Validate arguments<br/>against registered schema"]
-    OK{"Valid?"}
-    EXEC["ToolExecutor runs<br/>registered handler"]
-    INJ["Inject tool result/error<br/>as tool message"]
-    RETRY{"Retries<br/>remaining?"}
-    FAIL(["Fail: ToolRetriesExhausted"])
-    LIMIT{"Within<br/>iteration budget?"}
-    LIMITFAIL(["Fail: ToolLoopLimitReached"])
+    REG["Build ToolRegistry metadata"]
+    SPEC["Convert metadata to ToolSpec"]
+    MODEL["Model::set_tool_calling(specs)"]
+    GEN["Model generates from history"]
+    PARSE["Read GenerationResult.tool_calls"]
+    VAL["Validate arguments"]
+    EXEC["Application executes handler"]
+    ADD["Application adds tool result message"]
+    NEXT["Optional next generation pass"]
 
-    START --> GEN --> PARSE --> TEXT
-    TEXT -->|no| DONE
-    TEXT -->|yes| LIMIT
-    LIMIT -->|no| LIMITFAIL
-    LIMIT -->|yes| VAL --> OK
-    OK -->|yes| EXEC --> INJ --> GEN
-    OK -->|no| RETRY
-    RETRY -->|yes| INJ
-    RETRY -->|no| FAIL
-
+    REG --> SPEC --> MODEL --> GEN --> PARSE --> VAL --> EXEC --> ADD --> NEXT
 ```
 
 ## Typed Registration
 
-Register any supported callable and Zoo-Keeper will derive the argument schema
-automatically:
-
 ```cpp
-int add(int a, int b) { return a + b; }
+zoo::tools::ToolRegistry registry;
 
-agent->register_tool("add", "Add two integers", {"a", "b"}, add);
-
-agent->register_tool("greet", "Greet a person", {"name"},
-    [](std::string name) -> std::string {
-        return "Hello, " + name + "!";
-    });
-
-agent->register_tool("get_time", "Get current time", {}, []() -> std::string {
-    return "2025-01-01 12:00:00";
-});
+registry.register_tool("add", "Add two integers", {"a", "b"},
+                       [](int a, int b) { return a + b; });
 ```
 
 Supported typed parameter types:
@@ -72,81 +41,80 @@ Supported typed parameter types:
 | `bool` | `boolean` |
 | `std::string` | `string` |
 
-The parameter-name list must match the callable arity exactly or registration
-fails with `ErrorCode::InvalidToolSignature`.
-
 ## Manual Schema Registration
-
-Use the manual path when you need a JSON-backed handler or schema features
-that typed registration does not express directly, such as optional parameters
-or enums.
 
 ```cpp
 nlohmann::json schema = {
     {"type", "object"},
     {"properties", {
         {"query", {{"type", "string"}, {"description", "Search term"}}},
-        {"limit", {{"type", "integer"}, {"enum", {5, 10, 20}}}},
-        {"scope", {{"type", "string"}, {"enum", {"docs", "issues"}}}}
+        {"limit", {{"type", "integer"}, {"enum", {5, 10, 20}}}}
     }},
     {"required", {"query"}},
     {"additionalProperties", false}
 };
 
-auto result = agent->register_tool(
+registry.register_tool(
     "search_documents",
     "Search a local knowledge base.",
     schema,
     [](const nlohmann::json& args) -> zoo::Expected<nlohmann::json> {
-        return nlohmann::json{
-            {"query", args.at("query")},
-            {"limit", args.value("limit", 10)},
-            {"scope", args.value("scope", "docs")}
-        };
+        return nlohmann::json{{"query", args.at("query")}};
     });
 ```
 
-Manual handlers must accept a single JSON argument object and return
-`zoo::Expected<nlohmann::json>`.
+Manual handlers accept one JSON object and return `Expected<nlohmann::json>`.
 
-## Batch Registration
+## Exposing Tools To The Model
 
-When registering many tools at startup, use the batch overload to avoid
-per-tool overhead:
+`Model::set_tool_calling()` accepts model-facing `ToolSpec` values:
 
 ```cpp
-std::vector<zoo::tools::ToolDefinition> defs;
+std::vector<zoo::ToolSpec> specs;
+for (const auto& metadata : registry.get_all_tool_metadata()) {
+    specs.push_back(zoo::ToolSpec{
+        metadata.name,
+        metadata.description,
+        metadata.parameters_schema,
+    });
+}
 
-auto add_def = zoo::tools::make_tool_definition(
-    "add", "Add two integers", {"a", "b"},
-    [](int a, int b) { return a + b; });
-if (add_def) defs.push_back(std::move(*add_def));
-
-auto greet_def = zoo::tools::make_tool_definition(
-    "greet", "Greet a person", {"name"},
-    [](std::string name) -> std::string { return "Hello, " + name + "!"; });
-if (greet_def) defs.push_back(std::move(*greet_def));
-
-agent->register_tools(std::move(defs));
+if (!model->set_tool_calling(specs)) {
+    // The active model/template does not support native tool calling.
+}
 ```
 
-`ToolRegistry::register_tools(std::vector<ToolDefinition>)` inserts every
-definition as one ordered batch. The low-level registry is single-threaded
-unless the caller externally synchronizes access that can overlap with
-mutation.
-`Agent::register_tools(std::vector<ToolDefinition>)` queues one registration
-command on the inference thread and performs one tool-calling refresh, rather
-than N command round-trips for N individual `register_tool` calls. An optional
-`std::chrono::nanoseconds` timeout overload is also available.
+Zoo-Keeper asks llama.cpp's chat-template layer to choose the native format,
+parser, grammar, triggers, preserved tokens, and stop sequences.
 
-Re-registering an existing tool name replaces it in place without changing
-its position in the deterministic ordering.
+## Parsing And Validation
 
-## Supported Manual Schema Subset
+Use `generate_from_history()` when you need structured tool-call records:
 
-Manual registration accepts a deliberately small subset of JSON Schema.
-Unsupported constructs fail fast during registration with
-`ErrorCode::InvalidToolSchema`.
+```cpp
+model->add_message(zoo::OwnedMessage::user("Search docs for llama.cpp.").view());
+auto generated = model->generate_from_history();
+
+for (const auto& call : generated->tool_calls) {
+    zoo::tools::ToolCall parsed{
+        call.id,
+        call.name,
+        nlohmann::json::parse(call.arguments_json),
+    };
+    auto valid = zoo::tools::ToolArgumentsValidator{}.validate(parsed, registry);
+}
+```
+
+After executing a handler, add a tool result yourself if you want another model
+pass:
+
+```cpp
+auto result = registry.invoke(parsed.name, parsed.arguments);
+model->add_message(zoo::OwnedMessage::tool(result->dump(), parsed.id).view());
+auto final = model->generate_from_history();
+```
+
+## Supported Schema Subset
 
 Supported:
 
@@ -158,93 +126,15 @@ Supported:
 - property `"enum"`
 - `"additionalProperties": false` or omission
 
-Not supported:
-
-- nested objects
-- arrays and `items`
-- `oneOf`, `anyOf`, `allOf`, `not`
-- `$ref`
-- numeric or string bounds such as `minimum`, `maximum`, `pattern`, `minLength`,
-  `maxLength`
-- unknown keywords that would change validation semantics
-
-The runtime normalizes supported schemas into one internal representation and
-uses that same representation for validation, deterministic schema export, and
-grammar-constrained tool calling.
-
-The same schema subset is accepted by `Agent::extract()` for structured output.
-See [Structured Output](extract.md) for details.
-
-## Validation and Retries
-
-Every detected native tool call is validated against the normalized registered
-schema, including grammar-constrained calls.
-
-Validation enforces:
-
-- required arguments are present,
-- argument types match the registered primitive type,
-- enum values match exactly when configured,
-- unknown arguments are rejected.
-
-If validation fails, the agent injects a corrective tool message and gives the
-model another chance to repair the call up to
-`AgentConfig::max_tool_retries`. Exhaustion fails the request with
-`ErrorCode::ToolRetriesExhausted`.
-
-## Deterministic Ordering
-
-Tool ordering is deterministic and follows registration order. That order is
-used for:
-
-- `ToolRegistry::get_tool_names()`
-- `ToolRegistry::get_all_schemas()`
-- tool grammar generation
-- tool listings embedded in the system prompt
-
-Re-registering an existing tool updates it in place without moving its slot.
-
-## Tool Trace Records
-
-When `GenerationOptions::record_tool_trace` is `true`, completed responses can
-include a `tool_trace` with the tool attempts made during the request.
-
-```cpp
-auto handle = agent->chat(
-    zoo::MessageView{zoo::Role::User, "What is 42 + 58?"},
-    zoo::GenerationOptions{.record_tool_trace = true});
-
-auto response = handle.await_result();
-if (!response) {
-    std::cerr << response.error().to_string() << '\n';
-    return;
-}
-
-if (response->tool_trace) {
-    for (const auto& invocation : response->tool_trace->invocations) {
-        std::cout << invocation.name << " [" << zoo::to_string(invocation.status) << "]\n";
-        std::cout << "args: " << invocation.arguments_json << '\n';
-        if (invocation.result_json) {
-            std::cout << "result: " << *invocation.result_json << '\n';
-        }
-        if (invocation.error) {
-            std::cout << "error: " << invocation.error->to_string() << '\n';
-        }
-    }
-}
-```
-
-`tool_trace` is optional and remains empty unless you opt in. The same
-`GenerationOptions` flag works for both text responses and structured
-extractions.
+Unsupported constructs fail during registration with
+`ErrorCode::InvalidToolSchema`: nested objects, arrays, composition keywords,
+`$ref`, bounds, regex patterns, and unknown semantic keywords.
 
 ## Low-Level Registry Access
 
-`zoo::tools::ToolRegistry` remains public for lower-level usage, testing, or
-embedding inside custom runtimes. It is not the primary user path for normal
-application code. The registry does not lock internally; share it across
-threads only with external synchronization around reads and writes that can
-overlap.
+`ToolRegistry` is single-threaded unless the caller externally synchronizes
+overlapping reads and writes. This is deliberate: applications own handler
+dispatch and can choose their own concurrency model.
 
 ## Error Codes
 
@@ -253,14 +143,5 @@ overlap.
 | 500 | `ToolNotFound` | Requested tool name is not registered |
 | 501 | `ToolExecutionFailed` | Handler returned an execution failure |
 | 502 | `InvalidToolSignature` | Typed registration metadata does not match the callable |
-| 503 | `ToolRetriesExhausted` | Validation retry budget was exhausted |
-| 504 | `ToolLoopLimitReached` | Agent exceeded the configured tool-iteration budget |
 | 505 | `InvalidToolSchema` | Manual schema uses an unsupported construct |
 | 506 | `ToolValidationFailed` | Parsed arguments failed validation |
-
-## See Also
-
-- [Getting Started](getting-started.md) -- basic Agent setup
-- [Structured Output](extract.md) -- grammar-constrained extraction using the same schema subset
-- [Examples](../examples/README.md) -- runnable programs
-- [Architecture](architecture.md) -- runtime structure and threading model

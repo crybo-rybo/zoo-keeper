@@ -10,8 +10,7 @@
  *   ZOO_BENCHMARK_MODEL=/path/to/model.gguf build/benchmarks/zoo_benchmarks
  */
 
-#include "zoo/agent.hpp"
-#include "zoo/core/model.hpp"
+#include "zoo/zoo.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -233,8 +232,7 @@ HistorySnapshot make_history_snapshot(std::string final_user_prompt) {
 }
 
 void run_live_model_benchmarks(const std::string& model_path) {
-    auto model_result =
-        zoo::core::Model::load(make_model_config(model_path), make_generation_options());
+    auto model_result = zoo::Model::load(make_model_config(model_path), make_generation_options());
     require_success(model_result, "live_model.load");
     auto& model = *model_result;
 
@@ -313,8 +311,7 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "Zoo-Keeper benchmark harness\n";
-        std::cout << "sizeof(RequestHandle<TextResponse>)="
-                  << sizeof(zoo::RequestHandle<TextResponse>)
+        std::cout << "sizeof(ModelConfig)=" << sizeof(zoo::ModelConfig)
                   << " sizeof(MessageView)=" << sizeof(zoo::MessageView)
                   << " sizeof(OwnedMessage)=" << sizeof(zoo::OwnedMessage) << '\n';
 

@@ -297,33 +297,9 @@ TEST(ModelConfigTest, ValidationRejectsBadFields) {
     EXPECT_FALSE(config.validate().has_value());
 }
 
-TEST(AgentConfigTest, DefaultsAndValidation) {
-    zoo::AgentConfig config;
-    EXPECT_EQ(config.max_history_messages, 64u);
-    EXPECT_EQ(config.request_queue_capacity, 64u);
-    EXPECT_EQ(config.max_tool_iterations, 5);
-    EXPECT_EQ(config.max_tool_retries, 2);
-    EXPECT_TRUE(config.validate().has_value());
-}
-
-TEST(AgentConfigTest, ValidationRejectsInvalidFields) {
-    zoo::AgentConfig config;
-    config.request_queue_capacity = 0;
-    EXPECT_FALSE(config.validate().has_value());
-
-    config = {};
-    config.max_history_messages = 0;
-    EXPECT_FALSE(config.validate().has_value());
-
-    config = {};
-    config.max_tool_iterations = 0;
-    EXPECT_FALSE(config.validate().has_value());
-}
-
 TEST(GenerationOptionsTest, DefaultsAndValidation) {
     zoo::GenerationOptions options;
     EXPECT_EQ(options.max_tokens, -1);
-    EXPECT_FALSE(options.record_tool_trace);
     EXPECT_TRUE(options.validate().has_value());
 }
 
@@ -353,19 +329,6 @@ TEST(ModelConfigJsonTest, RejectsMissingModelPath) {
     EXPECT_THROW((void)json.get<zoo::ModelConfig>(), std::invalid_argument);
 }
 
-TEST(AgentConfigJsonTest, RoundTripsSerializableFields) {
-    zoo::AgentConfig config;
-    config.max_history_messages = 8;
-    config.request_queue_capacity = 4;
-    config.max_tool_iterations = 3;
-    config.max_tool_retries = 1;
-
-    const nlohmann::json json = config;
-    EXPECT_FALSE(json.contains("tool_worker_threads"));
-    const auto round_trip = json.get<zoo::AgentConfig>();
-    EXPECT_EQ(round_trip, config);
-}
-
 TEST(GenerationOptionsJsonTest, RoundTripsSerializableFields) {
     zoo::GenerationOptions options;
     options.sampling.temperature = 0.2f;
@@ -373,11 +336,10 @@ TEST(GenerationOptionsJsonTest, RoundTripsSerializableFields) {
     options.sampling.top_k = 12;
     options.max_tokens = 256;
     options.stop_sequences = {"</tool_call>", "User:"};
-    options.record_tool_trace = true;
 
     const nlohmann::json json = options;
     EXPECT_EQ(json.at("sampling").at("top_k"), 12);
-    EXPECT_EQ(json.at("record_tool_trace"), true);
+    EXPECT_FALSE(json.contains("record_tool_trace"));
 
     const auto round_trip = json.get<zoo::GenerationOptions>();
     EXPECT_EQ(round_trip, options);
@@ -465,26 +427,13 @@ TEST(TokenUsageTest, Defaults) {
     EXPECT_EQ(usage.total_tokens, 0);
 }
 
-TEST(ToolInvocationTest, DefaultsAndStatusStrings) {
-    zoo::ToolInvocation invocation;
-    EXPECT_TRUE(invocation.id.empty());
-    EXPECT_TRUE(invocation.name.empty());
-    EXPECT_TRUE(invocation.arguments_json.empty());
-    EXPECT_EQ(invocation.status, zoo::ToolInvocationStatus::Succeeded);
-    EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::Succeeded), "succeeded");
-    EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::ValidationFailed), "validation_failed");
-    EXPECT_STREQ(zoo::to_string(zoo::ToolInvocationStatus::ExecutionFailed), "execution_failed");
-}
-
 TEST(TextResponseTest, Defaults) {
     zoo::TextResponse response;
     EXPECT_TRUE(response.text.empty());
-    EXPECT_FALSE(response.tool_trace.has_value());
 }
 
 TEST(ExtractionResponseTest, Defaults) {
     zoo::ExtractionResponse response;
     EXPECT_TRUE(response.text.empty());
     EXPECT_TRUE(response.data.is_null());
-    EXPECT_FALSE(response.tool_trace.has_value());
 }

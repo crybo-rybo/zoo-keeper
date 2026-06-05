@@ -4,6 +4,26 @@ This document covers what consumers need to know when upgrading Zoo-Keeper.
 
 ## Unreleased
 
+### v2 llama.cpp Harness Hard Break
+
+Zoo-Keeper no longer presents an Agent SDK as the primary API. The installed
+surface is now centered on `zoo::Model`, a synchronous llama.cpp model/session
+harness.
+
+- Use `zoo::Model::load(...)` instead of `zoo::Agent::create(...)`.
+- Include `zoo/model.hpp` or `zoo/zoo.hpp`; `zoo/agent.hpp` is removed.
+- `Agent`, `AgentConfig`, `RequestHandle`, async request queues, and automatic
+  tool-loop APIs are removed from the public API.
+- Stateless completion is now `Model::complete(ConversationView, ...)`.
+- Structured extraction is now synchronous `Model::extract(...)`.
+- `ToolSpec` replaces model-facing tool metadata such as `CoreToolInfo`; tool
+  execution is caller-owned through `zoo::tools`.
+- `GenerationOptions::record_tool_trace` and response `tool_trace` fields are
+  removed with the automatic tool loop.
+- `zoo::hub::ModelStore::load_model(...)` now returns a `std::unique_ptr<zoo::Model>`;
+  `ModelStore::create_agent(...)` is removed.
+- `ZooKeeper::zoo` remains the single supported CMake target.
+
 ### Source Compatibility Shims Removed
 
 The compatibility-only names and forwarding surfaces have been removed. Update
@@ -11,7 +31,7 @@ call sites to the canonical API before upgrading:
 
 - `zoo::Message` → `zoo::OwnedMessage`
 - `zoo::ToolCallInfo` → `zoo::OwnedToolCall`
-- `zoo::AsyncTextCallback` → `zoo::AsyncTokenCallback`
+- `zoo::AsyncTextCallback` / `zoo::AsyncTokenCallback` → synchronous `zoo::TokenCallback`
 - `ZooKeeper::zoo_core` → `ZooKeeper::zoo`
 
 `CachedModelInfo::size_bytes` has also been removed because llama.cpp's cache
@@ -19,7 +39,7 @@ listing no longer reports cache entry sizes.
 
 `GenerationOverride` no longer accepts implicit construction from
 `GenerationOptions`. Use `GenerationOverride::inherit_defaults()` to inherit
-model or agent defaults, or
+model defaults, or
 `GenerationOverride::explicit_options(options)` to apply request options exactly.
 
 ## v1.1.5 → v1.1.6

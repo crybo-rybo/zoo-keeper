@@ -303,12 +303,13 @@ Expected<ToolDefinition> make_tool_definition(const std::string& name,
 }
 
 /**
- * @brief Registry of tools available to the agent runtime.
+ * @brief Registry of caller-owned tools and model-facing schemas.
  *
  * The registry owns normalized tool metadata, exposes deterministic JSON Schema
- * definitions for prompt construction and grammar generation, and invokes
- * registered handlers. It has no internal synchronization; callers must
- * externally serialize any access that can overlap with mutation.
+ * definitions for prompt construction and validation, and invokes registered
+ * handlers when the caller chooses to execute a parsed tool call. It has no
+ * internal synchronization; callers must externally serialize any access that
+ * can overlap with mutation.
  */
 class ToolRegistry {
   public:

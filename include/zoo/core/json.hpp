@@ -196,47 +196,15 @@ inline Expected<ModelConfig> load_model_config(const nlohmann::json& j) {
     }
 }
 
-inline void to_json(nlohmann::json& j, const AgentConfig& config) {
-    j = nlohmann::json{{"max_history_messages", config.max_history_messages},
-                       {"request_queue_capacity", config.request_queue_capacity},
-                       {"max_tool_iterations", config.max_tool_iterations},
-                       {"max_tool_retries", config.max_tool_retries}};
-}
-
-inline void from_json(const nlohmann::json& j, AgentConfig& config) {
-    static constexpr std::array<const char*, 4> kAllowedKeys = {
-        "max_history_messages", "request_queue_capacity", "max_tool_iterations",
-        "max_tool_retries"};
-
-    detail::reject_unknown_keys(j, "agent config", kAllowedKeys);
-
-    AgentConfig parsed;
-    if (auto it = j.find("max_history_messages"); it != j.end()) {
-        it->get_to(parsed.max_history_messages);
-    }
-    if (auto it = j.find("request_queue_capacity"); it != j.end()) {
-        it->get_to(parsed.request_queue_capacity);
-    }
-    if (auto it = j.find("max_tool_iterations"); it != j.end()) {
-        it->get_to(parsed.max_tool_iterations);
-    }
-    if (auto it = j.find("max_tool_retries"); it != j.end()) {
-        it->get_to(parsed.max_tool_retries);
-    }
-
-    config = std::move(parsed);
-}
-
 inline void to_json(nlohmann::json& j, const GenerationOptions& options) {
     j = nlohmann::json{{"sampling", options.sampling},
                        {"max_tokens", options.max_tokens},
-                       {"stop_sequences", options.stop_sequences},
-                       {"record_tool_trace", options.record_tool_trace}};
+                       {"stop_sequences", options.stop_sequences}};
 }
 
 inline void from_json(const nlohmann::json& j, GenerationOptions& options) {
-    static constexpr std::array<const char*, 4> kAllowedKeys = {
-        "sampling", "max_tokens", "stop_sequences", "record_tool_trace"};
+    static constexpr std::array<const char*, 3> kAllowedKeys = {"sampling", "max_tokens",
+                                                                "stop_sequences"};
 
     detail::reject_unknown_keys(j, "generation options", kAllowedKeys);
 
@@ -249,9 +217,6 @@ inline void from_json(const nlohmann::json& j, GenerationOptions& options) {
     }
     if (auto it = j.find("stop_sequences"); it != j.end()) {
         it->get_to(parsed.stop_sequences);
-    }
-    if (auto it = j.find("record_tool_trace"); it != j.end()) {
-        it->get_to(parsed.record_tool_trace);
     }
 
     options = std::move(parsed);

@@ -61,7 +61,7 @@ preset enables the live-model test label set.
 | `ZOO_ENABLE_METAL` | Metal acceleration (macOS) | ON (macOS only) |
 | `ZOO_ENABLE_CUDA` | CUDA acceleration | OFF |
 | `ZOO_BUILD_TESTS` | Build test suite | OFF |
-| `ZOO_BUILD_INTEGRATION_TESTS` | Build Model/Agent integration tests | OFF |
+| `ZOO_BUILD_INTEGRATION_TESTS` | Build live Model integration tests | OFF |
 | `ZOO_BUILD_EXAMPLES` | Build example applications | OFF |
 | `ZOO_BUILD_BENCHMARKS` | Build the repo-local benchmark harness | OFF |
 | `ZOO_BUILD_HUB` | Build optional HuggingFace download client and local model store | OFF |
@@ -170,7 +170,7 @@ scripts/test.sh -R "HuggingFace|ModelStore|AutoConfig|GgufInspector|HubPath"
 
 ## Integration Tests
 
-The integration target exercises the concrete `Model` and `Agent` layers. Two
+The integration target exercises the concrete `Model` harness. Two
 failure-path tests run using vendored fixtures. Optional live smoke tests run
 when a real GGUF path is provided.
 
@@ -355,7 +355,7 @@ Zoo-Keeper's.
 
 ```bash
 scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
-./build/examples/minimal_agent /path/to/model.gguf
+./build/examples/minimal_model /path/to/model.gguf
 ```
 
 Full list, usage lines, and config notes:
@@ -370,6 +370,6 @@ For the interactive chat demo, edit `examples/config.example.json` so
 
 ## See Also
 
-- [Getting Started](getting-started.md) -- first agent walkthrough
+- [Getting Started](getting-started.md) -- first model walkthrough
 - [Configuration](configuration.md) -- config struct fields
 - [Maintainer CMake Packaging Notes](maintainer-cmake-packaging.md) -- build-tree vs install-tree package config internals

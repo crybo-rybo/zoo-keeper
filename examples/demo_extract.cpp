@@ -1,24 +1,13 @@
 /**
  * @file demo_extract.cpp
- * @brief Demonstrates Agent::extract() for grammar-constrained structured output.
- *
- * Runs three self-contained extraction scenarios against a single model to show
- * the stateful, stateless, and streaming extract() overloads.
- *
- * Usage:
- *   ./demo_extract <model.gguf>
+ * @brief Demonstrates Model::extract() for grammar-constrained structured output.
  */
 
 #include <zoo/zoo.hpp>
 
 #include <array>
-#include <iomanip>
 #include <iostream>
 #include <string>
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 static void print_separator(const std::string& title) {
     std::cout << "\n-- " << title << " " << std::string(55 - title.size(), '-') << "\n";
@@ -34,17 +23,7 @@ static void print_result(const zoo::Expected<zoo::ExtractionResponse>& response)
               << response->usage.prompt_tokens << " prompt\n";
 }
 
-// ============================================================================
-// Scenarios
-// ============================================================================
-
-/**
- * @brief Scenario 1 — stateful extraction.
- *
- * Extracts a person's name and age from a natural-language sentence. The
- * message is appended to the agent's retained history.
- */
-static void run_entity_extraction(zoo::Agent& agent) {
+static void run_entity_extraction(zoo::Model& model) {
     print_separator("Scenario 1: entity extraction (stateful)");
 
     nlohmann::json schema = {
@@ -54,18 +33,11 @@ static void run_entity_extraction(zoo::Agent& agent) {
         {"additionalProperties", false}};
 
     std::cout << "Input:  \"Alice Chen is the lead engineer. She turned 34 last Tuesday.\"\n";
-    auto handle =
-        agent.extract(schema, "Alice Chen is the lead engineer. She turned 34 last Tuesday.");
-    print_result(handle.await_result());
+    print_result(
+        model.extract(schema, "Alice Chen is the lead engineer. She turned 34 last Tuesday."));
 }
 
-/**
- * @brief Scenario 2 — stateless extraction with an enum constraint.
- *
- * Classifies the sentiment of a movie review using an explicit message list.
- * The agent's history is not modified.
- */
-static void run_sentiment_classification(zoo::Agent& agent) {
+static void run_sentiment_classification(zoo::Model& model) {
     print_separator("Scenario 2: sentiment classification (stateless, enum)");
 
     nlohmann::json schema = {
@@ -85,18 +57,11 @@ static void run_sentiment_classification(zoo::Agent& agent) {
         zoo::MessageView{zoo::Role::System, "Classify the overall sentiment of the review."},
         zoo::MessageView{zoo::Role::User, review},
     };
-    auto handle =
-        agent.extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)});
-    print_result(handle.await_result());
+    print_result(
+        model.extract(schema, zoo::ConversationView{std::span<const zoo::MessageView>(messages)}));
 }
 
-/**
- * @brief Scenario 3 — streaming extraction.
- *
- * Extracts a numeric count while forwarding tokens to stdout via the on_token
- * callback so you can watch the constrained output build character by character.
- */
-static void run_numeric_extraction(zoo::Agent& agent) {
+static void run_numeric_extraction(zoo::Model& model) {
     print_separator("Scenario 3: numeric extraction (streaming)");
 
     nlohmann::json schema = {
@@ -109,17 +74,16 @@ static void run_numeric_extraction(zoo::Agent& agent) {
     std::cout << "Stream: ";
     std::cout.flush();
 
-    auto handle = agent.extract(schema, "The delivery contains 48 individual cartons.", {},
-                                [](std::string_view token) { std::cout << token << std::flush; });
+    auto on_token = [](std::string_view token) {
+        std::cout << token << std::flush;
+        return zoo::TokenAction::Continue;
+    };
+    auto response =
+        model.extract(schema, "The delivery contains 48 individual cartons.", {}, on_token);
 
-    auto response = handle.await_result();
     std::cout << "\n";
     print_result(response);
 }
-
-// ============================================================================
-// Main
-// ============================================================================
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -140,23 +104,18 @@ int main(int argc, char** argv) {
     generation.sampling.seed = 42;
 
     std::cout << "Loading model: " << model_config.model_path << "\n";
-    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
-    if (!agent_result) {
-        std::cerr << "Error: " << agent_result.error().to_string() << "\n";
+    auto model_result = zoo::Model::load(model_config, generation);
+    if (!model_result) {
+        std::cerr << "Error: " << model_result.error().to_string() << "\n";
         return 1;
     }
-    auto agent = std::move(*agent_result);
-    auto prompt =
-        agent->try_set_system_prompt("You are a precise extraction assistant. "
-                                     "Extract exactly the fields requested and nothing else.");
-    if (!prompt) {
-        std::cerr << "Error: " << prompt.error().to_string() << "\n";
-        return 1;
-    }
+    auto model = std::move(*model_result);
+    model->set_system_prompt("You are a precise extraction assistant. "
+                             "Extract exactly the fields requested and nothing else.");
 
-    run_entity_extraction(*agent);
-    run_sentiment_classification(*agent);
-    run_numeric_extraction(*agent);
+    run_entity_extraction(*model);
+    run_sentiment_classification(*model);
+    run_numeric_extraction(*model);
 
     std::cout << "\nDone.\n";
     return 0;

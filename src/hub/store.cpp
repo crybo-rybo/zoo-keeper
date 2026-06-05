@@ -138,23 +138,13 @@ Expected<ModelConfig> ModelStore::model_config(const std::string& name_or_alias)
     return core::GgufInspector::auto_configure(entry->info);
 }
 
-Expected<std::unique_ptr<core::Model>>
-ModelStore::load_model(const std::string& name_or_alias, const GenerationOptions& options) const {
+Expected<std::unique_ptr<Model>> ModelStore::load_model(const std::string& name_or_alias,
+                                                        const GenerationOptions& options) const {
     auto config = model_config(name_or_alias);
     if (!config) {
         return std::unexpected(config.error());
     }
-    return core::Model::load(*config, options);
-}
-
-Expected<std::unique_ptr<Agent>> ModelStore::create_agent(const std::string& name_or_alias,
-                                                          const AgentConfig& agent_config,
-                                                          const GenerationOptions& options) const {
-    auto config = model_config(name_or_alias);
-    if (!config) {
-        return std::unexpected(config.error());
-    }
-    return Agent::create(*config, agent_config, options);
+    return Model::load(*config, options);
 }
 
 Expected<ModelEntry> ModelStore::pull(HuggingFaceClient& client, const std::string& identifier,

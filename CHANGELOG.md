@@ -7,16 +7,35 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- `zoo::Model` is now the top-level public llama.cpp model/session harness,
+  with synchronous retained generation, stateless completion, structured
+  extraction, streaming callbacks, cancellation callbacks, token accounting, and
+  native tool-call parsing.
+- `ToolSpec` is the public model-facing tool schema type. Tool execution remains
+  caller-owned through `zoo::tools` utilities.
+
 ### Changed
 
+- Zoo-Keeper is now documented and packaged as a llama.cpp LLM harness rather
+  than an Agent SDK. `zoo::core::Model` remains the implementation type behind
+  the top-level `zoo::Model` alias.
+- `zoo::hub::ModelStore::load_model(...)` returns `std::unique_ptr<zoo::Model>`.
 - CRAP score JSON reports are now opt-in via `scripts/crap_report.py --json-out`
   instead of being written automatically on every `scripts/crap.sh` run.
 
 ### Removed
 
+- Removed the public Agent SDK surface: `zoo::Agent`, `AgentConfig`,
+  `RequestHandle`, async request queues, and automatic tool-loop APIs.
+- Removed `zoo/agent.hpp` and Agent-specific examples/tests/runtime sources.
+- Removed `GenerationOptions::record_tool_trace` and response `tool_trace`
+  fields with the automatic tool loop.
 - Removed compatibility-only public aliases `zoo::Message`,
-  `zoo::ToolCallInfo`, and `zoo::AsyncTextCallback`; use
-  `zoo::OwnedMessage`, `zoo::OwnedToolCall`, and `zoo::AsyncTokenCallback`.
+  `zoo::ToolCallInfo`, `zoo::AsyncTextCallback`, and `zoo::AsyncTokenCallback`;
+  use `zoo::OwnedMessage`, `zoo::OwnedToolCall`, and synchronous
+  `zoo::TokenCallback`.
 - Removed implicit `GenerationOptions` construction of `GenerationOverride`;
   use `GenerationOverride::inherit_defaults()` or
   `GenerationOverride::explicit_options(options)`.

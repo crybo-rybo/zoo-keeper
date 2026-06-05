@@ -1,221 +1,100 @@
 # Architecture
 
-Zoo-Keeper exposes three core public layers plus an optional hub layer. Higher
-layers build on lower layers, and consumers can stop at the lowest layer that
-fits their needs.
+Zoo-Keeper is a llama.cpp harness centered on one loaded model session:
+`zoo::Model`. The public API intentionally exposes Zoo-Keeper value types rather
+than llama C API handles; all `llama_model`, `llama_context`, sampler, chat
+template, grammar, and KV-cache ownership stays private.
 
 ```mermaid
 flowchart TB
-    subgraph L4["Layer 4 — Hub (optional, ZOO_BUILD_HUB=ON)"]
+    subgraph Hub["Hub (optional, ZOO_BUILD_HUB=ON)"]
         H["zoo::hub<br/>HuggingFaceClient · ModelStore"]
     end
 
-    subgraph L3["Layer 3 — Agent"]
-        A["zoo::Agent<br/>RequestHandle · async orchestration"]
+    subgraph Harness["Model Harness"]
+        M["zoo::Model<br/>load · generate · complete · extract"]
     end
 
-    subgraph L2["Layer 2 — Tools (llama.cpp-free)"]
+    subgraph Tools["Tool Utilities"]
         T["zoo::tools<br/>ToolRegistry · Parser · Validator"]
     end
 
-    subgraph L1["Layer 1 — Core"]
-        C["zoo::core<br/>Model · GgufInspector · SystemProbe"]
+    subgraph Core["Implementation Namespace"]
+        C["zoo::core<br/>GGUF inspection · system probe · llama wrapper internals"]
     end
 
     subgraph Llama["llama.cpp libraries"]
         LL["llama.cpp core + llama-common"]
     end
 
-    H --> A
+    H --> M
     H --> C
-    H -->|"download/cache"| LL
-    A --> T
-    A --> C
+    M --> T
+    M --> C
     C --> LL
-
+    H -->|"download/cache"| LL
 ```
 
-## Public Layers
+## Public Surface
 
-| Layer | Primary Types | Responsibility |
-|-------|---------------|----------------|
-| Hub *(optional)* | `zoo::hub::HuggingFaceClient`, `zoo::hub::ModelStore` | HuggingFace downloads, local model cataloging |
-| Agent | `zoo::Agent`, `zoo::RequestHandle<Result>` | Async request submission, background inference, native tool orchestration |
-| Tools | `zoo::tools::ToolRegistry`, `zoo::tools::ToolCallParser`, `zoo::tools::ToolArgumentsValidator` | Tool registration, native tool-call parsing, schema validation |
-| Core | `zoo::core::Model`, `zoo::core::GgufInspector`, `zoo::core::SystemProbe` | Direct synchronous llama.cpp wrapper, GGUF metadata read, hardware probe, hardware-aware auto-configuration |
+| Area | Primary Types | Responsibility |
+|------|---------------|----------------|
+| Model harness | `zoo::Model`, `ModelConfig`, `GenerationOptions` | Load GGUF models, own one llama.cpp session, manage history/KV state, generate text, run stateless completion, and extract schema-constrained JSON |
+| Tool utilities | `zoo::tools::ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator`, `ToolSpec` | Build model-facing tool schemas, parse native tool calls, validate arguments, and let callers execute handlers explicitly |
+| Hub *(optional)* | `zoo::hub::HuggingFaceClient`, `zoo::hub::ModelStore` | Download GGUF files through llama.cpp cache paths and resolve catalog entries to `ModelConfig`/`Model` |
+| Core implementation | `zoo::core::GgufInspector`, `zoo::core::SystemProbe` | Inspect GGUF metadata and probe host hardware for model configuration |
 
-## Usage Model
+`zoo::core::Model` remains the underlying implementation type, but the normal
+consumer entry point is the top-level alias `zoo::Model`.
 
-### `zoo::core::Model`
+## Model Session
 
-Use `Model` when you want direct, single-threaded inference without the agent
-runtime. It owns model loading, prompt rendering, history, KV-cache
-interaction, sampling, and generation.
+`zoo::Model` is synchronous and not internally thread-safe. One instance owns:
 
-### `zoo::Agent`
+- llama.cpp model/context handles
+- chat-template rendering state
+- sampler and grammar state
+- retained message history
+- KV-cache bookkeeping
+- token usage and latency accounting
 
-Use `Agent` when you want queued asynchronous requests, streaming callbacks,
-cancellation, native tool execution, and a choice between stateful `chat(...)`
-requests and stateless request-scoped `complete(...)` requests. `Agent` is the
-primary high-level runtime surface for most consumers.
+Use `generate(...)` for retained conversation turns, `complete(...)` for a
+request-scoped conversation that restores the previous history afterward, and
+`extract(...)` for grammar-constrained JSON output.
 
-`RequestHandle<Result>` is the public async return type. It carries the request
-ID and exposes `cancel()`, `ready()`, and `await_result()` for cancellation,
-polling, and retrieving the completed response or error.
+Streaming and cancellation are callback-based:
 
-### Request lifecycle
+```cpp
+auto on_token = [](std::string_view token) {
+    std::cout << token << std::flush;
+    return zoo::TokenAction::Continue;
+};
+auto should_cancel = [&] { return stop_requested.load(); };
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Calling thread
-    participant Facade as zoo::Agent
-    participant Handle as RequestHandle
-    participant Slots as RequestSlots
-    participant Mailbox as RuntimeMailbox
-    participant Inf as Inference thread
-    participant Model as zoo::core::Model
-    participant CB as CallbackDispatcher
-
-    App->>Facade: chat(message, callback)
-    Facade->>Slots: allocate slot + RequestHandle
-    Facade->>Mailbox: push_request(QueuedRequest)
-    Facade-->>App: RequestHandle<TextResponse>
-
-    Inf->>Mailbox: pop next work item (commands first)
-    Inf->>Slots: load active request payload
-    Inf->>Model: generate_from_history(...)
-    loop token generation
-        Model-->>Inf: token(s)
-        opt streaming callback registered
-            Inf->>CB: dispatch token
-            CB->>App: on_token(token)
-            App-->>CB: Continue / Stop
-        end
-    end
-    Model-->>Inf: GenerationResult
-
-    Inf->>Slots: complete slot with TextResponse
-    App->>Handle: await_result()
-    Handle->>Slots: wait + release
-    Slots-->>Handle: Expected<TextResponse>
-    Handle-->>App: Expected<TextResponse>
+auto response = model->generate("Hello", {}, on_token, should_cancel);
 ```
 
-1. The calling thread submits via `chat()`, `complete()`, or `extract()` and
-   receives a `RequestHandle<Result>` immediately.
-2. The runtime enqueues work on the inference thread through
-   `RuntimeMailbox` (commands are prioritized over queued requests).
-3. Generation runs on `zoo::core::Model`; optional streaming callbacks are
-   dispatched on `CallbackDispatcher`.
-4. The caller observes completion through `await_result()`.
+## Tool Calling
 
-## Public Threading Guarantees
+Tool calling is native-template only. `Model::set_tool_calling()` accepts
+`std::vector<zoo::ToolSpec>` and asks llama.cpp's chat-template layer to prepare
+the model-specific format, parser, grammar triggers, and stop sequences.
 
-- `zoo::Agent` owns a background inference thread.
-- Requests are submitted from the calling thread through `chat(...)`,
-  `complete(...)`, or `extract(...)`.
-- Request completion is observed through `RequestHandle<Result>::await_result()`.
-- Model state is owned by the inference thread while the agent is running.
-- Streaming token callbacks execute on the CallbackDispatcher thread. Tool
-  handlers execute on a dedicated ToolExecutor handler thread while the tool loop
-  waits for their result. Abandoned or completed handler threads are joined
-  asynchronously so cancellation does not block the inference thread.
-- Direct `ToolRegistry` use is single-threaded unless callers externally
-  synchronize overlapping operations. `Agent` serializes registry mutation on
-  its inference thread.
+Zoo-Keeper does not run an autonomous tool loop. Callers parse generated native
+tool calls through `Model::generate_from_history()` or
+`Model::parse_tool_response()`, validate them with `zoo::tools`, execute their
+own handlers, then add `OwnedMessage::tool(...)` responses if they want another
+model pass.
 
-```mermaid
-flowchart LR
-    subgraph Caller["Calling thread(s)"]
-        APP["Application code"]
-        SUB["chat() · complete() · extract()"]
-        AWAIT["RequestHandle::await_result()"]
-        APP --> SUB --> AWAIT
-    end
-
-    subgraph Runtime["Agent runtime"]
-        SLOTS["RequestSlots<br/>payloads + completion state"]
-        MB["RuntimeMailbox<br/>requests + commands"]
-        INF["Inference thread<br/>AgentRuntime"]
-        BE["AgentBackend → Model"]
-        MB --> INF --> BE
-        INF -->|"load / resolve"| SLOTS
-    end
-
-    subgraph Workers["Dedicated workers"]
-        CB["CallbackDispatcher<br/>streaming token callbacks"]
-        TE["ToolExecutor<br/>user tool handlers"]
-    end
-
-    SUB -->|"reserve slot"| SLOTS
-    SUB -->|"enqueue request"| MB
-    SUB -->|"return handle"| AWAIT
-    INF -->|"dispatch tokens"| CB
-    CB -->|"TokenAction::Continue / Stop"| APP
-    INF -->|"invoke handler"| TE
-    TE -->|"result"| INF
-    AWAIT -->|"ready / await / cancel"| SLOTS
-
-```
-
-These guarantees are part of the public behavioral contract. Private runtime
-mechanisms that implement them are documented separately for maintainers.
-
-## Tool Calling Model
-
-Tool calling is native-only. Zoo-Keeper only executes model-emitted native tool
-calls when the active model/template supports them. If the selected model does
-not expose native tool calling, the runtime remains on the text path.
-
-When `GenerationOptions::record_tool_trace` is enabled, the request can retain
-a `tool_trace` describing the attempts made during the tool loop.
-
-```mermaid
-flowchart TD
-    START(["User request enters tool loop"])
-    GEN["Model generates tokens<br/>(native tool grammar when available)"]
-    PARSE["Extract native tool calls<br/>(template parser format)"]
-    TEXT{"Tool calls<br/>detected?"}
-    DONE(["Return TextResponse<br/>+ optional tool_trace"])
-    VAL["Validate arguments<br/>against registered schema"]
-    OK{"Valid?"}
-    EXEC["ToolExecutor runs<br/>registered handler"]
-    INJ["Inject tool result/error<br/>as tool message"]
-    RETRY{"Retries<br/>remaining?"}
-    FAIL(["Fail: ToolRetriesExhausted"])
-    LIMIT{"Within<br/>iteration budget?"}
-    LIMITFAIL(["Fail: ToolLoopLimitReached"])
-
-    START --> GEN --> PARSE --> TEXT
-    TEXT -->|no| DONE
-    TEXT -->|yes| LIMIT
-    LIMIT -->|no| LIMITFAIL
-    LIMIT -->|yes| VAL --> OK
-    OK -->|yes| EXEC --> INJ --> GEN
-    OK -->|no| RETRY
-    RETRY -->|yes| INJ
-    RETRY -->|no| FAIL
-
-```
-
-See [tools.md](tools.md) for registration, schema rules, and error codes.
-
-## CMake Targets
+## CMake Target
 
 | Target | Status | Notes |
 |--------|--------|-------|
-| `ZooKeeper::zoo` | Primary | Recommended target for new consumers |
+| `ZooKeeper::zoo` | Primary | Single supported target for consumers |
 
 ## Design Goals
 
-- One obvious public runtime story centered on `ZooKeeper::zoo`
-- Small installed API surface under `include/zoo/`
-- Explicit native tool execution data and deterministic tool metadata behavior
-- Docs that describe supported behavior without exposing private implementation
-  details as API
-
-## For Maintainers
-
-Internal runtime ownership, private module boundaries, and contributor-facing
-invariants live in [maintainer-architecture.md](maintainer-architecture.md).
+- Keep llama.cpp coupling explicit and intentional.
+- Keep llama handles out of public headers.
+- Prefer one model-session story over backend abstraction or autonomous agent behavior.
+- Keep tool execution caller-owned and observable through normal application code.
