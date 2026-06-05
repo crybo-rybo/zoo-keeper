@@ -73,7 +73,9 @@ parser, grammar, triggers, preserved tokens, and stop sequences.
 
 ## Parsing And Validation
 
-Use `generate_from_history()` when you need structured tool-call records:
+Use `generate_from_history()` when you need structured tool-call records. The
+generated assistant turn is committed to history, including any structured tool
+calls:
 
 ```cpp
 model->add_message(zoo::OwnedMessage::user("Search docs for llama.cpp.").view());
@@ -89,8 +91,8 @@ for (const auto& call : generated->tool_calls) {
 }
 ```
 
-After validating a call, dispatch it through application code. Add a tool result
-yourself if you want another model pass:
+After validating a call, dispatch it through application code. Add a matching
+tool result if you want another model pass:
 
 ```cpp
 nlohmann::json result = run_application_tool(parsed.name, parsed.arguments);

@@ -67,6 +67,7 @@ auto generated = model->generate_from_history();
 for (const auto& call : generated->tool_calls) {
     // validate and execute in application code
 }
+// generated is already committed; append tool results before another pass.
 ```
 
 ## See Also

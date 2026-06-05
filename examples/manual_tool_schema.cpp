@@ -79,6 +79,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // The assistant tool-call turn is already committed to history here.
     std::cout << "Visible content:\n" << generated->parsed_content << "\n\n";
     for (const auto& call : generated->tool_calls) {
         auto tool_call = to_tool_call(call);

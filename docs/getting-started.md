@@ -57,7 +57,7 @@ owns one model/context/session.
 | `complete(messages)` | Generate against an explicit `ConversationView` without mutating retained history |
 | `extract(schema, message)` | Generate schema-constrained JSON and commit the extraction turn |
 | `extract(schema, messages)` | Stateless schema-constrained extraction over explicit messages |
-| `generate_from_history()` | Low-level generation pass from the current history without committing the assistant turn |
+| `generate_from_history()` | Generate from retained history and commit the assistant turn, including structured tool calls |
 | `set_system_prompt(text)` | Set or replace the leading system prompt |
 | `add_message(message)` | Add a structured message to retained history |
 | `get_history()` | Return a `HistorySnapshot` copy |

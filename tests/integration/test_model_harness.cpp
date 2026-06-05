@@ -48,6 +48,14 @@ struct TestConfig {
     zoo::GenerationOptions generation;
 };
 
+zoo::tools::ToolCall to_tool_call(const zoo::OwnedToolCall& call) {
+    return zoo::tools::ToolCall{
+        call.id,
+        call.name,
+        nlohmann::json::parse(call.arguments_json, nullptr, false),
+    };
+}
+
 TestConfig make_base_config(const std::filesystem::path& model_path) {
     TestConfig config;
     config.model.model_path = model_path.string();
@@ -170,6 +178,63 @@ TEST_F(LiveModelIntegrationTest, CompleteDoesNotMutatePersistentHistory) {
     EXPECT_FALSE(scoped->text.empty());
     EXPECT_FALSE(streamed.empty());
     EXPECT_EQ(model->get_history(), before);
+}
+
+TEST_F(LiveModelIntegrationTest, NativeToolLoopCommitsAssistantBeforeToolResult) {
+    auto cfg = config();
+    cfg.generation.max_tokens = 96;
+    auto model_result = zoo::Model::load(cfg.model, cfg.generation);
+    ASSERT_TRUE(model_result.has_value()) << model_result.error().to_string();
+
+    zoo::tools::ToolRegistry registry;
+    const nlohmann::json schema = {
+        {"type", "object"},
+        {"properties", {{"key", {{"type", "string"}, {"description", "Lookup key"}}}}},
+        {"required", nlohmann::json::array({"key"})},
+        {"additionalProperties", false},
+    };
+    auto registered =
+        registry.register_tool("lookup_code", "Lookup a deterministic code by key.", schema);
+    ASSERT_TRUE(registered.has_value()) << registered.error().to_string();
+
+    auto& model = *model_result;
+    if (!model->set_tool_calling(registry.get_all_tool_specs())) {
+        GTEST_SKIP() << "Configured integration model does not support native tool calling.";
+    }
+
+    model->set_system_prompt(
+        "Use lookup_code when asked for a code. After a tool result, answer briefly.");
+    ASSERT_TRUE(model->add_message(
+        zoo::OwnedMessage::user("Use lookup_code with key alpha, then report the code.").view()));
+
+    auto generated = model->generate_from_history();
+    ASSERT_TRUE(generated.has_value()) << generated.error().to_string();
+    ASSERT_TRUE(generated->tool_call_detected) << generated->text;
+    ASSERT_FALSE(generated->tool_calls.empty()) << generated->text;
+
+    const auto history_after_call = model->get_history();
+    ASSERT_GE(history_after_call.size(), 3u);
+    const auto& assistant_call = history_after_call[history_after_call.size() - 1];
+    EXPECT_EQ(assistant_call.role, zoo::Role::Assistant);
+    ASSERT_FALSE(assistant_call.tool_calls.empty());
+    EXPECT_EQ(assistant_call.tool_calls[0].id, generated->tool_calls[0].id);
+
+    auto parsed = to_tool_call(generated->tool_calls[0]);
+    ASSERT_FALSE(parsed.arguments.is_discarded()) << generated->tool_calls[0].arguments_json;
+    auto validation = zoo::tools::ToolArgumentsValidator{}.validate(parsed, registry);
+    ASSERT_TRUE(validation.has_value()) << validation.error().to_string();
+
+    const nlohmann::json tool_result = {{"code", "A-17"}, {"key", "alpha"}};
+    ASSERT_TRUE(model->add_message(zoo::OwnedMessage::tool(tool_result.dump(), parsed.id).view()));
+
+    auto final = model->generate_from_history();
+    ASSERT_TRUE(final.has_value()) << final.error().to_string();
+
+    const auto history_after_result = model->get_history();
+    ASSERT_GE(history_after_result.size(), 5u);
+    EXPECT_EQ(history_after_result[history_after_result.size() - 2].role, zoo::Role::Tool);
+    EXPECT_EQ(history_after_result[history_after_result.size() - 2].tool_call_id, parsed.id);
+    EXPECT_EQ(history_after_result[history_after_result.size() - 1].role, zoo::Role::Assistant);
 }
 
 TEST_F(LiveModelIntegrationTest, ExtractReturnsValidJsonMatchingSchema) {

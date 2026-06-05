@@ -80,11 +80,12 @@ Tool calling is native-template only. `Model::set_tool_calling()` accepts
 `std::vector<zoo::ToolSpec>` and asks llama.cpp's chat-template layer to prepare
 the model-specific format, parser, grammar triggers, and stop sequences.
 
-Zoo-Keeper does not run an autonomous tool loop. Callers parse generated native
-tool calls through `Model::generate_from_history()` or
+Zoo-Keeper does not run an autonomous tool loop. Callers read generated native
+tool calls from `Model::generate_from_history()` or parse explicit text with
 `Model::parse_tool_response()`, validate them with `zoo::tools`, dispatch them
-through application code, then add `OwnedMessage::tool(...)` responses if they
-want another model pass.
+through application code, then add `OwnedMessage::tool(...)` responses before
+another model pass. `generate_from_history()` commits the assistant turn it
+returns, including structured tool calls.
 
 ## CMake Target
 

@@ -105,9 +105,11 @@ class Model {
     };
 
     /**
-     * @brief Generates from the current history without appending a new user message.
+     * @brief Generates from the current history and commits the assistant turn.
      *
-     * @note This method does not commit the assistant turn to history.
+     * When native tool calling is active, returned tool calls are also stored on
+     * the appended assistant message so callers can add matching tool results
+     * before a follow-up generation pass.
      */
     Expected<GenerationResult> generate_from_history(GenerationOverride generation = {},
                                                      TokenCallback on_token = {},

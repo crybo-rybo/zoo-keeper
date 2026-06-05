@@ -189,11 +189,16 @@ Expected<ExtractionResponse> Model::extract(const nlohmann::json& output_schema,
         return std::unexpected(params.error());
     }
 
+    const size_t history_size = impl_->session_.messages.size();
     auto add_result = add_message(message);
     if (!add_result) {
         return std::unexpected(add_result.error());
     }
-    auto rollback_user = ScopeExit([this] { rollback_last_message(*impl_); });
+    auto rollback_turn = ScopeExit([this, history_size] {
+        while (impl_->session_.messages.size() > history_size) {
+            rollback_last_message(*impl_);
+        }
+    });
 
     auto response =
         extract_from_history(*this, *impl_, *params, generation, on_token, should_cancel);
@@ -201,12 +206,7 @@ Expected<ExtractionResponse> Model::extract(const nlohmann::json& output_schema,
         return std::unexpected(response.error());
     }
 
-    auto assistant_result = add_message(OwnedMessage::assistant(response->text).view());
-    if (!assistant_result) {
-        return std::unexpected(assistant_result.error());
-    }
-    finalize_response();
-    rollback_user.dismiss();
+    rollback_turn.dismiss();
     return response;
 }
 
