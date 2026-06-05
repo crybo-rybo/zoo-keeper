@@ -39,7 +39,7 @@ struct RequestReservation {
 struct ActiveRequest {
     RequestId id = 0;
     HistoryMode history_mode = HistoryMode::Append;
-    const std::vector<Message>* messages = nullptr;
+    const std::vector<OwnedMessage>* messages = nullptr;
     const GenerationOptions* options = nullptr;
     std::shared_ptr<AsyncTokenCallback> streaming_callback;
     const std::optional<nlohmann::json>* extraction_schema = nullptr;

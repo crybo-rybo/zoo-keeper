@@ -86,10 +86,6 @@ for (const auto& m : cached) {
 }
 ```
 
-`CachedModelInfo::size_bytes` is retained for source compatibility but is
-reported as `0`, because llama.cpp's b9296 cache listing exposes repository and
-tag only.
-
 For gated models, pass a bearer token via `HuggingFaceClient::Config`:
 
 ```cpp

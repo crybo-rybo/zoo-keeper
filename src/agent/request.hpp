@@ -35,7 +35,7 @@ enum class ResultKind {
  * @brief Full per-request payload stored in a request slot.
  */
 struct RequestPayload {
-    std::vector<Message> messages;
+    std::vector<OwnedMessage> messages;
     HistoryMode history_mode = HistoryMode::Append;
     GenerationOptions options;
     AsyncTokenCallback streaming_callback;

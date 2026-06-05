@@ -60,10 +60,6 @@ target_compile_definitions(zoo
         "$<$<BOOL:${ZOO_ENABLE_LOGGING}>:ZOO_LOGGING_ENABLED>"
 )
 
-add_library(zoo_core INTERFACE)
-target_link_libraries(zoo_core INTERFACE zoo)
-
 add_library(ZooKeeper::zoo ALIAS zoo)
-add_library(ZooKeeper::zoo_core ALIAS zoo_core)
 
 zoo_apply_strict_target_options(zoo)

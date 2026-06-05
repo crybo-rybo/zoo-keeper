@@ -15,7 +15,7 @@ namespace {
 using zoo::CancellationCallback;
 using zoo::CoreToolInfo;
 using zoo::Expected;
-using zoo::GenerationOptions;
+using zoo::GenerationOverride;
 using zoo::HistorySnapshot;
 using zoo::MessageView;
 using zoo::TokenCallback;
@@ -28,7 +28,7 @@ template <typename ModelLike>
 concept ModelMirrorsAgentBackend = requires(ModelLike& model) {
     { model.add_message(std::declval<MessageView>()) } -> std::same_as<Expected<void>>;
     {
-        model.generate_from_history(std::declval<const GenerationOptions&>(),
+        model.generate_from_history(std::declval<GenerationOverride>(),
                                     std::declval<TokenCallback>(),
                                     std::declval<CancellationCallback>())
     } -> std::same_as<Expected<GenerationResult>>;

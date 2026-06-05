@@ -324,13 +324,13 @@ Expected<TextResponse> Model::generate(MessageView message, GenerationOverride g
     if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
         auto parsed = parse_tool_response(generated_text);
         if (!parsed.tool_calls.empty()) {
-            impl_->session_.messages.push_back(Message::assistant_with_tool_calls(
+            impl_->session_.messages.push_back(OwnedMessage::assistant_with_tool_calls(
                 std::move(parsed.content), std::move(parsed.tool_calls)));
         } else {
-            impl_->session_.messages.push_back(Message::assistant(std::move(parsed.content)));
+            impl_->session_.messages.push_back(OwnedMessage::assistant(std::move(parsed.content)));
         }
     } else {
-        impl_->session_.messages.push_back(Message::assistant(std::move(generated_text)));
+        impl_->session_.messages.push_back(OwnedMessage::assistant(std::move(generated_text)));
     }
 
     if (!impl_->session_.sampler_policy.is_native_tool_call() && all_stops.empty() &&
@@ -408,7 +408,7 @@ Expected<Model::GenerationResult> Model::generate_from_history(GenerationOverrid
     // return the structured result so callers avoid a redundant re-parse.
     bool tool_detected = false;
     std::string parsed_content;
-    std::vector<ToolCallInfo> parsed_tool_calls;
+    std::vector<OwnedToolCall> parsed_tool_calls;
     if (impl_->session_.sampler_policy.is_native_tool_call()) {
         auto parsed = parse_tool_response(*text_result);
         tool_detected = !parsed.tool_calls.empty();

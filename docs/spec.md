@@ -33,14 +33,13 @@ The supported surface is:
 - Installed headers under `include/zoo/`
 - CMake target `ZooKeeper::zoo`
 - Core types and APIs such as `ModelConfig`, `AgentConfig`, `GenerationOptions`,
-  `zoo::Agent`, `zoo::core::Model`, `OwnedMessage`, `Message`,
-  `MessageView`, `ConversationView`, `HistorySnapshot`, `OwnedToolCall`,
-  `ToolCallInfo`, `TextResponse`, `ExtractionResponse`, `RequestHandle<T>`,
+  `zoo::Agent`, `zoo::core::Model`, `OwnedMessage`, `MessageView`,
+  `ConversationView`, `HistorySnapshot`, `OwnedToolCall`,
+  `TextResponse`, `ExtractionResponse`, `RequestHandle<T>`,
   `ToolRegistry`, `ToolCallParser`, and `ToolArgumentsValidator`
 
-`OwnedMessage` and `OwnedToolCall` are the ownership-explicit canonical names.
-`Message` and `ToolCallInfo` are stable source-compatible aliases retained for
-existing consumers and examples.
+`OwnedMessage` and `OwnedToolCall` are the ownership-explicit retained-history
+types.
 
 `ToolCallView` and `ToolCallSpan` are retained as request-scoped borrowed APIs
 for adapters that already hold structured assistant tool-call metadata. Borrowed

@@ -65,7 +65,7 @@ class ToolLoopController {
             if (detection.response_text.empty() && tool_invoked_ &&
                 iteration < agent_config_.max_tool_iterations) {
                 backend_.add_message(
-                    Message::user("Please respond to the user with the tool result.").view());
+                    OwnedMessage::user("Please respond to the user with the tool result.").view());
                 callback_dispatcher_.drain();
                 continue;
             }
@@ -85,7 +85,7 @@ class ToolLoopController {
     struct ToolDetection {
         std::vector<tools::ToolCall> tool_calls;
         std::string response_text;
-        std::vector<ToolCallInfo> structured_tool_calls;
+        std::vector<OwnedToolCall> structured_tool_calls;
     };
 
     [[nodiscard]] static bool is_cancelled(const ActiveRequest& request) {
@@ -119,7 +119,7 @@ class ToolLoopController {
         return detection;
     }
 
-    static tools::ToolCall to_tool_call(const ToolCallInfo& structured_call) {
+    static tools::ToolCall to_tool_call(const OwnedToolCall& structured_call) {
         tools::ToolCall tool_call;
         tool_call.id = structured_call.id;
         tool_call.name = structured_call.name;
@@ -133,13 +133,15 @@ class ToolLoopController {
 
     Expected<void> handle_tool_calls(const std::vector<tools::ToolCall>& tool_calls,
                                      std::string response_text,
-                                     std::vector<ToolCallInfo> structured_tool_calls, int iteration,
-                                     bool record_tool_trace, const ActiveRequest& request) {
+                                     std::vector<OwnedToolCall> structured_tool_calls,
+                                     int iteration, bool record_tool_trace,
+                                     const ActiveRequest& request) {
         if (!structured_tool_calls.empty()) {
             backend_.add_message(
-                Message::assistant_with_tool_calls(response_text, structured_tool_calls).view());
+                OwnedMessage::assistant_with_tool_calls(response_text, structured_tool_calls)
+                    .view());
         } else {
-            backend_.add_message(Message::assistant(response_text).view());
+            backend_.add_message(OwnedMessage::assistant(response_text).view());
         }
         backend_.finalize_response();
 
@@ -163,7 +165,7 @@ class ToolLoopController {
                                     size_t start_index, const Error& error) {
         const std::string content = "Error: " + error.message;
         for (size_t index = start_index; index < tool_calls.size(); ++index) {
-            backend_.add_message(Message::tool(content, tool_calls[index].id).view());
+            backend_.add_message(OwnedMessage::tool(content, tool_calls[index].id).view());
         }
         callback_dispatcher_.drain();
     }
@@ -207,7 +209,7 @@ class ToolLoopController {
             status = ToolInvocationStatus::ExecutionFailed;
         }
 
-        backend_.add_message(Message::tool(std::move(tool_result_str), tool_call.id).view());
+        backend_.add_message(OwnedMessage::tool(std::move(tool_result_str), tool_call.id).view());
         tool_invoked_ = true;
         if (record_tool_trace) {
             tool_invocations_.push_back(
@@ -248,7 +250,8 @@ class ToolLoopController {
 
         std::string error_content = "Error: " + validation_error.message;
         backend_.add_message(
-            Message::tool(error_content + "\nPlease correct the arguments.", tool_call.id).view());
+            OwnedMessage::tool(error_content + "\nPlease correct the arguments.", tool_call.id)
+                .view());
         tool_invoked_ = true;
         if (record_tool_trace) {
             tool_invocations_.push_back(ToolInvocation{
@@ -273,7 +276,7 @@ class ToolLoopController {
                                            bool record_tool_trace) {
         const auto end_time = std::chrono::steady_clock::now();
 
-        backend_.add_message(Message::assistant(response_text).view());
+        backend_.add_message(OwnedMessage::assistant(response_text).view());
         backend_.finalize_response();
         callback_dispatcher_.drain();
 

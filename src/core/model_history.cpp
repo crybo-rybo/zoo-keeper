@@ -14,7 +14,7 @@
 namespace zoo::core {
 
 void Model::set_system_prompt(std::string_view prompt) {
-    Message sys_msg = Message::system(std::string(prompt));
+    OwnedMessage sys_msg = OwnedMessage::system(std::string(prompt));
 
     if (!impl_->session_.messages.empty() && impl_->session_.messages[0].role == Role::System) {
         impl_->session_.estimated_tokens -=
@@ -35,7 +35,7 @@ Expected<void> Model::add_message(MessageView message) {
         return std::unexpected(err.error());
     }
 
-    impl_->session_.messages.push_back(Message::from_view(message));
+    impl_->session_.messages.push_back(OwnedMessage::from_view(message));
     impl_->session_.estimated_tokens +=
         estimate_message_tokens(*impl_, impl_->session_.messages.back());
     note_history_append(*impl_);
@@ -92,7 +92,7 @@ int estimate_tokens(const Model::Impl& impl, std::string_view text) {
     return std::max(1, static_cast<int>(text.length() / 4));
 }
 
-int estimate_message_tokens(const Model::Impl& impl, const Message& message) {
+int estimate_message_tokens(const Model::Impl& impl, const OwnedMessage& message) {
     int total = estimate_tokens(impl, message.content) + Model::Impl::kTemplateOverheadPerMessage;
     if (!message.tool_call_id.empty()) {
         total += estimate_tokens(impl, message.tool_call_id);

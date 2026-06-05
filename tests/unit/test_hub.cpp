@@ -277,18 +277,6 @@ TEST(CachedModelInfoTest, ToStringLatestOmitsTag) {
     EXPECT_EQ(info.to_string(), "owner/model");
 }
 
-TEST(CachedModelInfoTest, SizeBytesRemainsSourceCompatibleNoop) {
-    zoo::hub::CachedModelInfo info;
-    EXPECT_EQ(info.size_bytes, 0U);
-
-    info.user = "owner";
-    info.model = "model";
-    info.tag = "Q4_K_M";
-    info.size_bytes = 123;
-
-    EXPECT_EQ(info.to_string(), "owner/model:Q4_K_M");
-}
-
 // ---- HuggingFace cache path helpers ----
 
 TEST(HfCachePathsTest, RepoFolderReplacesSlashWithDoubleHyphen) {

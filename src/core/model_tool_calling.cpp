@@ -123,7 +123,7 @@ Model::ParsedResponse Model::parse_tool_response(std::string_view text) const {
     result.content = std::move(parsed.content);
     result.tool_calls.reserve(parsed.tool_calls.size());
     for (auto& tc : parsed.tool_calls) {
-        result.tool_calls.push_back(ToolCallInfo{
+        result.tool_calls.push_back(OwnedToolCall{
             std::move(tc.id),
             std::move(tc.name),
             std::move(tc.arguments),

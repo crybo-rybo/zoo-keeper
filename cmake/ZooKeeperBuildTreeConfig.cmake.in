@@ -50,11 +50,4 @@ if(NOT TARGET ZooKeeper::llama)
     endif()
 endif()
 
-if(NOT TARGET ZooKeeper::zoo_core)
-    add_library(ZooKeeper::zoo_core INTERFACE IMPORTED)
-    set_property(TARGET ZooKeeper::zoo_core PROPERTY
-        INTERFACE_LINK_LIBRARIES ZooKeeper::zoo
-    )
-endif()
-
 check_required_components(ZooKeeper)

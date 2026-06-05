@@ -115,7 +115,7 @@ struct Model::Impl {
 
         PromptState prompt_state;
 
-        std::vector<Message> messages;
+        std::vector<OwnedMessage> messages;
         int estimated_tokens = 0;
         std::vector<int> token_buffer;
         SamplingParams active_sampling;
@@ -168,7 +168,7 @@ bool rebuild_sampler_with_schema_grammar(Model::Impl& impl);
 [[nodiscard]] std::vector<std::string> merge_stop_sequences(const Model::Impl& impl,
                                                             std::vector<std::string> base);
 [[nodiscard]] int estimate_tokens(const Model::Impl& impl, std::string_view text);
-[[nodiscard]] int estimate_message_tokens(const Model::Impl& impl, const Message& message);
+[[nodiscard]] int estimate_message_tokens(const Model::Impl& impl, const OwnedMessage& message);
 void rollback_last_message(Model::Impl& impl) noexcept;
 [[nodiscard]] GenerationOptions resolve_generation_options(const Model::Impl& impl,
                                                            GenerationOverride generation);
