@@ -34,12 +34,13 @@ Do not spread llama.cpp calls outside `src/core/model*.cpp`.
 ## Tooling Boundaries
 
 - `include/zoo/tools/*` contains the supported public tool utility API.
-- `ToolRegistry` owns normalized metadata and optional handlers.
+- `ToolRegistry` owns normalized model-facing schemas and validation metadata.
 - Parser and validator operate on strings and JSON, not on llama internals.
 - `src/tools/grammar.hpp` is private implementation used by schema extraction.
 
-Tool execution is caller-owned. Do not reintroduce an autonomous tool loop
-without a separate product/API decision.
+Tool execution is caller-owned and lives outside Zoo-Keeper. Do not reintroduce
+executable tool storage or an autonomous tool loop without a separate
+product/API decision.
 
 ## Hub Internals
 

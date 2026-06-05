@@ -84,7 +84,7 @@ See [Structured Output](../docs/extract.md) for schema details.
 ./build/examples/manual_tool_schema /path/to/model.gguf
 ```
 
-See [Tools](../docs/tools.md) for typed vs manual registration.
+See [Tools](../docs/tools.md) for schema registration and native call parsing.
 
 ## Hub layer
 

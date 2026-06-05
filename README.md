@@ -26,7 +26,7 @@ Zoo-Keeper is a C++23 LLM harness built tightly on [llama.cpp](https://github.co
 At a high level, Zoo-Keeper provides:
 
 - **`zoo::Model`** — model loading, retained history, stateless completion, streaming, cancellation, and schema extraction
-- **`zoo::tools`** — caller-owned tool metadata, parsing, invocation, and schema validation
+- **`zoo::tools`** — caller-owned tool metadata, parsing, and schema validation
 - **`zoo::hub`** *(optional)* — HuggingFace downloads and a local model store
 
 See [Architecture](docs/architecture.md) for the harness boundary and llama.cpp ownership model.
@@ -58,12 +58,12 @@ For CMake integration, configuration, tools, streaming, and error handling, see 
 | [Getting Started](docs/getting-started.md) | First build and first model session |
 | [Building](docs/building.md) | CMake setup, FetchContent, Metal/CUDA, sanitizers, install/package |
 | [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, JSON config |
-| [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
+| [Tools](docs/tools.md) | Tool schemas, native call parsing, supported schema subset, error handling |
 | [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
 | [Hub Layer](docs/hub.md) | HuggingFace downloading, local model store, and how hub code uses core inspection |
 | [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
 | [Examples](docs/examples.md) | Runnable programs under `examples/`; API sketches in docs |
-| [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
+| [Compatibility](docs/compatibility.md) | Public API boundary, release stability policy, deprecation rules |
 | [Migration](MIGRATION.md) | Upgrade notes for major API changes |
 
 ## Testing

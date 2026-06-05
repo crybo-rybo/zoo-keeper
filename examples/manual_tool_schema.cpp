@@ -11,10 +11,6 @@
 
 namespace {
 
-zoo::ToolSpec to_tool_spec(const zoo::tools::ToolMetadata& metadata) {
-    return zoo::ToolSpec{metadata.name, metadata.description, metadata.parameters_schema};
-}
-
 zoo::tools::ToolCall to_tool_call(const zoo::OwnedToolCall& call) {
     return zoo::tools::ToolCall{call.id, call.name,
                                 nlohmann::json::parse(call.arguments_json, nullptr, false)};
@@ -57,21 +53,14 @@ int main(int argc, char** argv) {
 
     zoo::tools::ToolRegistry registry;
     auto register_result = registry.register_tool(
-        "search_documents", "Search a tiny in-memory document index for matching snippets.", schema,
-        [](const nlohmann::json& args) -> zoo::Expected<nlohmann::json> {
-            return nlohmann::json{{"query", args.at("query")},
-                                  {"scope", args.value("scope", "docs")},
-                                  {"limit", args.value("limit", 5)}};
-        });
+        "search_documents", "Search a tiny in-memory document index for matching snippets.",
+        schema);
     if (!register_result) {
         std::cerr << register_result.error().to_string() << '\n';
         return 1;
     }
 
-    std::vector<zoo::ToolSpec> specs;
-    for (const auto& metadata : registry.get_all_tool_metadata()) {
-        specs.push_back(to_tool_spec(metadata));
-    }
+    std::vector<zoo::ToolSpec> specs = registry.get_all_tool_specs();
     if (!model->set_tool_calling(specs)) {
         std::cerr << "Selected model/template does not support native tool calling.\n";
         return 1;

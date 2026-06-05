@@ -14,7 +14,7 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   extraction, streaming callbacks, cancellation callbacks, token accounting, and
   native tool-call parsing.
 - `ToolSpec` is the public model-facing tool schema type. Tool execution remains
-  caller-owned through `zoo::tools` utilities.
+  caller-owned outside Zoo-Keeper.
 
 ### Changed
 
@@ -32,6 +32,9 @@ Zoo-Keeper adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Removed `zoo/agent.hpp` and Agent-specific examples/tests/runtime sources.
 - Removed `GenerationOptions::record_tool_trace` and response `tool_trace`
   fields with the automatic tool loop.
+- Removed Zoo-owned tool execution helpers from `zoo::tools`: `ToolHandler`,
+  `ToolDefinition`, callable registration overloads, `make_tool_definition(...)`,
+  `ToolRegistry::invoke(...)`, and `ToolRegistry::find_handler(...)`.
 - Removed compatibility-only public aliases `zoo::Message`,
   `zoo::ToolCallInfo`, `zoo::AsyncTextCallback`, and `zoo::AsyncTokenCallback`;
   use `zoo::OwnedMessage`, `zoo::OwnedToolCall`, and synchronous

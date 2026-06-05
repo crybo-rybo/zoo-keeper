@@ -339,7 +339,6 @@ TEST(GenerationOptionsJsonTest, RoundTripsSerializableFields) {
 
     const nlohmann::json json = options;
     EXPECT_EQ(json.at("sampling").at("top_k"), 12);
-    EXPECT_FALSE(json.contains("record_tool_trace"));
 
     const auto round_trip = json.get<zoo::GenerationOptions>();
     EXPECT_EQ(round_trip, options);

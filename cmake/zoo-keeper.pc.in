@@ -4,7 +4,7 @@ libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
 Name: Zoo-Keeper
-Description: C++23 agentic wrapper around llama.cpp
+Description: C++23 llama.cpp LLM harness
 Version: @PROJECT_VERSION@
 Requires: nlohmann_json
 Libs: @ZOO_PKGCONFIG_LIBS@

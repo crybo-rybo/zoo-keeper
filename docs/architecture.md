@@ -40,7 +40,7 @@ flowchart TB
 | Area | Primary Types | Responsibility |
 |------|---------------|----------------|
 | Model harness | `zoo::Model`, `ModelConfig`, `GenerationOptions` | Load GGUF models, own one llama.cpp session, manage history/KV state, generate text, run stateless completion, and extract schema-constrained JSON |
-| Tool utilities | `zoo::tools::ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator`, `ToolSpec` | Build model-facing tool schemas, parse native tool calls, validate arguments, and let callers execute handlers explicitly |
+| Tool utilities | `zoo::tools::ToolRegistry`, `ToolCallParser`, `ToolArgumentsValidator`, `ToolSpec` | Build model-facing tool schemas, parse native tool calls, and validate arguments before caller-owned dispatch |
 | Hub *(optional)* | `zoo::hub::HuggingFaceClient`, `zoo::hub::ModelStore` | Download GGUF files through llama.cpp cache paths and resolve catalog entries to `ModelConfig`/`Model` |
 | Core implementation | `zoo::core::GgufInspector`, `zoo::core::SystemProbe` | Inspect GGUF metadata and probe host hardware for model configuration |
 
@@ -82,9 +82,9 @@ the model-specific format, parser, grammar triggers, and stop sequences.
 
 Zoo-Keeper does not run an autonomous tool loop. Callers parse generated native
 tool calls through `Model::generate_from_history()` or
-`Model::parse_tool_response()`, validate them with `zoo::tools`, execute their
-own handlers, then add `OwnedMessage::tool(...)` responses if they want another
-model pass.
+`Model::parse_tool_response()`, validate them with `zoo::tools`, dispatch them
+through application code, then add `OwnedMessage::tool(...)` responses if they
+want another model pass.
 
 ## CMake Target
 

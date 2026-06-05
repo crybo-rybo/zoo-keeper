@@ -74,8 +74,8 @@ Expected<TextResponse> generate_response_from_history(Model& model, GenerationOv
         return TokenAction::Continue;
     };
 
-    auto generated = model.generate_from_history(generation, TokenCallback(wrapped_callback),
-                                                 should_cancel);
+    auto generated =
+        model.generate_from_history(generation, TokenCallback(wrapped_callback), should_cancel);
     if (!generated) {
         return std::unexpected(generated.error());
     }
@@ -164,12 +164,10 @@ Expected<ExtractionResponse> extract_from_history(Model& model, Model::Impl& imp
 } // namespace
 
 Expected<TextResponse> Model::complete(ConversationView messages, GenerationOverride generation,
-                                       TokenCallback on_token,
-                                       CancellationCallback should_cancel) {
+                                       TokenCallback on_token, CancellationCallback should_cancel) {
     auto previous = swap_history(snapshot_from_view(messages));
-    auto restore_history = ScopeExit([this, previous = std::move(previous)]() mutable {
-        replace_history(std::move(previous));
-    });
+    auto restore_history = ScopeExit(
+        [this, previous = std::move(previous)]() mutable { replace_history(std::move(previous)); });
 
     return generate_response_from_history(*this, generation, on_token, should_cancel);
 }
@@ -222,9 +220,8 @@ Expected<ExtractionResponse> Model::extract(const nlohmann::json& output_schema,
     }
 
     auto previous = swap_history(snapshot_from_view(messages));
-    auto restore_history = ScopeExit([this, previous = std::move(previous)]() mutable {
-        replace_history(std::move(previous));
-    });
+    auto restore_history = ScopeExit(
+        [this, previous = std::move(previous)]() mutable { replace_history(std::move(previous)); });
 
     return extract_from_history(*this, *impl_, *params, generation, on_token, should_cancel);
 }

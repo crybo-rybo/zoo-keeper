@@ -9,6 +9,7 @@
 #include "types.hpp"
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -27,29 +28,30 @@ class ToolArgumentsValidator {
      * @return Empty success when the arguments satisfy the registered schema.
      */
     Expected<void> validate(const ToolCall& tool_call, const ToolRegistry& registry) const {
-        auto metadata = registry.get_tool_metadata(tool_call.name);
-        if (!metadata) {
+        auto parameters = registry.get_tool_parameters(tool_call.name);
+        if (!parameters) {
             return std::unexpected(
                 Error{ErrorCode::ToolNotFound, "Tool not found: " + tool_call.name});
         }
 
-        return validate(tool_call, *metadata);
+        return validate(tool_call, *parameters);
     }
 
     /**
-     * @brief Validates one parsed tool call against supplied metadata.
+     * @brief Validates one parsed tool call against supplied parameters.
      *
      * @param tool_call Parsed tool call to inspect.
-     * @param metadata Normalized metadata for the named tool.
+     * @param parameters Normalized parameters for the named tool.
      * @return Empty success when the arguments satisfy the registered schema.
      */
-    Expected<void> validate(const ToolCall& tool_call, const ToolMetadata& metadata) const {
+    Expected<void> validate(const ToolCall& tool_call,
+                            std::span<const ToolParameter> parameters) const {
         if (!tool_call.arguments.is_object()) {
             return std::unexpected(
                 Error{ErrorCode::ToolValidationFailed, "Tool arguments must be a JSON object"});
         }
 
-        for (const auto& parameter : metadata.parameters) {
+        for (const auto& parameter : parameters) {
             if (parameter.required && !tool_call.arguments.contains(parameter.name)) {
                 return std::unexpected(Error{ErrorCode::ToolValidationFailed,
                                              "Missing required argument: " + parameter.name});
@@ -57,7 +59,7 @@ class ToolArgumentsValidator {
         }
 
         for (const auto& [key, value] : tool_call.arguments.items()) {
-            const ToolParameter* parameter = find_parameter(metadata.parameters, key);
+            const ToolParameter* parameter = find_parameter(parameters, key);
             if (!parameter) {
                 return std::unexpected(
                     Error{ErrorCode::ToolValidationFailed, "Unexpected argument: " + key});
@@ -82,7 +84,7 @@ class ToolArgumentsValidator {
     }
 
   private:
-    static const ToolParameter* find_parameter(const std::vector<ToolParameter>& parameters,
+    static const ToolParameter* find_parameter(std::span<const ToolParameter> parameters,
                                                std::string_view name) {
         for (const auto& parameter : parameters) {
             if (parameter.name == name) {
@@ -140,8 +142,7 @@ class ToolArgumentsValidator {
 validate_json_against_schema(const nlohmann::json& data,
                              const std::vector<ToolParameter>& parameters) {
     ToolCall synthetic{"", "", data};
-    ToolMetadata schema{"", "", {}, parameters};
-    return ToolArgumentsValidator{}.validate(synthetic, schema);
+    return ToolArgumentsValidator{}.validate(synthetic, std::span<const ToolParameter>(parameters));
 }
 
 } // namespace zoo::tools

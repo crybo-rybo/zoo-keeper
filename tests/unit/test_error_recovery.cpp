@@ -3,11 +3,33 @@
  * @brief Unit tests for tool argument validation.
  */
 
-#include "fixtures/tool_definitions.hpp"
 #include "zoo/tools/validation.hpp"
 #include <gtest/gtest.h>
 
-using namespace zoo::testing::tools;
+namespace {
+
+nlohmann::json add_schema() {
+    return {{"type", "object"},
+            {"properties", {{"a", {{"type", "integer"}}}, {"b", {{"type", "integer"}}}}},
+            {"required", nlohmann::json::array({"a", "b"})},
+            {"additionalProperties", false}};
+}
+
+nlohmann::json greet_schema() {
+    return {{"type", "object"},
+            {"properties", {{"name", {{"type", "string"}}}}},
+            {"required", nlohmann::json::array({"name"})},
+            {"additionalProperties", false}};
+}
+
+nlohmann::json multiply_schema() {
+    return {{"type", "object"},
+            {"properties", {{"a", {{"type", "number"}}}, {"b", {{"type", "number"}}}}},
+            {"required", nlohmann::json::array({"a", "b"})},
+            {"additionalProperties", false}};
+}
+
+} // namespace
 
 /// Shared fixture that pre-registers common tools for validation tests.
 class ToolArgumentsValidatorTest : public ::testing::Test {
@@ -16,10 +38,10 @@ class ToolArgumentsValidatorTest : public ::testing::Test {
     zoo::tools::ToolArgumentsValidator validator;
 
     void SetUp() override {
-        ASSERT_TRUE(registry.register_tool("add", "Add two integers", {"a", "b"}, add).has_value());
-        ASSERT_TRUE(registry.register_tool("greet", "Greet someone", {"name"}, greet).has_value());
-        ASSERT_TRUE(registry.register_tool("multiply", "Multiply doubles", {"a", "b"}, multiply)
-                        .has_value());
+        ASSERT_TRUE(registry.register_tool("add", "Add two integers", add_schema()).has_value());
+        ASSERT_TRUE(registry.register_tool("greet", "Greet someone", greet_schema()).has_value());
+        ASSERT_TRUE(
+            registry.register_tool("multiply", "Multiply doubles", multiply_schema()).has_value());
 
         nlohmann::json schema = {
             {"type", "object"},
@@ -30,12 +52,7 @@ class ToolArgumentsValidatorTest : public ::testing::Test {
             {"required", nlohmann::json::array({"unit"})},
             {"additionalProperties", false}};
 
-        ASSERT_TRUE(registry
-                        .register_tool("forecast", "Fetch forecast", schema,
-                                       [](const nlohmann::json&) -> zoo::Expected<nlohmann::json> {
-                                           return nlohmann::json::object();
-                                       })
-                        .has_value());
+        ASSERT_TRUE(registry.register_tool("forecast", "Fetch forecast", schema).has_value());
     }
 };
 

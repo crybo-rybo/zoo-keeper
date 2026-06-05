@@ -6,8 +6,8 @@
 #include "core/model_test_access.hpp"
 #include "zoo/model.hpp"
 
-#include <gtest/gtest.h>
 #include <array>
+#include <gtest/gtest.h>
 #include <span>
 #include <type_traits>
 

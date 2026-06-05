@@ -163,9 +163,8 @@ TEST_F(LiveModelIntegrationTest, CompleteDoesNotMutatePersistentHistory) {
         streamed.append(token);
         return zoo::TokenAction::Continue;
     };
-    auto scoped =
-        model->complete(zoo::ConversationView{std::span<const zoo::MessageView>(scoped_messages)},
-                        {}, on_token);
+    auto scoped = model->complete(
+        zoo::ConversationView{std::span<const zoo::MessageView>(scoped_messages)}, {}, on_token);
 
     ASSERT_TRUE(scoped.has_value()) << scoped.error().to_string();
     EXPECT_FALSE(scoped->text.empty());
@@ -206,10 +205,10 @@ TEST_F(LiveModelIntegrationTest, StreamingCallbackCanCancelGeneration) {
         return zoo::TokenAction::Continue;
     };
     auto should_cancel = [&] { return streamed_tokens > 2; };
-    auto response = (*model_result)
-                        ->generate("Write a long paragraph about local inference.",
-                                   zoo::GenerationOverride::inherit_defaults(),
-                                   on_token, should_cancel);
+    auto response =
+        (*model_result)
+            ->generate("Write a long paragraph about local inference.",
+                       zoo::GenerationOverride::inherit_defaults(), on_token, should_cancel);
 
     ASSERT_FALSE(response.has_value());
     EXPECT_EQ(response.error().code, zoo::ErrorCode::RequestCancelled);

@@ -401,8 +401,6 @@ enum class ErrorCode {
 
     // Tool errors (500-599)
     ToolNotFound = 500,         ///< A referenced tool name is not registered.
-    ToolExecutionFailed = 501,  ///< A tool handler threw or returned an execution failure.
-    InvalidToolSignature = 502, ///< Registered tool metadata does not match its callable signature.
     InvalidToolSchema = 505,    ///< A manually supplied tool schema uses an unsupported construct.
     ToolValidationFailed = 506, ///< A parsed tool call failed schema-based argument validation.
 
@@ -711,6 +709,8 @@ struct ToolSpec {
     std::string name;                 ///< Tool name exposed to the model.
     std::string description;          ///< Human-readable description used in the chat template.
     nlohmann::json parameters_schema; ///< JSON Schema for accepted arguments.
+
+    bool operator==(const ToolSpec& other) const = default;
 };
 
 } // namespace zoo
