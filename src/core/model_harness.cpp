@@ -47,11 +47,11 @@ HistorySnapshot snapshot_from_view(ConversationView messages) {
     return snapshot;
 }
 
-std::string response_text_from_generation(const Model::GenerationResult& generated) {
+std::string response_text_from_generation(Model::GenerationResult& generated) {
     if (generated.tool_call_detected) {
-        return generated.parsed_content;
+        return std::move(generated.parsed_content);
     }
-    return generated.text;
+    return std::move(generated.text);
 }
 
 Expected<TextResponse> generate_response_from_history(Model& model, GenerationOverride generation,
