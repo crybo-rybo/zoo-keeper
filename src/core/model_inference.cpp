@@ -122,25 +122,31 @@ struct AssistantGeneration {
 };
 
 AssistantGeneration append_assistant_generation(Model& model, Model::Impl& impl,
-                                                std::string generated_text) {
+                                                std::string generated_text, bool capture_parsed) {
     AssistantGeneration result;
     result.raw_text = std::move(generated_text);
 
     if (impl.session_.sampler_policy.is_native_tool_call() && impl.session_.tool_state) {
         auto parsed = model.parse_tool_response(result.raw_text);
-        if (!parsed.tool_calls.empty()) {
+        result.tool_call_detected = !parsed.tool_calls.empty();
+        if (result.tool_call_detected) {
             impl.session_.messages.push_back(OwnedMessage::assistant_with_tool_calls(
                 std::move(parsed.content), std::move(parsed.tool_calls)));
         } else {
             impl.session_.messages.push_back(OwnedMessage::assistant(std::move(parsed.content)));
         }
-        result.parsed_content = impl.session_.messages.back().content;
-        result.tool_calls = impl.session_.messages.back().tool_calls;
-        result.tool_call_detected = !result.tool_calls.empty();
+        if (capture_parsed) {
+            result.parsed_content = impl.session_.messages.back().content;
+            result.tool_calls = impl.session_.messages.back().tool_calls;
+        }
         return result;
     }
 
-    impl.session_.messages.push_back(OwnedMessage::assistant(result.raw_text));
+    if (capture_parsed) {
+        impl.session_.messages.push_back(OwnedMessage::assistant(result.raw_text));
+    } else {
+        impl.session_.messages.push_back(OwnedMessage::assistant(std::move(result.raw_text)));
+    }
     return result;
 }
 
@@ -347,7 +353,8 @@ Expected<TextResponse> Model::generate(MessageView message, GenerationOverride g
         return std::unexpected(generate_result.error());
     }
 
-    append_assistant_generation(*this, *impl_, std::move(*generate_result));
+    append_assistant_generation(*this, *impl_, std::move(*generate_result),
+                                /*capture_parsed=*/false);
 
     if (!impl_->session_.sampler_policy.is_native_tool_call() && all_stops.empty() &&
         completion_tokens > 0) {
@@ -420,7 +427,8 @@ Expected<Model::GenerationResult> Model::generate_from_history(GenerationOverrid
         return std::unexpected(text_result.error());
     }
 
-    auto assistant = append_assistant_generation(*this, *impl_, std::move(*text_result));
+    auto assistant = append_assistant_generation(*this, *impl_, std::move(*text_result),
+                                                 /*capture_parsed=*/true);
     impl_->session_.estimated_tokens +=
         estimate_message_tokens(*impl_, impl_->session_.messages.back());
     note_history_append(*impl_);
