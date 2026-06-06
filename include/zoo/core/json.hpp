@@ -119,9 +119,16 @@ inline void apply_model_config_overrides(const nlohmann::json& j, ModelConfig& c
 
 } // namespace detail
 
-// Pure deserializer: never inspects files or probes hardware. The optional
-// `auto_configure` key is recognized so it does not fail validation, but it is
-// resolved only by the explicit `load_model_config()` helper below.
+/**
+ * @brief Deserializes a `ModelConfig` from JSON.
+ *
+ * Pure deserializer: never inspects files or probes hardware. The optional
+ * `auto_configure` key is recognized so it does not fail strict key validation,
+ * but hardware-aware resolution is only performed by `load_model_config()`.
+ *
+ * @param j JSON object containing at minimum `"model_path"`.
+ * @param config Output config populated from @p j.
+ */
 inline void from_json(const nlohmann::json& j, ModelConfig& config) {
     // "auto_configure" is consumed by `load_model_config`, not here. Listed so
     // strict key validation does not reject configs that opt into auto-config.
@@ -157,11 +164,19 @@ inline Expected<ModelConfig> auto_configure_model_path(const std::string& model_
 
 } // namespace detail
 
-// Returns a `ModelConfig` from JSON, resolving `auto_configure: true` against
-// the host system if requested. Explicit JSON keys override the auto-derived
-// values. Performs I/O (GGUF inspection) and backend init (system probe), so
-// callers should treat it as an explicit configuration step rather than pure
-// parsing.
+/**
+ * @brief Loads a `ModelConfig` from JSON, optionally applying hardware-aware auto-configuration.
+ *
+ * When `"auto_configure": true` is present, inspects the GGUF file and probes the host
+ * hardware to derive sensible defaults, then layers any explicit JSON keys on top.
+ * Without `auto_configure`, behaves like a strict `from_json` deserializer.
+ *
+ * Unlike `from_json`, this function performs I/O (GGUF inspection) and backend initialization
+ * (system probe), so callers should treat it as an explicit configuration step.
+ *
+ * @param j JSON object containing at minimum `"model_path"`.
+ * @return Resolved `ModelConfig`, or an error if JSON is malformed or hardware probing fails.
+ */
 inline Expected<ModelConfig> load_model_config(const nlohmann::json& j) {
     try {
         detail::reject_unknown_keys(j, "model config", detail::kModelConfigKeys);

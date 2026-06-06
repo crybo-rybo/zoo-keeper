@@ -35,36 +35,51 @@ See `.secret/integration-testing.md` for local model paths, integration test com
 
 ## Architecture
 
-C++23 library on llama.cpp (fetched at configure time via CMake `FetchContent`, pinned by `ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`). Four layers — each depends only on layers below it:
+Zoo-Keeper is a synchronous llama.cpp **harness** centered on one loaded model session: `zoo::Model`. C++23, built on llama.cpp fetched at configure time via CMake `FetchContent` (pinned by `ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`). There is **no Agent SDK** — automatic tool loops, async request queues, inference threads, and `RequestHandle` were removed in the v2 harness rewrite.
 
 | Layer | Namespace | Role |
 |-------|-----------|------|
-| 4 | `zoo::hub` | **Optional.** HuggingFace downloading + local model store. Requires `ZOO_BUILD_HUB=ON` |
-| 3 | `zoo::Agent` | Async orchestration: inference thread, request queue, streaming, agentic tool loop |
-| 2 | `zoo::tools` | Tool registry, schema validation, GBNF schema grammar generation. Zero llama.cpp dependency. Non-template implementation lives in `src/tools/registry.cpp` |
-| 1 | `zoo::core` | `Model` (sync llama.cpp wrapper), `GgufInspector` (metadata read), `SystemProbe` (RAM/CPU/GPU probe), hardware-aware `auto_configure`. JSON `auto_configure: true` enables zero-tuning model loads |
+| Hub *(optional)* | `zoo::hub` | HuggingFace downloading + local model store. Requires `ZOO_BUILD_HUB=ON`. `ModelStore::load_model()` returns `std::unique_ptr<zoo::Model>` |
+| Harness | `zoo::Model` (alias for `zoo::core::Model`) | Synchronous load · generate · complete · extract · stream · cancel · history · tool-call parsing. Single-session, not thread-safe |
+| Tool utilities | `zoo::tools` | Schema registration (`ToolRegistry`), tool-call parsing (`ToolCallParser`), argument validation (`ToolArgumentsValidator`). Zero llama.cpp dependency. No tool execution |
+| Core internals | `zoo::core` | `GgufInspector` (metadata read), `SystemProbe` (RAM/CPU/GPU probe), hardware-aware `auto_configure`, llama.cpp wrapper internals |
 
-**Threading model:** Agent owns the inference thread; callers submit via `chat()` and get `RequestHandle<TextResponse>`. Model access is protected by thread confinement to the inference thread. Streaming callbacks run on `CallbackDispatcher`, and user tool handlers run on `ToolExecutor` while the tool loop waits for their result.
+`zoo::Model` lives at `include/zoo/model.hpp` as `using Model = core::Model;`. Consumers should use the top-level alias.
 
-**Tool calling:** Model initializes chat templates via `common_chat_templates_init()` (from the llama.cpp `common` library). Prompt rendering uses `common_chat_templates_apply()`. Tool calling is template-driven: `Model::set_tool_calling()` detects the model's native format (29+ formats recognized) and activates a lazy grammar with format-specific triggers. Models without a recognized native tool calling format have tool calling disabled (`set_tool_calling()` returns `false`). Parsed tool calls are returned inside a `ParsedResponse` struct (containing `std::vector<OwnedToolCall>`) via `Model::parse_tool_response()`. The old hardcoded `<tool_call>` sentinel approach and generic fallback format have been removed.
+**Threading model:** `Model` is synchronous and not internally thread-safe. Callers that need concurrency own separate instances or synchronize externally. There is no inference thread, no request queue, and no callback dispatcher.
+
+**Generation surface:**
+- `Model::generate(user_message_or_view, ...)` — appends to retained history, returns `TextResponse`
+- `Model::complete(ConversationView, ...)` — stateless: runs against an explicit conversation, then restores the previous retained history
+- `Model::extract(schema, ..., ...)` — schema-constrained JSON, returns `ExtractionResponse`
+- `Model::generate_from_history(...)` — low-level pass that commits the assistant turn and surfaces any structured tool calls
+- Streaming via `TokenCallback`, cancellation via `CancellationCallback` — both `FunctionRef`-typed (non-owning, synchronous)
+
+**Tool calling:** Template-driven and native-only. `Model::set_tool_calling(std::vector<ToolSpec>)` asks llama.cpp's `common_chat_templates` layer to prepare the model's native format (29+ formats recognized) — parser, grammar triggers, stop sequences. Models without a recognized native tool calling format have tool calling disabled (`set_tool_calling()` returns `false`). The old hardcoded `<tool_call>` sentinel approach and generic fallback format were removed.
+
+Zoo-Keeper does **not** run an autonomous tool loop. The harness emits structured `OwnedToolCall` records via `generate_from_history()` or `Model::parse_tool_response()`; the application validates them with `zoo::tools` and dispatches them through its own executor map / service layer / UI workflow, then appends `OwnedMessage::tool(...)` results before another model pass.
+
+**Tool registry:** `tools::ToolRegistry` owns normalized `ToolSpec`s (name + description + JSON Schema) and validation metadata only. It does **not** store handlers. `ToolHandler`, `ToolDefinition`, `make_tool_definition(...)`, `ToolRegistry::invoke(...)`, and `ToolRegistry::find_handler(...)` were removed in v2. Registration is schema-only: `registry.register_tool(name, description, schema)`.
 
 **CMake targets:** `zoo` (static lib). Consumers use `ZooKeeper::zoo`. The build requires `LLAMA_BUILD_COMMON=ON` to link the `common` library from llama.cpp.
 
 ## Key Conventions
 
-- All llama.cpp / gguf.h / ggml-backend.h calls live in `src/core/` — nowhere else (currently `model*.cpp`, `gguf_inspector.cpp`, `system_probe.cpp`)
+- All llama.cpp / gguf.h / ggml-backend.h calls live in `src/core/` — nowhere else (currently `model*.cpp`, `gguf_inspector.cpp`, `system_probe.cpp`, `hf_download.cpp`)
 - Public headers in `include/zoo/core/` use forward declarations for llama types (no `llama.h`, `gguf.h`, or `ggml-backend.h` in public headers); `common_chat_templates` is forward-declared in `model.hpp`
 - Error handling uses `std::expected` (C++23), not exceptions
 - `role_to_string()` returns `const char*` (static storage) — safe for `llama_chat_message`
 - `ZOO_LOG` is a no-op when `ZOO_LOGGING_ENABLED` is not defined
-- `validate_role_sequence()` is a free function in `types.hpp` (pure logic, unit testable)
-- `OwnedToolCall` in `types.hpp` carries parsed tool call data (id, name, arguments_json) from model output
-- `CoreToolInfo` in `types.hpp` is the Layer 1 tool descriptor — the agent converts `tools::ToolMetadata` to this before calling `Model::set_tool_calling()`
+- `validate_role_sequence()` is a free function in `types.hpp` (pure logic, unit testable) with overloads for `ConversationView`, `HistorySnapshot`, `std::span<const OwnedMessage>`, `std::vector<OwnedMessage>`, and `std::span<const MessageView>`
+- `OwnedToolCall` / `ToolCallView` / `ToolCallSpan` in `types.hpp` carry parsed tool call data (id, name, arguments_json)
+- `ToolSpec` in `types.hpp` is the model-facing tool descriptor (name + description + `parameters_schema`) passed to `Model::set_tool_calling()`
+- `ConversationView` / `MessageView` are non-owning request-scoped views; `OwnedMessage` / `HistorySnapshot` are retained storage. Adapters convert one to the other at API boundaries.
+- `GenerationOverride` is the per-call generation policy: either `inherit_defaults()` or `explicit_options(GenerationOptions)`
 
 ## Testing
 
-- Unit tests cover pure logic and private runtime seams: types, tools, validation, parsing, grammar, batch, and agent-runtime orchestration
-- Live Model/Agent testing requires integration tests with a real GGUF model
+- Unit tests cover pure logic and private runtime seams: types, tools, validation, parsing, grammar, batch, prompt bookkeeping, sampling helpers, streaming filter, token accounting, GGUF inspection, GPU fit, hub catalog, model store internals, and model harness wiring
+- Live Model behavior requires integration tests with a real GGUF model (`tests/integration/test_model_harness.cpp`)
 - Never `using namespace zoo;` in test files — `zoo::testing` clashes with `::testing` (gtest)
 - Test binary: `zoo_tests`, discovered via `gtest_discover_tests`
 
@@ -86,15 +101,17 @@ scripts/test.sh      # All tests must pass
 
 ### Ask first
 - Adding new dependencies or modifying CMakeLists.txt build structure
-- Changes to public API headers (`include/zoo/*.hpp`, `include/zoo/core/*.hpp`, `include/zoo/tools/*.hpp`)
+- Changes to public API headers (`include/zoo/model.hpp`, `include/zoo/zoo.hpp`, `include/zoo/core/*.hpp`, `include/zoo/tools/*.hpp`, `include/zoo/hub/*.hpp`)
 - Updating the pinned llama.cpp version (`ZOO_LLAMA_TAG` in `cmake/ZooKeeperOptions.cmake`)
+- Reintroducing async / threaded orchestration — the v2 harness is intentionally synchronous
 
 ### Never
 - Include `llama.h` in any public header (forward-declare llama types)
-- Add llama.cpp calls outside `src/core/model*.cpp`
+- Add llama.cpp calls outside `src/core/`
 - Use exceptions for error handling (use `std::expected`)
 - Push directly to `main`
 - Commit `.DS_Store`, build artifacts, or secrets
+- Add an automatic tool-execution loop inside Zoo-Keeper — execution belongs to caller code
 </AgentBoundaries>
 
 ## Changeset Discipline
