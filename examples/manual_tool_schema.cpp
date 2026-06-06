@@ -1,13 +1,22 @@
 /**
  * @file manual_tool_schema.cpp
- * @brief Registers a manual-schema tool through `zoo::Agent`.
+ * @brief Configures model-facing tool schemas and parses native tool calls.
  */
 
 #include <zoo/zoo.hpp>
 
-#include <algorithm>
 #include <iostream>
 #include <string>
+#include <vector>
+
+namespace {
+
+zoo::tools::ToolCall to_tool_call(const zoo::OwnedToolCall& call) {
+    return zoo::tools::ToolCall{call.id, call.name,
+                                nlohmann::json::parse(call.arguments_json, nullptr, false)};
+}
+
+} // namespace
 
 int main(int argc, char** argv) {
     if (argc != 2) {
@@ -22,18 +31,16 @@ int main(int argc, char** argv) {
 
     zoo::GenerationOptions generation;
     generation.max_tokens = 256;
-    generation.record_tool_trace = true;
     generation.sampling.temperature = 0.0f;
     generation.sampling.top_p = 1.0f;
     generation.sampling.top_k = 1;
 
-    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
-    if (!agent_result) {
-        std::cerr << agent_result.error().to_string() << '\n';
+    auto model_result = zoo::Model::load(model_config, generation);
+    if (!model_result) {
+        std::cerr << model_result.error().to_string() << '\n';
         return 1;
     }
-
-    auto agent = std::move(*agent_result);
+    auto model = std::move(*model_result);
 
     nlohmann::json schema = {
         {"type", "object"},
@@ -44,58 +51,43 @@ int main(int argc, char** argv) {
         {"required", nlohmann::json::array({"query"})},
         {"additionalProperties", false}};
 
-    auto register_result = agent->register_tool(
-        "search_documents", "Search a tiny in-memory document index for matching snippets.", schema,
-        [](const nlohmann::json& args) -> zoo::Expected<nlohmann::json> {
-            const std::string query = args.at("query").get<std::string>();
-            const int limit = args.value("limit", 5);
-            const std::string scope = args.value("scope", "docs");
-
-            nlohmann::json matches = nlohmann::json::array();
-            const int count = std::min(limit, 3);
-            for (int i = 0; i < count; ++i) {
-                matches.push_back(scope + " match " + std::to_string(i + 1) + " for " + query);
-            }
-
-            return nlohmann::json{{"query", query},
-                                  {"scope", scope},
-                                  {"limit", limit},
-                                  {"matches", std::move(matches)}};
-        });
-
+    zoo::tools::ToolRegistry registry;
+    auto register_result = registry.register_tool(
+        "search_documents", "Search a tiny in-memory document index for matching snippets.",
+        schema);
     if (!register_result) {
         std::cerr << register_result.error().to_string() << '\n';
         return 1;
     }
 
-    auto prompt = agent->try_set_system_prompt(
-        "You are a retrieval assistant. Use tools when they are relevant.");
-    if (!prompt) {
-        std::cerr << prompt.error().to_string() << '\n';
+    std::vector<zoo::ToolSpec> specs = registry.get_all_tool_specs();
+    if (!model->set_tool_calling(specs)) {
+        std::cerr << "Selected model/template does not support native tool calling.\n";
         return 1;
     }
 
-    auto handle = agent->chat(
-        "Search the docs for llama.cpp. Use a limit of 5 results and keep the answer brief.");
-    auto response = handle.await_result();
-    if (!response) {
-        std::cerr << response.error().to_string() << '\n';
+    model->set_system_prompt("You are a retrieval assistant. Emit a tool call when useful.");
+    auto prompt_result = model->add_message(
+        zoo::OwnedMessage::user("Search the docs for llama.cpp. Use a limit of 5 results.").view());
+    if (!prompt_result) {
+        std::cerr << prompt_result.error().to_string() << '\n';
+        return 1;
+    }
+    auto generated = model->generate_from_history();
+    if (!generated) {
+        std::cerr << generated.error().to_string() << '\n';
         return 1;
     }
 
-    std::cout << response->text << "\n\n";
-    if (response->tool_trace) {
-        for (const auto& invocation : response->tool_trace->invocations) {
-            std::cout << invocation.name << " [" << zoo::to_string(invocation.status) << "]\n";
-            std::cout << "args: " << invocation.arguments_json << '\n';
-            if (invocation.result_json) {
-                std::cout << "result: " << *invocation.result_json << '\n';
-            }
-            if (invocation.error) {
-                std::cout << "error: " << invocation.error->to_string() << '\n';
-            }
-            std::cout << '\n';
-        }
+    // The assistant tool-call turn is already committed to history here.
+    std::cout << "Visible content:\n" << generated->parsed_content << "\n\n";
+    for (const auto& call : generated->tool_calls) {
+        auto tool_call = to_tool_call(call);
+        auto validation = zoo::tools::ToolArgumentsValidator{}.validate(tool_call, registry);
+        std::cout << "Tool call: " << call.name << "\n";
+        std::cout << "Arguments: " << call.arguments_json << "\n";
+        std::cout << "Validation: " << (validation ? "ok" : validation.error().to_string())
+                  << "\n\n";
     }
 
     return 0;

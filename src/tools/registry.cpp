@@ -183,15 +183,14 @@ Expected<std::vector<std::string>> collect_required_names(const nlohmann::json& 
     return required_names;
 }
 
-Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
-                                                      const std::string& description,
-                                                      const nlohmann::json& schema) {
+Expected<std::vector<ToolParameter>> normalize_tool_parameters(const std::string& tool_name,
+                                                               const nlohmann::json& schema) {
     if (!schema.is_object()) {
         return std::unexpected(
             Error{ErrorCode::InvalidToolSchema, "Tool schema must be a JSON object"});
     }
 
-    if (auto result = validate_root_schema_keys(schema, name); !result) {
+    if (auto result = validate_root_schema_keys(schema, tool_name); !result) {
         return std::unexpected(result.error());
     }
 
@@ -199,25 +198,25 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
     if (type_it == schema.end() || !type_it->is_string() || *type_it != "object") {
         return std::unexpected(
             Error{ErrorCode::InvalidToolSchema,
-                  "Tool schema for '" + name + "' must declare top-level type 'object'"});
+                  "Tool schema for '" + tool_name + "' must declare top-level type 'object'"});
     }
 
     auto props_it = schema.find("properties");
     if (props_it == schema.end() || !props_it->is_object()) {
-        return std::unexpected(
-            Error{ErrorCode::InvalidToolSchema,
-                  "Tool schema for '" + name + "' must contain an object-valued 'properties'"});
+        return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                     "Tool schema for '" + tool_name +
+                                         "' must contain an object-valued 'properties'"});
     }
 
     auto additional_it = schema.find("additionalProperties");
     if (additional_it != schema.end() &&
         (!additional_it->is_boolean() || additional_it->get<bool>())) {
         return std::unexpected(Error{ErrorCode::InvalidToolSchema,
-                                     "Tool schema for '" + name +
+                                     "Tool schema for '" + tool_name +
                                          "' must omit 'additionalProperties' or set it to false"});
     }
 
-    auto required_names = collect_required_names(schema, *props_it, name);
+    auto required_names = collect_required_names(schema, *props_it, tool_name);
     if (!required_names) {
         return std::unexpected(required_names.error());
     }
@@ -228,25 +227,25 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
     for (const auto& [param_name, property] : props_it->items()) {
         if (!property.is_object()) {
             return std::unexpected(
-                Error{ErrorCode::InvalidToolSchema,
-                      "Property '" + param_name + "' on tool '" + name + "' must be an object"});
+                Error{ErrorCode::InvalidToolSchema, "Property '" + param_name + "' on tool '" +
+                                                        tool_name + "' must be an object"});
         }
 
-        if (auto result = validate_property_schema_keys(property, name, param_name); !result) {
+        if (auto result = validate_property_schema_keys(property, tool_name, param_name); !result) {
             return std::unexpected(result.error());
         }
 
         auto property_type_it = property.find("type");
         if (property_type_it == property.end() || !property_type_it->is_string()) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidToolSchema, "Property '" + param_name + "' on tool '" +
-                                                        name + "' must declare a string 'type'"});
+            return std::unexpected(Error{ErrorCode::InvalidToolSchema,
+                                         "Property '" + param_name + "' on tool '" + tool_name +
+                                             "' must declare a string 'type'"});
         }
 
         auto type = parse_tool_value_type(property_type_it->get_ref<const std::string&>());
         if (!type) {
             auto error = type.error();
-            error.context = "parameter=" + param_name + ", tool=" + name;
+            error.context = "parameter=" + param_name + ", tool=" + tool_name;
             return std::unexpected(std::move(error));
         }
 
@@ -258,7 +257,7 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
         if (auto description_it = property.find("description"); description_it != property.end()) {
             if (!description_it->is_string()) {
                 return std::unexpected(Error{ErrorCode::InvalidToolSchema,
-                                             "Property '" + param_name + "' on tool '" + name +
+                                             "Property '" + param_name + "' on tool '" + tool_name +
                                                  "' must use a string 'description'"});
             }
             parameter.description = description_it->get<std::string>();
@@ -267,12 +266,12 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
         if (auto enum_it = property.find("enum"); enum_it != property.end()) {
             if (!enum_it->is_array()) {
                 return std::unexpected(Error{ErrorCode::InvalidToolSchema,
-                                             "Property '" + param_name + "' on tool '" + name +
+                                             "Property '" + param_name + "' on tool '" + tool_name +
                                                  "' must use an array for 'enum'"});
             }
             parameter.enum_values = enum_it->get<std::vector<nlohmann::json>>();
-            if (auto result =
-                    validate_enum_values(parameter.enum_values, parameter.type, name, param_name);
+            if (auto result = validate_enum_values(parameter.enum_values, parameter.type, tool_name,
+                                                   param_name);
                 !result) {
                 return std::unexpected(result.error());
             }
@@ -297,80 +296,76 @@ Expected<ToolMetadata> normalize_manual_tool_metadata(const std::string& name,
         }
     }
 
-    ToolMetadata metadata;
-    metadata.name = name;
-    metadata.description = description;
-    metadata.parameters = std::move(parameters);
-    metadata.parameters_schema = build_parameters_schema(metadata.parameters);
-    return metadata;
+    return parameters;
 }
 
 Expected<std::vector<ToolParameter>> normalize_schema(const nlohmann::json& schema) {
-    auto result = normalize_manual_tool_metadata("schema", "", schema);
-    if (!result) {
-        return std::unexpected(result.error());
-    }
-    return std::move(result->parameters);
-}
-
-Expected<ToolDefinition> make_tool_definition(const std::string& name,
-                                              const std::string& description,
-                                              const nlohmann::json& schema, ToolHandler handler) {
-    auto metadata = normalize_manual_tool_metadata(name, description, schema);
-    if (!metadata) {
-        return std::unexpected(metadata.error());
-    }
-    return ToolDefinition{std::move(*metadata), std::move(handler)};
+    return normalize_tool_parameters("schema", schema);
 }
 
 } // namespace detail
 
-Expected<ToolDefinition> make_tool_definition(const std::string& name,
-                                              const std::string& description,
-                                              const nlohmann::json& schema, ToolHandler handler) {
-    return detail::make_tool_definition(name, description, schema, std::move(handler));
-}
-
-nlohmann::json ToolRegistry::build_schema_json(const ToolMetadata& metadata) {
+nlohmann::json ToolRegistry::build_schema_json(const ToolSpec& spec) {
     return nlohmann::json{{"type", "function"},
                           {"function",
-                           {{"name", metadata.name},
-                            {"description", metadata.description},
-                            {"parameters", metadata.parameters_schema}}}};
+                           {{"name", spec.name},
+                            {"description", spec.description},
+                            {"parameters", spec.parameters_schema}}}};
 }
 
 Expected<void> ToolRegistry::register_tool(const std::string& name, const std::string& description,
-                                           const nlohmann::json& schema, ToolHandler handler) {
-    auto definition = make_tool_definition(name, description, schema, std::move(handler));
-    if (!definition) {
-        return std::unexpected(definition.error());
-    }
-    return register_tool(std::move(*definition));
+                                           const nlohmann::json& schema) {
+    return register_tool(ToolSpec{name, description, schema});
 }
 
-Expected<void> ToolRegistry::register_tool(ToolDefinition definition) {
-    auto it = index_by_name_.find(definition.metadata.name);
+Expected<ToolRegistry::RegisteredTool> ToolRegistry::normalize(ToolSpec spec) {
+    auto parameters = detail::normalize_tool_parameters(spec.name, spec.parameters_schema);
+    if (!parameters) {
+        return std::unexpected(parameters.error());
+    }
+    spec.parameters_schema = detail::build_parameters_schema(*parameters);
+    return RegisteredTool{std::move(spec), std::move(*parameters)};
+}
+
+Expected<void> ToolRegistry::register_tool(ToolSpec spec) {
+    auto tool = normalize(std::move(spec));
+    if (!tool) {
+        return std::unexpected(tool.error());
+    }
+
+    auto it = index_by_name_.find(tool->spec.name);
     if (it != index_by_name_.end()) {
-        tools_[it->second] = std::move(definition);
+        tools_[it->second] = std::move(*tool);
         return {};
     }
 
     const size_t index = tools_.size();
-    index_by_name_.emplace(definition.metadata.name, index);
-    tools_.push_back(std::move(definition));
+    index_by_name_.emplace(tool->spec.name, index);
+    tools_.push_back(std::move(*tool));
     return {};
 }
 
-Expected<void> ToolRegistry::register_tools(std::vector<ToolDefinition> definitions) {
-    for (auto& definition : definitions) {
-        auto it = index_by_name_.find(definition.metadata.name);
-        if (it != index_by_name_.end()) {
-            tools_[it->second] = std::move(definition);
-        } else {
-            const size_t index = tools_.size();
-            index_by_name_.emplace(definition.metadata.name, index);
-            tools_.push_back(std::move(definition));
+Expected<void> ToolRegistry::register_tools(std::vector<ToolSpec> specs) {
+    std::vector<RegisteredTool> normalized;
+    normalized.reserve(specs.size());
+    for (auto& spec : specs) {
+        auto tool = normalize(std::move(spec));
+        if (!tool) {
+            return std::unexpected(tool.error());
         }
+        normalized.push_back(std::move(*tool));
+    }
+
+    for (auto& tool : normalized) {
+        auto it = index_by_name_.find(tool.spec.name);
+        if (it != index_by_name_.end()) {
+            tools_[it->second] = std::move(tool);
+            continue;
+        }
+
+        const size_t index = tools_.size();
+        index_by_name_.emplace(tool.spec.name, index);
+        tools_.push_back(std::move(tool));
     }
     return {};
 }
@@ -379,60 +374,52 @@ bool ToolRegistry::has_tool(const std::string& name) const {
     return index_by_name_.contains(name);
 }
 
-Expected<nlohmann::json> ToolRegistry::invoke(const std::string& name,
-                                              const nlohmann::json& args) const {
-    auto it = index_by_name_.find(name);
-    if (it == index_by_name_.end()) {
-        return std::unexpected(Error{ErrorCode::ToolNotFound, "Tool not found: " + name});
-    }
-    return tools_[it->second].handler(args);
-}
-
-std::optional<ToolHandler> ToolRegistry::find_handler(const std::string& name) const {
-    auto it = index_by_name_.find(name);
-    if (it == index_by_name_.end()) {
-        return std::nullopt;
-    }
-    return tools_[it->second].handler;
-}
-
 nlohmann::json ToolRegistry::get_tool_schema(const std::string& name) const {
-    auto metadata = get_tool_metadata(name);
-    if (!metadata) {
+    auto spec = get_tool_spec(name);
+    if (!spec) {
         return nlohmann::json{};
     }
-    return build_schema_json(*metadata);
+    return build_schema_json(*spec);
 }
 
 std::optional<nlohmann::json> ToolRegistry::get_parameters_schema(const std::string& name) const {
-    auto metadata = get_tool_metadata(name);
-    if (!metadata) {
+    auto spec = get_tool_spec(name);
+    if (!spec) {
         return std::nullopt;
     }
-    return metadata->parameters_schema;
+    return spec->parameters_schema;
 }
 
-std::optional<ToolMetadata> ToolRegistry::get_tool_metadata(const std::string& name) const {
+std::optional<ToolSpec> ToolRegistry::get_tool_spec(const std::string& name) const {
     auto it = index_by_name_.find(name);
     if (it == index_by_name_.end()) {
         return std::nullopt;
     }
-    return tools_[it->second].metadata;
+    return tools_[it->second].spec;
 }
 
-std::vector<ToolMetadata> ToolRegistry::get_all_tool_metadata() const {
-    std::vector<ToolMetadata> metadata;
-    metadata.reserve(tools_.size());
-    for (const auto& tool : tools_) {
-        metadata.push_back(tool.metadata);
+std::optional<std::vector<ToolParameter>>
+ToolRegistry::get_tool_parameters(const std::string& name) const {
+    auto it = index_by_name_.find(name);
+    if (it == index_by_name_.end()) {
+        return std::nullopt;
     }
-    return metadata;
+    return tools_[it->second].parameters;
+}
+
+std::vector<ToolSpec> ToolRegistry::get_all_tool_specs() const {
+    std::vector<ToolSpec> specs;
+    specs.reserve(tools_.size());
+    for (const auto& tool : tools_) {
+        specs.push_back(tool.spec);
+    }
+    return specs;
 }
 
 nlohmann::json ToolRegistry::get_all_schemas() const {
     nlohmann::json schemas = nlohmann::json::array();
     for (const auto& tool : tools_) {
-        schemas.push_back(build_schema_json(tool.metadata));
+        schemas.push_back(build_schema_json(tool.spec));
     }
     return schemas;
 }
@@ -441,7 +428,7 @@ std::vector<std::string> ToolRegistry::get_tool_names() const {
     std::vector<std::string> names;
     names.reserve(tools_.size());
     for (const auto& tool : tools_) {
-        names.push_back(tool.metadata.name);
+        names.push_back(tool.spec.name);
     }
     return names;
 }

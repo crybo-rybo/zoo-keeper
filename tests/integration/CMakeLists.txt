@@ -1,6 +1,5 @@
 add_executable(zoo_integration_tests
-    test_model_agent.cpp
-    test_extract.cpp
+    test_model_harness.cpp
 )
 
 target_link_libraries(zoo_integration_tests

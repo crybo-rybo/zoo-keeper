@@ -2,9 +2,9 @@ name: Build and Test
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   format:
@@ -56,6 +56,25 @@ jobs:
             --header-filter='^(include/zoo|src|tests|examples)/' \
             "${files[@]}"
 
+  warning-free-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CXXFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+          echo "LDFLAGS=-stdlib=libc++" >> $GITHUB_ENV
+
+      - name: Build all targets with warnings as errors
+        run: scripts/lint.sh
+
   build-and-test:
     name: build-and-test (${{ matrix.name }})
     strategy:
@@ -65,7 +84,7 @@ jobs:
           - name: linux-clang-full
             os: ubuntu-latest
             compiler: clang
-            cmake_flags: "-DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON"
+            cmake_flags: "-DZOO_BUILD_TESTS=ON -DZOO_BUILD_INTEGRATION_TESTS=ON -DZOO_BUILD_EXAMPLES=ON -DZOO_BUILD_BENCHMARKS=ON -DZOO_BUILD_HUB=ON"
           - name: macos-clang-metal
             os: macos-latest
             compiler: clang

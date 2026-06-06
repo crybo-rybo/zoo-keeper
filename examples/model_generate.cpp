@@ -1,6 +1,6 @@
 /**
  * @file model_generate.cpp
- * @brief Minimal standalone `zoo::core::Model` example.
+ * @brief Minimal standalone `zoo::Model` generation example.
  */
 
 #include <zoo/zoo.hpp>
@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
     zoo::GenerationOptions generation;
     generation.max_tokens = 128;
 
-    auto model_result = zoo::core::Model::load(model_config, generation);
+    auto model_result = zoo::Model::load(model_config, generation);
     if (!model_result) {
         std::cerr << model_result.error().to_string() << '\n';
         return 1;

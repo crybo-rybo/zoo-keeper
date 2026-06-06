@@ -152,6 +152,6 @@ hub-range `zoo::ErrorCode` enumerators.
 
 ## See Also
 
-- [Getting Started](getting-started.md) -- basic Agent setup
-- [Architecture](architecture.md) -- layer design and threading model
-- [Examples](../examples/README.md) -- runnable agent and core programs
+- [Getting Started](getting-started.md) -- basic model harness setup
+- [Architecture](architecture.md) -- layer design and model ownership
+- [Examples](../examples/README.md) -- runnable model harness programs

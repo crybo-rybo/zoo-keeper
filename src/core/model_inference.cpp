@@ -114,6 +114,36 @@ struct InferencePhase {
     }
 };
 
+struct AssistantGeneration {
+    std::string raw_text;
+    std::string parsed_content;
+    std::vector<OwnedToolCall> tool_calls;
+    bool tool_call_detected = false;
+};
+
+AssistantGeneration append_assistant_generation(Model& model, Model::Impl& impl,
+                                                std::string generated_text) {
+    AssistantGeneration result;
+    result.raw_text = std::move(generated_text);
+
+    if (impl.session_.sampler_policy.is_native_tool_call() && impl.session_.tool_state) {
+        auto parsed = model.parse_tool_response(result.raw_text);
+        if (!parsed.tool_calls.empty()) {
+            impl.session_.messages.push_back(OwnedMessage::assistant_with_tool_calls(
+                std::move(parsed.content), std::move(parsed.tool_calls)));
+        } else {
+            impl.session_.messages.push_back(OwnedMessage::assistant(std::move(parsed.content)));
+        }
+        result.parsed_content = impl.session_.messages.back().content;
+        result.tool_calls = impl.session_.messages.back().tool_calls;
+        result.tool_call_detected = !result.tool_calls.empty();
+        return result;
+    }
+
+    impl.session_.messages.push_back(OwnedMessage::assistant(result.raw_text));
+    return result;
+}
+
 Expected<TokenAction> invoke_token_callback(const TokenCallback& callback, std::string_view token) {
     try {
         return callback(token);
@@ -317,21 +347,7 @@ Expected<TextResponse> Model::generate(MessageView message, GenerationOverride g
         return std::unexpected(generate_result.error());
     }
 
-    std::string generated_text = std::move(*generate_result);
-
-    // When native tool calling is active, parse the output to extract
-    // structured tool calls for proper history round-tripping.
-    if (impl_->session_.sampler_policy.is_native_tool_call() && impl_->session_.tool_state) {
-        auto parsed = parse_tool_response(generated_text);
-        if (!parsed.tool_calls.empty()) {
-            impl_->session_.messages.push_back(OwnedMessage::assistant_with_tool_calls(
-                std::move(parsed.content), std::move(parsed.tool_calls)));
-        } else {
-            impl_->session_.messages.push_back(OwnedMessage::assistant(std::move(parsed.content)));
-        }
-    } else {
-        impl_->session_.messages.push_back(OwnedMessage::assistant(std::move(generated_text)));
-    }
+    append_assistant_generation(*this, *impl_, std::move(*generate_result));
 
     if (!impl_->session_.sampler_policy.is_native_tool_call() && all_stops.empty() &&
         completion_tokens > 0) {
@@ -404,20 +420,15 @@ Expected<Model::GenerationResult> Model::generate_from_history(GenerationOverrid
         return std::unexpected(text_result.error());
     }
 
-    // Tool call detection: if tool calling is active, parse the output and
-    // return the structured result so callers avoid a redundant re-parse.
-    bool tool_detected = false;
-    std::string parsed_content;
-    std::vector<OwnedToolCall> parsed_tool_calls;
-    if (impl_->session_.sampler_policy.is_native_tool_call()) {
-        auto parsed = parse_tool_response(*text_result);
-        tool_detected = !parsed.tool_calls.empty();
-        parsed_content = std::move(parsed.content);
-        parsed_tool_calls = std::move(parsed.tool_calls);
-    }
+    auto assistant = append_assistant_generation(*this, *impl_, std::move(*text_result));
+    impl_->session_.estimated_tokens +=
+        estimate_message_tokens(*impl_, impl_->session_.messages.back());
+    note_history_append(*impl_);
+    finalize_response();
 
-    return GenerationResult{std::move(*text_result), prompt_tokens, tool_detected,
-                            std::move(parsed_content), std::move(parsed_tool_calls)};
+    return GenerationResult{std::move(assistant.raw_text), prompt_tokens,
+                            assistant.tool_call_detected, std::move(assistant.parsed_content),
+                            std::move(assistant.tool_calls)};
 }
 
 Expected<void> ensure_grammar_sampler_for_pass(Model::Impl& impl) {

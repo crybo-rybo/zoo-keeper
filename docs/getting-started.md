@@ -1,9 +1,7 @@
 # Getting Started
 
-This guide walks through the split public API and a minimal first agent.
-
-For visual overviews of the layer stack, threading model, and request flow,
-see [Architecture](architecture.md).
+This guide walks through building Zoo-Keeper and running a first `zoo::Model`
+session.
 
 ## Prerequisites
 
@@ -11,142 +9,121 @@ see [Architecture](architecture.md).
 - **CMake 3.18+**
 - **Git**
 - **macOS or Linux**
-- **Network access on first build** — CMake fetches llama.cpp automatically at configure time.
+- **Network access on first build** - CMake fetches llama.cpp automatically at configure time.
 
-## Installation
+## Build
 
 ```bash
 git clone https://github.com/crybo-rybo/zoo-keeper.git
 cd zoo-keeper
-```
-
-## Building
-
-```bash
 scripts/build.sh -DZOO_BUILD_EXAMPLES=ON
 ```
 
-See [building.md](building.md) for platform-specific setup, integration tests, and package-install usage.
+## First Model
 
-## Your First Agent
-
-The runnable version of this walkthrough is
-[`examples/minimal_agent.cpp`](../examples/minimal_agent.cpp):
+Runnable source: [`examples/minimal_model.cpp`](../examples/minimal_model.cpp)
 
 ```bash
-./build/examples/minimal_agent /path/to/model.gguf
+./build/examples/minimal_model /path/to/model.gguf
 ```
 
-It loads split `ModelConfig`, `AgentConfig`, and `GenerationOptions`, sets a
-system prompt, issues one `chat()`, and prints the reply. Read the source for
-the full `Expected`-aware error handling.
+Minimal API shape:
 
-## Core API Overview
+```cpp
+#include <zoo/zoo.hpp>
 
-### `zoo::Agent`
+zoo::ModelConfig model_config;
+model_config.model_path = "/path/to/model.gguf";
 
-Create the async orchestration layer with `Agent::create(model_config, agent_config, generation)`.
+zoo::GenerationOptions generation;
+generation.max_tokens = 128;
+
+auto model = zoo::Model::load(model_config, generation).value();
+model->set_system_prompt("You are a helpful assistant.");
+
+auto response = model->generate("Hello!").value();
+std::cout << response.text << '\n';
+```
+
+## `zoo::Model`
+
+`zoo::Model` is the main llama.cpp-backed harness type. It is synchronous and
+owns one model/context/session.
 
 | Method | Description |
 |--------|-------------|
-| `create(model, agent, generation)` | Validate the split config blocks, load the model, and start the inference thread |
-| `chat(message)` | Submit a user message, returns `RequestHandle<TextResponse>` |
-| `chat(message, GenerationOverride::inherit_defaults(), callback)` | Chat using the configured default generation policy |
-| `chat(message, GenerationOverride::explicit_options(options), callback)` | Chat using exactly the supplied generation options |
-| `complete(messages)` | Submit a stateless request-scoped history without mutating retained history |
-| `complete(messages, GenerationOverride::explicit_options(options), callback)` | Stateless completion with exact per-call options |
-| `extract(schema, message)` | Submit a grammar-constrained extraction, returns `RequestHandle<ExtractionResponse>` |
-| `extract(schema, messages)` | Stateless extraction with explicit message history |
-| `cancel(id)` | Cancel a pending request by ID |
-| `try_set_system_prompt(text)` | Replace the system prompt; returns command-lane failures |
-| `register_tool(name, desc, params, func)` | Register a typed callable as a tool |
-| `register_tool(name, desc, schema, handler)` | Register a JSON-backed tool with an explicit schema |
-| `register_tools(definitions)` | Batch-register multiple tools with one inference-thread command |
-| `set_system_prompt(text, timeout)` | Set system prompt with timeout; returns `RequestTimeout` if inference thread is busy |
-| `try_get_history()` | Get history snapshot with `Expected<HistorySnapshot>` error reporting |
-| `get_history(timeout)` | Get history snapshot with timeout; returns `RequestTimeout` if inference thread is busy |
-| `try_clear_history()` | Clear conversation history with `Expected<void>` error reporting |
-| `clear_history(timeout)` | Clear conversation history with timeout; returns `RequestTimeout` if inference thread is busy |
-| `register_tool(..., timeout)` | Register a tool with timeout; returns `RequestTimeout` if inference thread is busy |
-| `stop()` | Gracefully shut down the agent |
-| `is_running()` | Check if the agent is accepting requests |
-| `model_config()` | Access the loaded `ModelConfig` |
-| `agent_config()` | Access the loaded `AgentConfig` |
-| `default_generation_options()` | Access the default `GenerationOptions` |
-| `tool_count()` | Number of registered tools |
+| `load(model, generation)` | Validate config, load the GGUF model, create the llama context and sampler |
+| `generate(user_message)` | Append a user message, generate an assistant response, and commit it to history |
+| `complete(messages)` | Generate against an explicit `ConversationView` without mutating retained history |
+| `extract(schema, message)` | Generate schema-constrained JSON and commit the extraction turn |
+| `extract(schema, messages)` | Stateless schema-constrained extraction over explicit messages |
+| `generate_from_history()` | Generate from retained history and commit the assistant turn, including structured tool calls |
+| `set_system_prompt(text)` | Set or replace the leading system prompt |
+| `add_message(message)` | Add a structured message to retained history |
+| `get_history()` | Return a `HistorySnapshot` copy |
+| `clear_history()` | Clear retained history and KV cache |
+| `set_tool_calling(specs)` | Configure native llama.cpp template tool-call formatting |
+| `parse_tool_response(text)` | Parse native tool-call output into structured calls |
+| `context_size()` / `estimated_tokens()` | Inspect model/session token limits and history estimate |
 
-Command-lane methods return `Expected<T>` so callers can handle `AgentNotRunning`,
-`RequestTimeout`, and other failures explicitly.
-
-Per-request overrides use `GenerationOverride`. Pass
+Per-call overrides use `GenerationOverride`. Pass
 `GenerationOverride::inherit_defaults()` to use configured defaults, or
-`GenerationOverride::explicit_options(options)` to apply a `GenerationOptions`
-value exactly.
+`GenerationOverride::explicit_options(options)` to apply an exact
+`GenerationOptions` value.
 
-### `RequestHandle<Result>`
+## Streaming And Cancellation
 
-Returned by async agent methods. Use `id()` to correlate externally, `cancel()` to request cancellation through the handle, `ready()` to poll, and `await_result()` to block until the `Expected<Result>` is ready.
+`TokenCallback` streams visible token chunks. `CancellationCallback` lets the
+caller stop generation cooperatively.
 
-### `zoo::core::Model`
+```cpp
+auto on_token = [](std::string_view token) {
+    std::cout << token << std::flush;
+    return zoo::TokenAction::Continue;
+};
+auto should_cancel = [&] { return stop_requested.load(); };
 
-The synchronous llama.cpp wrapper for direct, single-threaded inference.
+auto response = model->generate("Write a short note.", {}, on_token, should_cancel);
+```
 
-| Method | Description |
-|--------|-------------|
-| `load(model, generation)` | Factory: validate and load the model via the backend |
-| `generate(user_message)` | Generate a response and append it to retained history |
-| `generate_from_history()` | Generate from the current history state |
-| `set_system_prompt(text)` | Set or update the system prompt |
-| `add_message(message)` | Add a `MessageView` to history |
-| `get_history()` | Get a `HistorySnapshot` copy of the retained conversation |
-| `clear_history()` | Clear history and KV cache |
-| `context_size()` | Get context window size |
-| `estimated_tokens()` | Get estimated token count of history |
-| `is_context_exceeded()` | Check if history exceeds the context window |
+Returning `TokenAction::Stop` from `on_token` stops after the current streamed
+token. Returning `true` from `should_cancel` fails the request with
+`ErrorCode::RequestCancelled`.
 
-Runnable sample: [`examples/model_generate.cpp`](../examples/model_generate.cpp).
+## Messages And History
 
-### `zoo::MessageView`, `ConversationView`, and `HistorySnapshot`
+`MessageView` is the borrowed request-scoped message type. `ConversationView`
+is a borrowed sequence used by `complete()` and stateless `extract()`.
+`OwnedMessage` and `HistorySnapshot` own retained conversation state.
 
-`MessageView` is the borrowed request-scoped message type. `ConversationView` is a borrowed sequence of `MessageView` values used for `complete()` and stateless `extract()` calls. `OwnedMessage` is the ownership-explicit retained-history message type. `HistorySnapshot` owns retained history and is what `Model::get_history()` and `Agent::try_get_history()` return.
+Use `HistorySnapshot::view()` to pass retained history back into a request-scoped
+API without copying messages again.
 
-Assistant `MessageView` values may carry borrowed `ToolCallView` records via
-`ToolCallSpan`. This is intended for request-scoped adapters that already have
-structured tool-call metadata. The referenced strings and span elements must
-outlive the immediate API call; Zoo-Keeper materializes request-scoped messages
-into `OwnedMessage`/`OwnedToolCall` storage before asynchronous runtime use.
+## Response Types
 
-Use `HistorySnapshot::view()` when you want to pass retained history back into a request-scoped API without copying the messages again.
-
-### Response Types
-
-`chat()` and `complete()` return `TextResponse`. `extract()` returns `ExtractionResponse`.
+`generate()` and `complete()` return `TextResponse`.
+`extract()` returns `ExtractionResponse`.
 
 - `TextResponse::text` - generated response text
 - `TextResponse::usage` - prompt, completion, and total token counts
 - `TextResponse::metrics` - latency, time-to-first-token, and throughput
-- `TextResponse::tool_trace` - optional tool diagnostics when `GenerationOptions::record_tool_trace` is enabled
 - `ExtractionResponse::text` - raw JSON text returned by the model
 - `ExtractionResponse::data` - parsed structured output
-- `ExtractionResponse::tool_trace` - optional tool diagnostics for extraction calls
 
 ## Error Handling
 
-All fallible operations return `Expected<T>` (an alias for `std::expected<T, Error>`). Errors carry a categorized `ErrorCode` and human-readable message:
+All fallible operations return `Expected<T>`:
 
 ```cpp
-auto handle = agent->chat(zoo::MessageView{zoo::Role::User, "Hello"});
-auto response = handle.await_result();
+auto response = model->generate(zoo::MessageView{zoo::Role::User, "Hello"});
 if (!response) {
     std::cerr << response.error().to_string() << '\n';
 }
 ```
 
-Runnable: [`examples/error_handling.cpp`](../examples/error_handling.cpp).
-
 ## Next Steps
 
-- [Tool System](tools.md) -- register native C++ functions as model-callable tools
-- [Configuration Reference](configuration.md) -- all config options
-- [Architecture](architecture.md) -- four-layer design and threading model
-- [Examples](../examples/README.md) -- runnable programs and usage
+- [Configuration Reference](configuration.md)
+- [Structured Output](extract.md)
+- [Tool System](tools.md)
+- [Examples](../examples/README.md)

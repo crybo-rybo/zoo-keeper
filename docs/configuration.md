@@ -1,10 +1,10 @@
 # Configuration Reference
 
-Runtime setup is split across three value types: `zoo::ModelConfig`, `zoo::AgentConfig`, and `zoo::GenerationOptions`. The library provides opt-in JSON helpers for those types, plus `SamplingParams`, in `zoo/core/json.hpp`.
+Runtime setup is split across two public value types:
+`zoo::ModelConfig` and `zoo::GenerationOptions`. JSON helpers for those types,
+plus `SamplingParams`, live in `zoo/core/json.hpp`.
 
 ## JSON Mapping
-
-Each struct maps to a JSON object with the same field names as the public API. The mapping is strict: unknown keys are rejected, required keys are checked, and type mismatches fail during parse.
 
 ```cpp
 #include <zoo/core/json.hpp>
@@ -15,15 +15,14 @@ std::ifstream file("config.json");
 auto json = nlohmann::json::parse(file);
 
 zoo::ModelConfig model = json.at("model").get<zoo::ModelConfig>();
-zoo::AgentConfig agent = json.at("agent").get<zoo::AgentConfig>();
 zoo::GenerationOptions generation = json.at("generation").get<zoo::GenerationOptions>();
 ```
 
-`ModelConfig::validate()`, `AgentConfig::validate()`, and `GenerationOptions::validate()` remain separate from JSON parsing. `Agent::create(model, agent, generation)` runs all three validations before the model is loaded.
+`ModelConfig::validate()` and `GenerationOptions::validate()` remain separate
+from JSON parsing. `Model::load(model, generation)` runs both validations before
+loading llama.cpp state.
 
-## Config Fields
-
-### `zoo::ModelConfig`
+## `zoo::ModelConfig`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -34,37 +33,19 @@ zoo::GenerationOptions generation = json.at("generation").get<zoo::GenerationOpt
 | `use_mmap` | `bool` | `true` | Memory-map the model file |
 | `use_mlock` | `bool` | `false` | Lock model pages in RAM |
 
-JSON config blocks may also contain `"auto_configure": true`. That key is
-recognized by the parser but is *not* applied during pure deserialization
-(`from_json`) — pass the `model` object through the explicit
-`zoo::load_model_config()` helper to inspect the GGUF file, probe the host
-hardware, and merge any explicit overrides on top of the auto-derived values.
-Explicit keys in the same JSON object win over auto-derived values, so callers
-can use `"auto_configure": true` with overrides such as `"n_gpu_layers": 0` for
-portable CPU-only loading. See `examples/config.auto.example.json` for the
-minimal auto-configured example shape.
+Model JSON may include `"auto_configure": true`. That key is resolved only by
+`zoo::load_model_config()`, which inspects the GGUF file, probes hardware, and
+then applies explicit JSON overrides.
 
-### `zoo::AgentConfig`
+## `zoo::GenerationOptions`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_history_messages` | `size_t` | `64` | Maximum non-system messages retained in history |
-| `request_queue_capacity` | `size_t` | `64` | Maximum queued requests owned by the agent |
-| `max_tool_iterations` | `int` | `5` | Detect/execute/respond iterations per request |
-| `max_tool_retries` | `int` | `2` | Validation retries for malformed tool calls |
-
-### `zoo::GenerationOptions`
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `sampling` | `SamplingParams` | default-constructed | Sampling behavior for the request |
+| `sampling` | `SamplingParams` | default-constructed | Sampling behavior |
 | `max_tokens` | `int` | `-1` | Completion cap, or `-1` for the context-limited maximum |
 | `stop_sequences` | `vector<string>` | empty | Additional stop strings |
-| `record_tool_trace` | `bool` | `false` | Materialize `TextResponse::tool_trace` / `ExtractionResponse::tool_trace` |
 
-### `zoo::SamplingParams`
-
-Configured inside `generation.sampling`.
+## `zoo::SamplingParams`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -75,7 +56,7 @@ Configured inside `generation.sampling`.
 | `repeat_last_n` | `int` | `64` | Number of tokens considered by the repeat penalty |
 | `seed` | `int` | `-1` | Random seed, with `-1` meaning per-request randomness |
 
-## Example: In Code
+## Example
 
 ```cpp
 zoo::ModelConfig model;
@@ -83,69 +64,23 @@ model.model_path = "models/custom-model.gguf";
 model.context_size = 4096;
 model.n_gpu_layers = 16;
 
-zoo::AgentConfig agent;
-agent.max_history_messages = 32;
-agent.request_queue_capacity = 128;
-
 zoo::GenerationOptions generation;
 generation.max_tokens = 256;
-generation.record_tool_trace = true;
 generation.sampling.temperature = 0.8f;
 generation.sampling.top_p = 0.95f;
 
-auto runtime = zoo::Agent::create(model, agent, generation);
+auto loaded = zoo::Model::load(model, generation);
 ```
 
-## Example: JSON File
-
-`examples/config.example.json` shows the release-facing shape used by `demo_chat`:
-
-```json
-{
-  "model": {
-    "model_path": "path/to/model.gguf",
-    "context_size": 4096,
-    "n_gpu_layers": -1,
-    "use_mmap": true,
-    "use_mlock": false
-  },
-  "agent": {
-    "max_history_messages": 64,
-    "request_queue_capacity": 64,
-    "max_tool_iterations": 5,
-    "max_tool_retries": 2
-  },
-  "generation": {
-    "max_tokens": -1,
-    "stop_sequences": [],
-    "record_tool_trace": false,
-    "sampling": {
-      "temperature": 0.7,
-      "top_p": 0.9,
-      "top_k": 40,
-      "repeat_penalty": 1.1,
-      "repeat_last_n": 64,
-      "seed": -1
-    }
-  },
-  "system_prompt": "You are a helpful assistant with access to tools.",
-  "tools": true
-}
-```
-
-The example app wraps the three config blocks in a small top-level struct so it can carry `system_prompt` and the example-only `tools` toggle alongside them.
+`examples/config.example.json` shows the release-facing JSON shape used by
+`demo_chat`.
 
 ## Validation
 
-Validation checks run automatically inside `Agent::create()`.
-
-- `ModelConfig`: `model_path` must be set and `context_size` must be positive
-- `AgentConfig`: `max_history_messages` and `request_queue_capacity` must be at least 1
-- `GenerationOptions`: `max_tokens` must be positive or `-1`, and `sampling` must be valid
-
-If validation fails, construction returns an `Error` with the relevant `ErrorCode`.
+- `ModelConfig`: `model_path` must be set and `context_size` / `n_batch` must be positive
+- `GenerationOptions`: `max_tokens` must be positive or `-1`, and sampling values must be valid
 
 ## See Also
 
-- [Getting Started](getting-started.md) -- basic setup walkthrough
-- [Building](building.md) -- CMake options and platform setup
+- [Getting Started](getting-started.md)
+- [Building](building.md)

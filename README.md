@@ -5,8 +5,8 @@
 <h1 align="center">Zoo-Keeper</h1>
 
 <p align="center">
-  <b>The C++23 SDK for embedding local LLMs into your applications.</b><br/>
-  <sub>Async agent runtime &bull; Native tool calling &bull; Structured output &bull; Zero network dependency</sub>
+  <b>A C++23 llama.cpp LLM harness for local model sessions.</b><br/>
+  <sub>Model loading &bull; Streaming inference &bull; Native tool-call parsing &bull; Structured output</sub>
 </p>
 
 <p align="center">
@@ -19,18 +19,17 @@
 
 ## What is Zoo-Keeper?
 
-Zoo-Keeper is a C++23 inference SDK built on [llama.cpp](https://github.com/ggerganov/llama.cpp). It wraps the raw C API with a layered, type-safe library for embedding local LLMs in desktop apps, tools, games, and edge systems — no server required.
+Zoo-Keeper is a C++23 LLM harness built tightly on [llama.cpp](https://github.com/ggerganov/llama.cpp). It wraps the raw C API with a type-safe model session for embedding local GGUF-backed inference in desktop apps, tools, games, and edge systems — no server required.
 
-**llama.cpp is the engine. Zoo-Keeper is the SDK.**
+**llama.cpp is the engine. Zoo-Keeper is the harness.**
 
 At a high level, Zoo-Keeper provides:
 
-- **`zoo::core::Model`** — synchronous model loading, generation, and history
-- **`zoo::Agent`** — async requests, streaming, cancellation, tool execution, and structured extraction
-- **`zoo::tools`** — tool registration, parsing, and schema validation (no llama.cpp dependency)
+- **`zoo::Model`** — model loading, retained history, stateless completion, streaming, cancellation, and schema extraction
+- **`zoo::tools`** — caller-owned tool metadata, parsing, and schema validation
 - **`zoo::hub`** *(optional)* — HuggingFace downloads and a local model store
 
-See [Architecture](docs/architecture.md) for layer diagrams, threading guarantees, and the request lifecycle.
+See [Architecture](docs/architecture.md) for the harness boundary and llama.cpp ownership model.
 
 ## Quick Start
 
@@ -45,10 +44,9 @@ llama.cpp is fetched automatically at CMake configure time.
 ```cpp
 #include <zoo/zoo.hpp>
 
-auto agent = zoo::Agent::create(model_config).value();
-agent->try_set_system_prompt("You are a helpful assistant.").value();
-auto handle = agent->chat("Hello!");
-auto response = handle.await_result().value();
+auto model = zoo::Model::load(model_config).value();
+model->set_system_prompt("You are a helpful assistant.");
+auto response = model->generate("Hello!").value();
 ```
 
 For CMake integration, configuration, tools, streaming, and error handling, see [Getting Started](docs/getting-started.md) and [Building](docs/building.md). Runnable programs live under [`examples/`](examples/README.md).
@@ -57,15 +55,15 @@ For CMake integration, configuration, tools, streaming, and error handling, see 
 
 | Guide | Description |
 |-------|-------------|
-| [Getting Started](docs/getting-started.md) | First build, first agent, core API walkthrough |
+| [Getting Started](docs/getting-started.md) | First build and first model session |
 | [Building](docs/building.md) | CMake setup, FetchContent, Metal/CUDA, sanitizers, install/package |
-| [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, history budgets |
-| [Tools](docs/tools.md) | Typed tools, manual schema registration, supported schema subset, error handling |
+| [Configuration](docs/configuration.md) | Model config, sampling parameters, generation limits, JSON config |
+| [Tools](docs/tools.md) | Tool schemas, native call parsing, supported schema subset, error handling |
 | [Structured Output](docs/extract.md) | Grammar-constrained extraction, schema reference, stateful vs. stateless |
 | [Hub Layer](docs/hub.md) | HuggingFace downloading, local model store, and how hub code uses core inspection |
 | [Architecture](docs/architecture.md) | Layer design, runtime ownership, threading model, target structure |
 | [Examples](docs/examples.md) | Runnable programs under `examples/`; API sketches in docs |
-| [Compatibility](docs/compatibility.md) | Public API boundary, 1.x stability policy, deprecation rules |
+| [Compatibility](docs/compatibility.md) | Public API boundary, release stability policy, deprecation rules |
 | [Migration](MIGRATION.md) | Upgrade notes for major API changes |
 
 ## Testing
@@ -78,7 +76,7 @@ See [Building](docs/building.md) for hub builds, integration tests, and sanitize
 
 ## Acknowledgments
 
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov — the inference engine beneath the SDK
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov — the inference engine beneath the harness
 - [nlohmann/json](https://github.com/nlohmann/json) by Niels Lohmann
 - [GoogleTest](https://github.com/google/googletest) by Google
 

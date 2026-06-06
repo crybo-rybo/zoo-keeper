@@ -16,7 +16,7 @@ function(zoo_add_example target source)
     endif()
 endfunction()
 
-zoo_add_example(minimal_agent minimal_agent.cpp)
+zoo_add_example(minimal_model minimal_model.cpp)
 zoo_add_example(demo_chat demo_chat.cpp)
 zoo_add_example(model_generate model_generate.cpp)
 zoo_add_example(error_handling error_handling.cpp)

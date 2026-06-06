@@ -19,8 +19,8 @@ struct ModelTestAccess;
  * @brief Direct llama.cpp wrapper for model lifecycle, history, and generation.
  *
  * `Model` owns the backend model state and incremental chat-template state. It
- * can be used standalone, but it is intentionally not thread-safe; callers
- * that need concurrency should use `zoo::Agent`.
+ * is intentionally not thread-safe; callers that need concurrency should own
+ * separate model instances or synchronize externally.
  */
 class Model {
   public:
@@ -60,6 +60,39 @@ class Model {
                                     CancellationCallback should_cancel = {});
 
     /**
+     * @brief Generates against an explicit conversation without mutating retained history.
+     */
+    Expected<TextResponse> complete(ConversationView messages, GenerationOverride generation = {},
+                                    TokenCallback on_token = {},
+                                    CancellationCallback should_cancel = {});
+
+    /**
+     * @brief Generates schema-constrained JSON for a new user message.
+     */
+    Expected<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                         std::string_view user_message,
+                                         GenerationOverride generation = {},
+                                         TokenCallback on_token = {},
+                                         CancellationCallback should_cancel = {});
+
+    /**
+     * @brief Generates schema-constrained JSON for a structured inbound message.
+     */
+    Expected<ExtractionResponse> extract(const nlohmann::json& output_schema, MessageView message,
+                                         GenerationOverride generation = {},
+                                         TokenCallback on_token = {},
+                                         CancellationCallback should_cancel = {});
+
+    /**
+     * @brief Generates schema-constrained JSON against explicit request-scoped history.
+     */
+    Expected<ExtractionResponse> extract(const nlohmann::json& output_schema,
+                                         ConversationView messages,
+                                         GenerationOverride generation = {},
+                                         TokenCallback on_token = {},
+                                         CancellationCallback should_cancel = {});
+
+    /**
      * @brief Result of a low-level generation pass started from existing history.
      */
     struct GenerationResult {
@@ -72,9 +105,11 @@ class Model {
     };
 
     /**
-     * @brief Generates from the current history without appending a new user message.
+     * @brief Generates from the current history and commits the assistant turn.
      *
-     * @note This method does not commit the assistant turn to history.
+     * When native tool calling is active, returned tool calls are also stored on
+     * the appended assistant message so callers can add matching tool results
+     * before a follow-up generation pass.
      */
     Expected<GenerationResult> generate_from_history(GenerationOverride generation = {},
                                                      TokenCallback on_token = {},
@@ -114,9 +149,9 @@ class Model {
     [[nodiscard]] HistorySnapshot swap_history(HistorySnapshot snapshot);
 
     /**
-     * @brief Configures template-driven tool calling from registered tool metadata.
+     * @brief Configures template-driven tool calling from model-facing tool metadata.
      */
-    bool set_tool_calling(const std::vector<CoreToolInfo>& tools);
+    bool set_tool_calling(const std::vector<ToolSpec>& tools);
 
     /**
      * @brief Enables grammar-constrained schema output for future generations.

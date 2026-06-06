@@ -1,6 +1,6 @@
 /**
  * @file error_handling.cpp
- * @brief Demonstrates practical runtime error handling for `zoo::Agent`.
+ * @brief Demonstrates practical runtime error handling for `zoo::Model`.
  */
 
 #include <zoo/zoo.hpp>
@@ -42,15 +42,14 @@ int main(int argc, char** argv) {
     zoo::GenerationOptions generation;
     generation.max_tokens = 64;
 
-    auto agent_result = zoo::Agent::create(model_config, zoo::AgentConfig{}, generation);
-    if (!agent_result) {
-        print_error(agent_result.error());
+    auto model_result = zoo::Model::load(model_config, generation);
+    if (!model_result) {
+        print_error(model_result.error());
         return 1;
     }
 
-    auto& agent = *agent_result;
-    auto handle = agent->chat("Say hello in one sentence.");
-    auto response = handle.await_result();
+    auto& model = *model_result;
+    auto response = model->generate("Say hello in one sentence.");
     if (!response) {
         print_error(response.error());
         return 1;

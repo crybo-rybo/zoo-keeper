@@ -1,7 +1,7 @@
 DOXYFILE_ENCODING      = UTF-8
 PROJECT_NAME           = "@PROJECT_NAME@"
 PROJECT_NUMBER         = "@PROJECT_VERSION@"
-PROJECT_BRIEF          = "C++23 agentic wrapper around llama.cpp"
+PROJECT_BRIEF          = "C++23 llama.cpp LLM harness"
 OUTPUT_DIRECTORY       = "@ZOO_DOXYGEN_OUTPUT_DIR@"
 CREATE_SUBDIRS         = NO
 ALLOW_UNICODE_NAMES    = NO

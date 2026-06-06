@@ -15,16 +15,10 @@ if(ZOO_BUILD_TESTS)
         unit/test_gpu_fit.cpp
         unit/test_prompt_bookkeeping.cpp
         unit/test_sampling_helpers.cpp
-        unit/test_agent_mailbox.cpp
-        unit/test_agent_runtime.cpp
-        unit/test_backend_contract.cpp
-        unit/test_tool_executor.cpp
-        unit/test_extraction.cpp
-        unit/test_request_tracker.cpp
+        unit/test_model_harness.cpp
         unit/test_model_tool_calling.cpp
         unit/test_token_accounting.cpp
         unit/test_streaming_filter.cpp
-        unit/test_callback_dispatcher.cpp
         unit/test_gguf_inspector.cpp
         unit/test_system_probe.cpp
         "$<$<BOOL:${ZOO_BUILD_HUB}>:${CMAKE_CURRENT_SOURCE_DIR}/unit/test_hub.cpp>"

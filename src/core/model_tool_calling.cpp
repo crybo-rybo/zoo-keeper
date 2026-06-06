@@ -17,26 +17,26 @@ namespace zoo::core {
 // set_tool_calling
 // ---------------------------------------------------------------------------
 
-bool Model::set_tool_calling(const std::vector<CoreToolInfo>& tools) {
+bool Model::set_tool_calling(const std::vector<ToolSpec>& tools) {
     if (tools.empty()) {
         clear_tool_grammar();
         return true;
     }
 
-    // Convert CoreToolInfo → common_chat_tool
     std::vector<common_chat_tool> chat_tools;
     chat_tools.reserve(tools.size());
     for (const auto& t : tools) {
-        chat_tools.push_back({t.name, t.description, t.parameters_json});
+        chat_tools.push_back({t.name, t.description, t.parameters_schema.dump()});
     }
 
     // Build a minimal message set to probe the template for grammar/triggers.
     // We need at least one user message for the template to produce output.
+    common_chat_msg probe_message;
+    probe_message.role = "user";
+    probe_message.content = "hello";
+
     common_chat_templates_inputs inputs;
-    inputs.messages = {{
-        .role = "user",
-        .content = "hello",
-    }};
+    inputs.messages = {probe_message};
     inputs.tools = chat_tools;
     inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     inputs.add_generation_prompt = true;

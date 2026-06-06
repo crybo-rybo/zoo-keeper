@@ -1,6 +1,6 @@
 /**
  * @file types.hpp
- * @brief Core value types shared across the zoo-keeper model, tools, and agent layers.
+ * @brief Core value types shared across the Zoo-Keeper model harness.
  */
 
 #pragma once
@@ -104,7 +104,7 @@ template <typename Result, typename... Args> class FunctionRef<Result(Args...)> 
  * Intended for request-scoped adapters that already hold structured tool-call
  * records, such as OpenAI-compatible chat messages. The referenced strings must
  * outlive the enclosing `MessageView`/`ConversationView` call; use
- * `OwnedToolCall` for retained history or asynchronous storage.
+ * `OwnedToolCall` for retained history.
  */
 struct ToolCallView {
     std::string_view id;
@@ -140,9 +140,9 @@ struct OwnedToolCall {
 /**
  * @brief Lightweight span over either borrowed or owned tool call metadata.
  *
- * `ToolCallSpan` never owns the underlying records. Runtime entry points copy
+ * `ToolCallSpan` never owns the underlying records. Model entry points copy
  * request-scoped `MessageView` values into `OwnedMessage` storage before
- * enqueueing asynchronous work.
+ * retaining history.
  */
 class ToolCallSpan {
   public:
@@ -396,18 +396,11 @@ enum class ErrorCode {
     InvalidMessageSequence = 301, ///< Conversation roles violate sequencing rules.
     TemplateRenderFailed = 302,   ///< Chat template rendering failed.
 
-    // Runtime errors (400-499)
-    AgentNotRunning = 400,  ///< A request targeted an agent that is not accepting work.
+    // Request errors (400-499)
     RequestCancelled = 401, ///< The caller cancelled the request before completion.
-    RequestTimeout = 402,   ///< The request exceeded its allowed runtime.
-    QueueFull = 403,        ///< The request queue could not accept another item.
 
     // Tool errors (500-599)
     ToolNotFound = 500,         ///< A referenced tool name is not registered.
-    ToolExecutionFailed = 501,  ///< A tool handler threw or returned an execution failure.
-    InvalidToolSignature = 502, ///< Registered tool metadata does not match its callable signature.
-    ToolRetriesExhausted = 503, ///< Validation retries for a tool call were exhausted.
-    ToolLoopLimitReached = 504, ///< The agent exceeded its tool-iteration budget.
     InvalidToolSchema = 505,    ///< A manually supplied tool schema uses an unsupported construct.
     ToolValidationFailed = 506, ///< A parsed tool call failed schema-based argument validation.
 
@@ -522,59 +515,6 @@ using TokenCallback = FunctionRef<TokenAction(std::string_view)>;
 using CancellationCallback = FunctionRef<bool()>;
 
 /**
- * @brief Async streaming callback stored by the agent runtime.
- *
- * Callables returning `void` are adapted to `TokenAction::Continue`. The
- * underlying shape is preserved through `returns_action()` so the dispatcher
- * can run void callbacks asynchronously while waiting on action-returning
- * callbacks for their `TokenAction` result.
- */
-class AsyncTokenCallback {
-  public:
-    AsyncTokenCallback() = default;
-    AsyncTokenCallback(std::nullptr_t) noexcept {}
-
-    template <typename Callback>
-        requires(
-            !std::same_as<std::remove_cvref_t<Callback>, AsyncTokenCallback> &&
-            requires(Callback& callback, std::string_view token) {
-                std::invoke(callback, token);
-            } &&
-            (std::same_as<std::invoke_result_t<Callback&, std::string_view>, void> ||
-             std::convertible_to<std::invoke_result_t<Callback&, std::string_view>, TokenAction>))
-    AsyncTokenCallback(Callback&& callback) {
-        if constexpr (std::same_as<std::invoke_result_t<Callback&, std::string_view>, void>) {
-            callback_ = [cb = std::forward<Callback>(callback)](std::string_view token) mutable {
-                std::invoke(cb, token);
-                return TokenAction::Continue;
-            };
-            returns_action_ = false;
-        } else {
-            callback_ = [cb = std::forward<Callback>(callback)](std::string_view token) mutable {
-                return static_cast<TokenAction>(std::invoke(cb, token));
-            };
-            returns_action_ = true;
-        }
-    }
-
-    [[nodiscard]] explicit operator bool() const noexcept {
-        return static_cast<bool>(callback_);
-    }
-
-    [[nodiscard]] bool returns_action() const noexcept {
-        return returns_action_;
-    }
-
-    TokenAction operator()(std::string_view token) const {
-        return callback_(token);
-    }
-
-  private:
-    std::function<TokenAction(std::string_view)> callback_;
-    bool returns_action_ = false;
-};
-
-/**
  * @brief Model loading and backend configuration.
  */
 struct ModelConfig {
@@ -615,47 +555,12 @@ struct ModelConfig {
 };
 
 /**
- * @brief Agent queue, retention, and tool-loop policy configuration.
- */
-struct AgentConfig {
-    size_t max_history_messages = 64;   ///< Maximum number of non-system messages retained.
-    size_t request_queue_capacity = 64; ///< Fixed number of request slots the agent may own.
-    int max_tool_iterations = 5;        ///< Maximum detect/execute/respond iterations per request.
-    int max_tool_retries = 2;           ///< Maximum validation retries for malformed tool calls.
-
-    [[nodiscard]] Expected<void> validate() const {
-        if (max_history_messages == 0) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidConfig, "max_history_messages must be >= 1"});
-        }
-        if (request_queue_capacity == 0) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidConfig, "request_queue_capacity must be >= 1"});
-        }
-        if (max_tool_iterations < 1) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidConfig, "max_tool_iterations must be >= 1 (got " +
-                                                    std::to_string(max_tool_iterations) + ")"});
-        }
-        if (max_tool_retries < 0) {
-            return std::unexpected(
-                Error{ErrorCode::InvalidConfig, "max_tool_retries must be >= 0 (got " +
-                                                    std::to_string(max_tool_retries) + ")"});
-        }
-        return {};
-    }
-
-    bool operator==(const AgentConfig& other) const = default;
-};
-
-/**
- * @brief Per-call generation behavior shared by model and agent operations.
+ * @brief Per-call generation behavior for model operations.
  */
 struct GenerationOptions {
     SamplingParams sampling; ///< Sampling behavior for generation.
     int max_tokens = -1;     ///< Completion cap, or `-1` for the context-limited maximum.
     std::vector<std::string> stop_sequences; ///< User-defined stop sequences.
-    bool record_tool_trace = false;          ///< When true, materialize detailed tool diagnostics.
 
     [[nodiscard]] Expected<void> validate() const {
         if (max_tokens == 0 || (max_tokens < 0 && max_tokens != -1)) {
@@ -666,8 +571,7 @@ struct GenerationOptions {
     }
 
     [[nodiscard]] bool is_default() const noexcept {
-        return max_tokens == -1 && stop_sequences.empty() && !record_tool_trace &&
-               sampling == SamplingParams{};
+        return max_tokens == -1 && stop_sequences.empty() && sampling == SamplingParams{};
     }
 
     bool operator==(const GenerationOptions& other) const = default;
@@ -722,61 +626,12 @@ struct Metrics {
 };
 
 /**
- * @brief Outcome recorded for one attempted tool invocation.
- */
-enum class ToolInvocationStatus {
-    Succeeded,        ///< Tool arguments validated and the handler returned a result.
-    ValidationFailed, ///< Parsed arguments did not satisfy the registered schema.
-    ExecutionFailed   ///< The handler returned an execution failure.
-};
-
-[[nodiscard]] inline const char* to_string(ToolInvocationStatus status) noexcept {
-    switch (status) {
-    case ToolInvocationStatus::Succeeded:
-        return "succeeded";
-    case ToolInvocationStatus::ValidationFailed:
-        return "validation_failed";
-    case ToolInvocationStatus::ExecutionFailed:
-        return "execution_failed";
-    }
-    return "unknown";
-}
-
-/**
- * @brief Structured record of one attempted tool call.
- */
-struct ToolInvocation {
-    std::string id;             ///< Correlation identifier parsed from model output.
-    std::string name;           ///< Registered tool name the model attempted to invoke.
-    std::string arguments_json; ///< Serialized arguments exactly as parsed from model output.
-    ToolInvocationStatus status = ToolInvocationStatus::Succeeded; ///< Final outcome category.
-    std::optional<std::string> result_json; ///< Serialized handler result when execution succeeded.
-    std::optional<Error> error; ///< Validation or execution error when the attempt failed.
-
-    bool operator==(const ToolInvocation& other) const = default;
-};
-
-/**
- * @brief Optional diagnostic trace materialized only when explicitly requested.
- */
-struct ToolTrace {
-    std::vector<ToolInvocation> invocations;
-
-    [[nodiscard]] bool empty() const noexcept {
-        return invocations.empty();
-    }
-
-    bool operator==(const ToolTrace& other) const = default;
-};
-
-/**
  * @brief Text generation result for chat/complete/generate.
  */
 struct TextResponse {
-    std::string text;                    ///< Assistant-visible response text.
-    TokenUsage usage;                    ///< Prompt and completion token usage.
-    Metrics metrics;                     ///< Latency and throughput data.
-    std::optional<ToolTrace> tool_trace; ///< Tool diagnostics when explicitly requested.
+    std::string text; ///< Assistant-visible response text.
+    TokenUsage usage; ///< Prompt and completion token usage.
+    Metrics metrics;  ///< Latency and throughput data.
 
     bool operator==(const TextResponse& other) const = default;
 };
@@ -785,19 +640,13 @@ struct TextResponse {
  * @brief Structured extraction result for `extract()`.
  */
 struct ExtractionResponse {
-    std::string text;                    ///< Raw generated JSON text.
-    nlohmann::json data;                 ///< Parsed schema-conforming structured output.
-    TokenUsage usage;                    ///< Prompt and completion token usage.
-    Metrics metrics;                     ///< Latency and throughput data.
-    std::optional<ToolTrace> tool_trace; ///< Tool diagnostics when explicitly requested.
+    std::string text;    ///< Raw generated JSON text.
+    nlohmann::json data; ///< Parsed schema-conforming structured output.
+    TokenUsage usage;    ///< Prompt and completion token usage.
+    Metrics metrics;     ///< Latency and throughput data.
 
     bool operator==(const ExtractionResponse& other) const = default;
 };
-
-/**
- * @brief Monotonic identifier assigned to queued agent requests.
- */
-using RequestId = uint64_t;
 
 /**
  * @brief Validates whether a new message role can be appended to an existing history.
@@ -854,15 +703,14 @@ validate_role_sequence(const std::vector<OwnedMessage>& messages, Role role) {
 }
 
 /**
- * @brief Minimal tool description for template-driven tool calling at the core layer.
- *
- * This avoids a dependency from Layer 1 (core) on Layer 2 (tools).
- * The agent layer converts `tools::ToolMetadata` to this before passing to `Model`.
+ * @brief Tool description exposed to llama.cpp chat templates.
  */
-struct CoreToolInfo {
-    std::string name;            ///< Registered tool name exposed to the model.
-    std::string description;     ///< Human-readable description used in the chat template.
-    std::string parameters_json; ///< JSON Schema of the parameters as a string.
+struct ToolSpec {
+    std::string name;                 ///< Tool name exposed to the model.
+    std::string description;          ///< Human-readable description used in the chat template.
+    nlohmann::json parameters_schema; ///< JSON Schema for accepted arguments.
+
+    bool operator==(const ToolSpec& other) const = default;
 };
 
 } // namespace zoo

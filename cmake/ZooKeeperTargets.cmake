@@ -9,19 +9,11 @@ configure_file(
 )
 
 add_library(zoo STATIC
-    ${PROJECT_SOURCE_DIR}/src/agent/agent_facade.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/backend_model.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/request_handle.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/runtime.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/runtime_commands.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/runtime_inference.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/runtime_lifecycle.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/runtime_extraction.cpp
-    ${PROJECT_SOURCE_DIR}/src/agent/tool_executor.cpp
     ${PROJECT_SOURCE_DIR}/src/tools/registry.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_init.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_inference.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/model_harness.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_prompt.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_history.cpp
     ${PROJECT_SOURCE_DIR}/src/core/model_sampling.cpp

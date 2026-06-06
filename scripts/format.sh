@@ -25,7 +25,9 @@ fi
 # Use a read loop instead of `mapfile` for compatibility with macOS's stock Bash 3.2.
 files=()
 while IFS= read -r f; do
-    files+=("$f")
+    if [ -f "$f" ]; then
+        files+=("$f")
+    fi
 done < <(git ls-files '*.hpp' '*.cpp' '*.h' '*.c' | grep -v '^extern/')
 
 if [ ${#files[@]} -eq 0 ]; then

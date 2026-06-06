@@ -21,18 +21,18 @@ Binaries are written to `build/examples/`.
 
 | Binary | Source | What it shows |
 |--------|--------|----------------|
-| `minimal_agent` | [`minimal_agent.cpp`](minimal_agent.cpp) | Split `ModelConfig` / `AgentConfig` / `GenerationOptions`, one `chat()` |
-| `demo_chat` | [`demo_chat.cpp`](demo_chat.cpp) | Interactive CLI, JSON config, typed tools, streaming, metrics |
-| `demo_extract` | [`demo_extract.cpp`](demo_extract.cpp) | Stateful, stateless, and streaming `extract()` |
-| `model_generate` | [`model_generate.cpp`](model_generate.cpp) | Synchronous `zoo::core::Model::load()` + `generate()` |
-| `error_handling` | [`error_handling.cpp`](error_handling.cpp) | `Expected` error handling on `Agent::create()` and `chat()` |
-| `stream_cancel` | [`stream_cancel.cpp`](stream_cancel.cpp) | Token streaming callback + `handle.cancel()` |
-| `manual_tool_schema` | [`manual_tool_schema.cpp`](manual_tool_schema.cpp) | Manual JSON schema tools + `record_tool_trace` |
+| `minimal_model` | [`minimal_model.cpp`](minimal_model.cpp) | Smallest `zoo::Model::load()` + `generate()` flow |
+| `demo_chat` | [`demo_chat.cpp`](demo_chat.cpp) | Interactive CLI, JSON config, streaming, metrics |
+| `demo_extract` | [`demo_extract.cpp`](demo_extract.cpp) | Stateful, stateless, and streaming `Model::extract()` |
+| `model_generate` | [`model_generate.cpp`](model_generate.cpp) | Minimal one-shot generation |
+| `error_handling` | [`error_handling.cpp`](error_handling.cpp) | `Expected` error handling on `Model::load()` and `generate()` |
+| `stream_cancel` | [`stream_cancel.cpp`](stream_cancel.cpp) | Token streaming callback + cancellation callback |
+| `manual_tool_schema` | [`manual_tool_schema.cpp`](manual_tool_schema.cpp) | Manual JSON schema tools + native call parsing |
 
-### `minimal_agent`
+### `minimal_model`
 
 ```bash
-./build/examples/minimal_agent /path/to/model.gguf
+./build/examples/minimal_model /path/to/model.gguf
 ```
 
 Matches the walkthrough in [Getting Started](../docs/getting-started.md).
@@ -46,8 +46,8 @@ your GGUF, then:
 ./build/examples/demo_chat examples/config.example.json
 ```
 
-Type `/help` in the REPL for commands. Covers multi-turn history, tool
-registration, optional tool trace (via config), and response metrics.
+Type `/help` in the REPL for commands. Covers multi-turn history, streaming,
+cancellation, and response metrics.
 
 [`config.auto.example.json`](config.auto.example.json) shows `auto_configure` in
 the model block.
@@ -84,7 +84,7 @@ See [Structured Output](../docs/extract.md) for schema details.
 ./build/examples/manual_tool_schema /path/to/model.gguf
 ```
 
-See [Tools](../docs/tools.md) for typed vs manual registration.
+See [Tools](../docs/tools.md) for schema registration and native call parsing.
 
 ## Hub layer
 
@@ -96,9 +96,9 @@ do not require the hub.
 
 | Topic | Guide | Runnable reference |
 |-------|-------|-------------------|
-| First agent | [getting-started.md](../docs/getting-started.md) | `minimal_agent` |
+| First model | [getting-started.md](../docs/getting-started.md) | `minimal_model` |
 | Build / CI | [building.md](../docs/building.md) | all binaries above |
-| Tools | [tools.md](../docs/tools.md) | `demo_chat`, `manual_tool_schema` |
+| Tools | [tools.md](../docs/tools.md) | `manual_tool_schema` |
 | Extraction | [extract.md](../docs/extract.md) | `demo_extract` |
 | Config JSON | [configuration.md](../docs/configuration.md) | `config.example.json` |
 | Index in docs | [examples.md](../docs/examples.md) | this file |

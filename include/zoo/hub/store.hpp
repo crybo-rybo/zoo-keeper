@@ -5,11 +5,10 @@
 
 #pragma once
 
-#include "zoo/agent.hpp"
-#include "zoo/core/model.hpp"
 #include "zoo/core/types.hpp"
 #include "zoo/hub/huggingface.hpp"
 #include "zoo/hub/types.hpp"
+#include "zoo/model.hpp"
 
 #include <memory>
 #include <string>
@@ -91,18 +90,11 @@ class ModelStore {
     Expected<ModelConfig> model_config(const std::string& name_or_alias) const;
 
     /**
-     * @brief Loads a core::Model directly from the store.
+     * @brief Loads a Model directly from the store.
      */
-    Expected<std::unique_ptr<core::Model>>
+    Expected<std::unique_ptr<Model>>
     load_model(const std::string& name_or_alias,
                const GenerationOptions& options = GenerationOptions{}) const;
-
-    /**
-     * @brief Creates an Agent directly from the store.
-     */
-    Expected<std::unique_ptr<Agent>>
-    create_agent(const std::string& name_or_alias, const AgentConfig& agent_config = AgentConfig{},
-                 const GenerationOptions& options = GenerationOptions{}) const;
 
     // --- Download + add ---
 
