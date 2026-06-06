@@ -31,11 +31,12 @@ bool Model::set_tool_calling(const std::vector<ToolSpec>& tools) {
 
     // Build a minimal message set to probe the template for grammar/triggers.
     // We need at least one user message for the template to produce output.
+    common_chat_msg probe_message;
+    probe_message.role = "user";
+    probe_message.content = "hello";
+
     common_chat_templates_inputs inputs;
-    inputs.messages = {{
-        .role = "user",
-        .content = "hello",
-    }};
+    inputs.messages = {probe_message};
     inputs.tools = chat_tools;
     inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     inputs.add_generation_prompt = true;
